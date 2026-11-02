@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Friends{% endblock %}
+{% block content %}
+<h1>Friends</h1>
+{% if not published %}
+<form class="filters">
+  <input type="search" name="q" value="{{ q }}" placeholder="Search names">
+  <select name="show" onchange="this.form.submit()">
+    {% for value, label in [('friends', 'Current friends'), ('removed', 'Removed friends'), ('everyone', "Everyone you've interacted with")] %}
+      <option value="{{ value }}" {% if value == show %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <select name="sort" onchange="this.form.submit()">
+    {% for value, label in [('name', 'By name'), ('since', 'By friends since'), ('activity', 'By interactions')] %}
+      <option value="{{ value }}" {% if value == sort %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <button>Search</button>
+</form>
+{% endif %}
+
+<p class="meta">{{ "{:,}".format(people|length) }} people</p>
+<table class="numbers people">
+  <thead><tr><th>Name</th><th>Friends since</th><th>Comments</th><th>Likes</th><th>Wall posts</th><th>Tagged you</th></tr></thead>
+  <tbody>
+    {% for p in people %}
+    <tr>
+      <th><a href="/people/{{ p.id }}">{{ p.name }}</a></th>
+      <td>{% if p.friend_since %}{{ p.friend_since|date }}{% elif p.unfriended_at %}<span class="meta">removed {{ p.unfriended_at|date }}</span>{% endif %}</td>
+      <td>{{ p.comments or '' }}</td>
+      <td>{{ p.reactions or '' }}</td>
+      <td>{{ p.wall or '' }}</td>
+      <td>{{ p.tagged or '' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

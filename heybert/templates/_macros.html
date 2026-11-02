@@ -1,0 +1,120 @@
+{% macro person_link(id, name) -%}
+  {%- if id == me.id -%}you
+  {%- elif id and 'friends' in sections -%}<a href="/people/{{ id }}">{{ name }}</a>
+  {%- else -%}{{ name }}{%- endif -%}
+{%- endmacro %}
+
+{% macro owner_phrase(owner_id, owner_name, author_id=None) -%}
+  {%- if owner_id and (owner_id == me.id or owner_id == author_id) -%}your own
+  {%- elif owner_id and 'friends' in sections -%}<a href="/people/{{ owner_id }}">{{ owner_name }}</a>'s
+  {%- elif owner_id -%}{{ owner_name }}'s
+  {%- else -%}a{%- endif -%}
+{%- endmacro %}
+
+{% macro media_img(m) -%}
+  {%- if m.kind == 'video' -%}
+    <video src="/media/{{ m.path }}#t=0.5" preload="metadata" muted playsinline></video><span class="play" aria-hidden="true"></span>
+  {%- else -%}
+    <img src="{{ m|thumb }}" loading="lazy" alt="{{ m.description or '' }}" {% if m.width %}width="{{ m.width }}" height="{{ m.height }}"{% endif %}>
+  {%- endif -%}
+{%- endmacro %}
+
+{# Rows of photos at a shared height, each keeping its own shape (like Google Photos). #}
+{% macro justified(items) %}
+<div class="justified">
+  {% for m in items %}
+    <a href="/photos/{{ m.id }}" class="tile" style="--r: {{ m|aspect }}" title="{{ m.timestamp|date }}">{{ media_img(m) }}</a>
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{# Facebook-style layout for the photos attached to a post or comment. #}
+{% macro collage(items) %}
+  {% if items %}
+  {% set n = items|length %}
+  <div class="collage collage-{{ [n, 4]|min }}">
+    {% for m in items[:4] %}
+      <a href="/photos/{{ m.id }}" class="tile" {% if n == 1 and m.kind == 'photo' %}style="--bg-img: url('{{ m|thumb }}')"{% endif %}>
+        {{ media_img(m) }}
+        {% if loop.index == 4 and n > 4 %}<span class="more">+{{ n - 4 }}</span>{% endif %}
+      </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endmacro %}
+
+{% macro post_card(p) %}
+<article class="card">
+  <header>
+    <span class="badge badge-{{ p.kind }}">{{ p.kind }}</span>
+    <span class="what">
+      {% if p.kind == 'wall' %}Wrote on {{ person_link(p.target_id, p.target_name) }}'s profile
+      {% elif p.kind == 'group' %}Posted in <em>{{ p.group_name }}</em>
+      {% else %}{{ p.title|summary(me.name) }}{% endif %}
+    </span>
+    <time>{{ p.timestamp|dt }}</time>
+  </header>
+  {% if p.text %}<div class="text">{{ p.text|linkify }}</div>{% endif %}
+  {{ collage(p.media) }}
+  {% if p.link_url|safe_url and p.link_url not in (p.text or '') %}
+    <p class="link"><a href="{{ p.link_url }}" target="_blank" rel="noopener noreferrer">{{ p.link_url }}</a></p>
+  {% endif %}
+  {% if p.place_name %}
+    <p class="meta">📍 {{ p.place_name }}{% if p.place_address %}, {{ p.place_address }}{% endif %}</p>
+  {% endif %}
+  {% if p.tags %}
+    <p class="meta">With {% for t in p.tags %}{{ person_link(t.id, t.name) }}{{ ", " if not loop.last }}{% endfor %}</p>
+  {% endif %}
+</article>
+{% endmacro %}
+
+{% macro comment_card(c) %}
+<article class="card">
+  <header>
+    <span class="badge badge-comment">{{ 'reply' if c.action == 'replied' else 'comment' }}</span>
+    <span class="what">
+      {% if c.target_kind %}
+        {{ 'Replied to' if c.action == 'replied' else 'Commented on' }}
+        {{ owner_phrase(c.target_owner_id, c.owner_name, c.author_id) }} {{ c.target_kind }}
+        {%- if c.group_name %} in <em>{{ c.group_name }}</em>{% endif %}
+      {% else %}{{ c.title|summary(me.name) }}{% endif %}
+    </span>
+    <time>{{ c.timestamp|dt }}</time>
+  </header>
+  {% if not c.author_is_me and c.author_name %}<p class="meta">Posted anonymously as {{ c.author_name }}</p>{% endif %}
+  {% if c.text %}<div class="text">{{ c.text|linkify }}</div>
+  {% else %}<p class="meta">Facebook didn't include the text of this comment in the export.</p>{% endif %}
+  {{ collage(c.media) }}
+  {% if c.link_url|safe_url and c.link_url not in (c.text or '') %}
+    <p class="link"><a href="{{ c.link_url }}" target="_blank" rel="noopener noreferrer">{{ c.link_url }}</a></p>
+  {% endif %}
+</article>
+{% endmacro %}
+
+{% macro reaction_row(r) %}
+<li class="reaction">
+  <span class="emoji" title="{{ r.reaction }}">{{ emoji.get(r.reaction, '👍') }}</span>
+  <span class="what">
+    {{ {'Like': 'Liked', 'Love': 'Loved'}.get(r.reaction, 'Reacted ' ~ r.reaction ~ ' to') }}
+    {{ owner_phrase(r.target_owner_id, r.owner_name) }} {{ r.target_kind or 'post' }}
+    {%- if r.group_name %} in <em>{{ r.group_name }}</em>{% endif %}
+  </span>
+  <time>{{ r.timestamp|dt }}</time>
+  {% if r.url|safe_url %}<a class="out" href="{{ r.url }}" target="_blank" rel="noopener noreferrer" title="Open on Facebook">↗</a>{% endif %}
+</li>
+{% endmacro %}
+
+{% macro pager(page, has_next, total) %}
+<nav class="pager">
+  {% if page > 1 %}<a href="{{ page_url(request, page - 1) }}">← Previous</a>{% else %}<span></span>{% endif %}
+  <span class="meta">{{ "{:,}".format(total) }} total · page {{ page }}</span>
+  {% if has_next %}<a href="{{ page_url(request, page + 1) }}">Next →</a>{% else %}<span></span>{% endif %}
+</nav>
+{% endmacro %}
+
+{% macro year_select(years, year, label='All years') %}
+<select name="year" onchange="this.form.submit()">
+  <option value="">{{ label }}</option>
+  {% for y in years %}<option {% if y == year %}selected{% endif %}>{{ y }}</option>{% endfor %}
+</select>
+{% endmacro %}

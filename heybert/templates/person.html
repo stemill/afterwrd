@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% block title %}{{ person.name }}{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/friends">Friends</a> /</p>
+<h1>{{ person.name }}</h1>
+<p class="meta">
+  {% if person.is_me %}This is you.
+  {% elif person.friend_since %}Friends since {{ person.friend_since|date }}
+  {% elif person.unfriended_at %}Removed as a friend {{ person.unfriended_at|date }}
+  {% else %}Not in your friends list{% endif %}
+</p>
+
+<nav class="tabs">
+  {% for key, info in tabs.items() %}
+    <a href="?tab={{ key }}" {% if key == tab %}aria-current="page"{% endif %}>{{ info[0] }} <span class="meta">{{ counts[key] }}</span></a>
+  {% endfor %}
+</nav>
+
+{% if tab == 'comments' %}
+  <div class="feed">{% for c in rows %}{{ ui.comment_card(c) }}{% else %}<p class="empty">No comments on their things.</p>{% endfor %}</div>
+{% elif tab == 'likes' %}
+  <ul class="reactions">{% for r in rows %}{{ ui.reaction_row(r) }}{% else %}<li class="empty">No likes.</li>{% endfor %}</ul>
+{% elif tab in ('wall', 'tags') %}
+  <div class="feed">{% for p in rows %}{{ ui.post_card(p) }}{% else %}<p class="empty">No posts.</p>{% endfor %}</div>
+{% elif tab == 'photos' %}
+  <ul class="reactions">
+    {% for t in rows %}
+    <li class="reaction">
+      <span class="emoji">🏷️</span>
+      <span class="what">Tagged you in a photo</span>
+      <time>{{ t.timestamp|dt }}</time>
+      {% if t.url|safe_url %}<a class="out" href="{{ t.url }}" target="_blank" rel="noopener noreferrer" title="Open on Facebook">↗</a>{% endif %}
+    </li>
+    {% else %}<li class="empty">No photos.</li>{% endfor %}
+  </ul>
+{% endif %}
+{{ ui.pager(page, has_next, total) }}
+{% endblock %}

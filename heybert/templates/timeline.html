@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% block title %}Timeline{% endblock %}
+{% block content %}
+<h1>Timeline</h1>
+{% if not published %}
+<form class="filters">
+  {{ ui.year_select(years, year) }}
+</form>
+{% endif %}
+
+<div class="feed">
+  {% for type, item in items %}
+    {% if type == 'post' %}{{ ui.post_card(item) }}
+    {% elif type == 'comment' %}{{ ui.comment_card(item) }}
+    {% else %}<ul class="reactions">{{ ui.reaction_row(item) }}</ul>{% endif %}
+  {% else %}
+    <p class="empty">Nothing here.</p>
+  {% endfor %}
+</div>
+{{ ui.pager(page, has_next, total) }}
+{% endblock %}

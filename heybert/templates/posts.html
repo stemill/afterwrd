@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% block title %}Posts{% endblock %}
+{% block content %}
+<h1>Posts</h1>
+{% if not published %}
+<form class="filters">
+  <input type="search" name="q" value="{{ q }}" placeholder="Search posts">
+  <select name="kind" onchange="this.form.submit()">
+    <option value="">All kinds</option>
+    {% for k in kinds %}<option {% if k == kind %}selected{% endif %}>{{ k }}</option>{% endfor %}
+  </select>
+  {{ ui.year_select(years, year) }}
+  <button>Search</button>
+</form>
+{% endif %}
+
+<div class="feed">
+  {% for p in posts %}{{ ui.post_card(p) }}{% else %}<p class="empty">No posts match.</p>{% endfor %}
+</div>
+{{ ui.pager(page, has_next, total) }}
+{% endblock %}

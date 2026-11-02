@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}heybert{% endblock %} · heybert</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  <header class="site">
+    <a class="brand" href="/">heybert</a>
+    <nav>
+      {% set section = request.url.path.split('/')[1] %}
+      {% for path, label in [('', 'Overview'), ('timeline', 'Timeline'), ('posts', 'Posts'), ('photos', 'Photos'),
+                             ('comments', 'Comments'), ('likes', 'Likes'), ('friends', 'Friends')]
+            if (path or 'overview') in sections %}
+        <a href="/{{ path }}" {% if section == path or (path == 'friends' and section == 'people') %}aria-current="page"{% endif %}>{{ label }}</a>
+      {% endfor %}
+      {% if published %}<a href="/_auth/logout">Sign out</a>{% endif %}
+    </nav>
+  </header>
+  {% block main %}
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  {% endblock %}
+</body>
+</html>

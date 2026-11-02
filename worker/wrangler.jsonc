@@ -1,0 +1,27 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "heybert",
+	"main": "src/index.js",
+	"compatibility_date": "2026-10-01",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	// The site from `uv run heybert-export`. run_worker_first sends every request through the login check,
+	// and the Worker picks exact files itself, so Cloudflare's own HTML and 404 handling is off.
+	"assets": {
+		"directory": "../data/site",
+		"binding": "ASSETS",
+		"run_worker_first": true,
+		"html_handling": "none",
+		"not_found_handling": "none"
+	},
+	// Created on first deploy if it doesn't exist yet.
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "heybert",
+			"migrations_dir": "migrations",
+			"database_id": "a9674acd-d970-4f99-8225-e42324d89687"
+		}
+	]
+}

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Photos{% endblock %}
+{% block body_class %}wide{% endblock %}
+{% block content %}
+<h1>Photos &amp; videos</h1>
+
+<div class="albums">
+  {% for c in collections %}
+  <a class="album" href="/photos/album/{{ c.key }}">
+    <div class="cover">{% if c.cover.kind == 'video' %}<video src="/media/{{ c.cover.path }}#t=0.5" preload="metadata" muted playsinline></video>{% else %}<img src="{{ c.cover|thumb }}" loading="lazy" alt="">{% endif %}</div>
+    <div class="label">
+      <strong>{{ c.title }}</strong>
+      <span>{{ "{:,}".format(c.count) }} · {{ date_range(c.first_ts, c.last_ts) }}</span>
+    </div>
+  </a>
+  {% endfor %}
+  {% if tagged %}
+  <a class="album album-tagged" href="/photos/tagged">
+    <div class="cover"><span>🏷️</span></div>
+    <div class="label">
+      <strong>Photos you're tagged in</strong>
+      <span>{{ tagged }} · links to Facebook</span>
+    </div>
+  </a>
+  {% endif %}
+</div>
+
+{% for year, albums in by_year %}
+<h2 class="year">{{ year }}</h2>
+<div class="albums">
+  {% for a in albums %}
+  <a class="album" href="/photos/album/{{ a.id }}">
+    <div class="cover">{% if a.path %}<img src="{{ a|thumb }}" loading="lazy" alt="">{% endif %}</div>
+    <div class="label">
+      <strong>{{ a.name }}</strong>
+      <span>{{ a.count }} · {{ date_range(a.first_ts, a.last_ts) }}</span>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% endfor %}
+{% endblock %}

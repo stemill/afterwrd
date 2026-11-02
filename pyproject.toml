@@ -1,0 +1,22 @@
+[project]
+name = "heybert"
+version = "0.1.0"
+description = "Browse a Facebook data export: friends, posts, photos, comments and likes."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "httpx>=0.28",
+    "jinja2>=3.1",
+    "pillow>=11",
+    "uvicorn>=0.32",
+]
+
+[project.scripts]
+heybert = "heybert.app:main"
+heybert-ingest = "heybert.ingest:main"
+heybert-export = "heybert.export:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
