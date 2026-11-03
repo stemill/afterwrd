@@ -6,6 +6,9 @@ account, so no one else holds your data, and setting it up needs no terminal, no
 
 ## Install your own
 
+**Easiest: follow the install page, <https://stemill.github.io/heybert/>,** which has a button that copies the
+installer for you. The same steps in full:
+
 You need your Facebook download and a free Cloudflare account. It takes about 15 minutes, most of it waiting
 for Facebook.
 
@@ -14,12 +17,14 @@ for Facebook.
    ready (from minutes to a day); download the zip file(s).
 2. **Make a Cloudflare account** at <https://dash.cloudflare.com/sign-up>. An email address is all it asks
    for; don't add a card.
-3. **Create a Worker.** In the Cloudflare dashboard: *Workers & Pages* → *Create* → *Start with Hello World*.
-   Name it what you like (it becomes your address, e.g. `heybert.<your-name>.workers.dev`) and press
-   *Deploy*. The first time, Cloudflare asks you to choose `<your-name>`.
-4. **Paste in the installer.** Download `installer.js` from the
-   [latest release](https://github.com/stemill/heybert/releases/latest), then in the Worker press
-   *Edit code*, delete everything there, paste the whole of `installer.js` and press *Deploy*.
+3. **Create a Worker.** In the Cloudflare dashboard's left-hand menu: *Compute* → *Workers & Pages* →
+   *Create application* (top right) → *Start with Hello World*. Replace the made-up *Worker name* (something
+   like `blue-mud-43e4`) with `heybert`, or whatever you like: it becomes your address,
+   `heybert.<your-name>.workers.dev`. Leave *Protect with Cloudflare Access* off (heybert has its own
+   sign-in) and press *Deploy*. The first time, Cloudflare asks you to choose `<your-name>`.
+4. **Paste in the installer.** Press *Copy installer* on the [install page](https://stemill.github.io/heybert/)
+   (or download `installer.js` from the [latest release](https://github.com/stemill/heybert/releases/latest) and
+   copy all of it), then in the Worker press *Edit code*, select everything there, paste over it and press *Deploy*.
 5. **Run it.** Open your Worker's address. Press **Create a token**: Cloudflare's token page opens with the
    permissions filled in; scroll down, press *Continue to summary*, *Create Token*, and copy the token. Paste it
    into the installer and press **Install heybert**.

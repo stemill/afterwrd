@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install heybert</title>
+<meta name="description" content="Your Facebook archive as a private website, in your own free Cloudflare account.">
+<link rel="icon" href="data:,">
+<style>
+  :root { --bg: #f4f5f7; --surface: #fff; --text: #1c1e21; --muted: #65676b; --border: #dddfe2; --accent: #1b62d6; --accent-soft: #e7effc; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #18191a; --surface: #242526; --text: #e4e6eb; --muted: #a8abaf; --border: #3a3b3c; --accent: #6ea8ff; --accent-soft: #263951; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 2rem; margin: 0 0 6px; }
+  .lede { color: var(--muted); margin: 0 0 28px; font-size: 1.05rem; }
+  ol.steps { list-style: none; counter-reset: step; padding: 0; margin: 0; display: grid; gap: 14px; }
+  ol.steps > li { counter-increment: step; background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px 18px 64px; position: relative; }
+  ol.steps > li::before { content: counter(step); position: absolute; left: 18px; top: 16px; width: 30px; height: 30px; border-radius: 50%;
+    background: var(--accent-soft); color: var(--accent); font-weight: 700; display: grid; place-items: center; }
+  h2 { font-size: 1.1rem; margin: 2px 0 6px; }
+  p { margin: 6px 0; }
+  .meta { color: var(--muted); font-size: 0.9rem; }
+  a { color: var(--accent); }
+  .button { display: inline-block; margin: 8px 8px 0 0; padding: 10px 18px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+  .button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .path { font-weight: 600; }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
+  textarea { width: 100%; height: 260px; margin-top: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg); color: var(--text); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+  footer { margin-top: 28px; color: var(--muted); font-size: 0.85rem; }
+  code { font-size: 0.9em; }
+</style>
+</head>
+<body>
+<main>
+<h1>Install heybert</h1>
+<p class="lede">Your Facebook archive as a private website that only people you invite can see. It runs in your own
+free Cloudflare account: no one else holds your data, and there's nothing to pay. About 15 minutes on a computer.</p>
+
+<ol class="steps">
+  <li>
+    <h2>Ask Facebook for your download</h2>
+    <p>In Facebook's <a href="https://accountscenter.facebook.com/info_and_permissions/dyi/" target="_blank" rel="noopener">Download your information</a>,
+    choose your profile, <b>All available information</b>, format <b>JSON</b> and media quality <b>High</b>. Facebook
+    emails you when it's ready, which can take from minutes to a day. You'll need the zip file(s) at step 5.</p>
+  </li>
+  <li>
+    <h2>Make a free Cloudflare account</h2>
+    <p>An email address is all it asks for. Don't add a card; heybert stays within the free plan.</p>
+    <a class="button" href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">Sign up to Cloudflare</a>
+  </li>
+  <li>
+    <h2>Create a Worker</h2>
+    <p>In Cloudflare, go to <span class="path">Workers &amp; Pages</span> and press <span class="path">Create application</span>,
+    then <span class="path">Start with Hello World</span>. Change the <b>Worker name</b> to <code>heybert</code> (it becomes your
+    site's address), leave <b>Protect with Cloudflare Access</b> off and press <b>Deploy</b>.</p>
+    <a class="button" href="https://dash.cloudflare.com/?to=/:account/workers-and-pages" target="_blank" rel="noopener">Open Workers &amp; Pages</a>
+    <p class="meta">If the link lands elsewhere: <span class="path">Compute → Workers &amp; Pages</span> in the left-hand menu.</p>
+  </li>
+  <li>
+    <h2>Paste in the installer</h2>
+    <p>Copy the installer, then in your new Worker press <b>Edit code</b>, select everything in the editor
+    (<kbd>⌘A</kbd> or <kbd>Ctrl+A</kbd>), paste over it and press <b>Deploy</b>.</p>
+    <button class="button primary" id="copy">Copy installer</button>
+    <details>
+      <summary>See what you're pasting (heybert __VERSION__)</summary>
+      <textarea id="installer" readonly spellcheck="false">__INSTALLER_HTML__</textarea>
+    </details>
+  </li>
+  <li>
+    <h2>Open your Worker and follow the installer</h2>
+    <p>Press <b>Visit</b> (or open <code>https://heybert.&lt;your-name&gt;.workers.dev</code>). The installer walks you through
+    the rest: a Cloudflare token it needs once, a passkey for you (your face, fingerprint or device PIN; no password),
+    then importing your Facebook zip and inviting people.</p>
+  </li>
+</ol>
+
+<footer>
+  <p>The installer downloads heybert __VERSION__ from its <a href="__RELEASE_PAGE__">published release</a> and checks every file
+  against the fingerprint <code>__MANIFEST_SHORT__…</code> before installing anything. The token is only used while installing;
+  you can delete it afterwards in Cloudflare under My Profile → API Tokens. <a href="__REPO_PAGE__">Source code</a>.</p>
+</footer>
+</main>
+<script>
+  document.getElementById("copy").addEventListener("click", async (e) => {
+    const text = document.getElementById("installer").value;
+    try {
+      await navigator.clipboard.writeText(text);
+      e.target.textContent = "Copied: now paste it into your Worker";
+    } catch {
+      const box = document.getElementById("installer");
+      box.closest("details").open = true;
+      box.select();
+      e.target.textContent = "Press ⌘C or Ctrl+C to copy";
+    }
+  });
+</script>
+</body>
+</html>

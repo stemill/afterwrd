@@ -94,6 +94,19 @@ const installer = readFileSync(join(worker, "installer", "installer.js"), "utf8"
   .replaceAll("__MANIFEST_SHA256__", sha256(manifestBytes))
   .replaceAll("__VERSION__", version);
 writeFileSync(join(out, "installer.js"), installer);
+
+// The install page (published to GitHub Pages by the release workflow), with this installer in it to copy.
+const repo = /^https:\/\/github\.com\/([^/]+\/[^/]+)\//.exec(base)?.[1];
+const escapeHtml = (text) => text.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+const site = join(worker, "release", "site");
+rmSync(site, { recursive: true, force: true });
+mkdirSync(site, { recursive: true });
+writeFileSync(join(site, "index.html"), readFileSync(join(worker, "installer", "page.html"), "utf8")
+  .replaceAll("__INSTALLER_HTML__", () => escapeHtml(installer)) // a function, so "$" in the code stays literal
+  .replaceAll("__VERSION__", version)
+  .replaceAll("__MANIFEST_SHORT__", sha256(manifestBytes).slice(0, 12))
+  .replaceAll("__RELEASE_PAGE__", repo ? `https://github.com/${repo}/releases/tag/v${version}` : base)
+  .replaceAll("__REPO_PAGE__", repo ? `https://github.com/${repo}` : base));
 rmSync(dist, { recursive: true, force: true });
 
 const total = [...modules, ...assets].reduce((n, f) => n + f.size, 0);
