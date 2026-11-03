@@ -3,13 +3,14 @@
 //   1. keeps a new key for this site to call it with, and sends it to POST /_connect/<token>/accept here;
 //   2. this site proves the key is theirs, and meant for this site, by calling their /_peer/hello?from=<this site>
 //      with it; then keeps it and answers with a key for them to call this site with.
-// Connections are mutual: both owners see each other's new posts in Feed and can comment on them (peers.js).
+// Connections are mutual: both owners read each other's posts and photos from their own sites, in Feed and on friend
+// pages, and can comment on them (peers.js, friends.js).
 //
 // Without a session:   GET /_connect/<token>  (the page the link opens), GET …/info, POST …/accept
 // The owner's:         GET /_admin/connections, POST …/link, GET|POST …/new?link=, POST …/<id>/disconnect
 import { asset, ownerHeader } from "./nav.js";
 import { connectLinkPage, messagePage } from "./pages.js";
-import { callSite, forgetFriend, host, KEY_RE, ownerName, siteOrigin } from "./peers.js";
+import { callSite, host, KEY_RE, ownerName, siteOrigin } from "./peers.js";
 import { escape, html, json, now, randomToken, sha256 } from "./util.js";
 
 const LINK_SECONDS = 7 * 24 * 3600;
@@ -105,7 +106,7 @@ export async function handleConnections(request, env, url) {
       // Tell them, if they can be reached; either way this side forgets them.
       await callSite(connection.origin, "/_peer/disconnect", { key: connection.their_key, body: {} }).catch(() => {});
       // The owner's copies of what they said on that site (comments_elsewhere) stay: they're theirs.
-      await db.batch([...forgetFriend(db, connection.origin), db.prepare("DELETE FROM connections WHERE id = ?").bind(connection.id)]);
+      await db.prepare("DELETE FROM connections WHERE id = ?").bind(connection.id).run();
     }
     return json({ ok: true });
   }
@@ -191,9 +192,9 @@ function connectionsPage(connections) {
 <p class="crumbs"><a href="/feed">Feed</a> /</p>
 <h1>Connected sites</h1>
 <p class="meta">Connect with friends who have their own afterwrd site, and you become friends: you'll each see the
-other's new posts in <a href="/feed">Feed</a>, and can look round each other's whole site (everything you've published,
-as anyone you've invited can) by coming in through your own site, without an invite or passkey. Your comments are kept
-on their site, as part of their archive. Disconnecting ends all of it at once.</p>
+other's new posts in <a href="/feed">Feed</a>, and can read each other's posts and photos (everything you've published)
+on your own site: press their name. Your comments are kept on their site, as part of their archive. Disconnecting
+ends all of it at once.</p>
 
 <div class="actions-row">
   <button class="chip primary" id="make">Make a Connect link</button>
@@ -218,8 +219,7 @@ ${connections.length ? `<table class="numbers">
     <th><a href="/friend/${c.id}/posts">${escape(c.name)}</a></th>
     <td><a href="${escape(c.origin)}" target="_blank" rel="noopener noreferrer">${escape(host(c.origin))}</a></td>
     <td>${day(c.connected_at)}</td>
-    <td><a class="chip" href="/_feed/visit?to=${encodeURIComponent(c.origin)}">Visit</a>
-      <button class="chip" data-disconnect="${c.id}" data-name="${escape(c.name)}">Disconnect</button></td>
+    <td><button class="chip" data-disconnect="${c.id}" data-name="${escape(c.name)}">Disconnect</button></td>
   </tr>`).join("")}</tbody>
 </table>` : `<p class="empty">You're not connected with anyone yet.</p>`}`, `${POST_SCRIPT}
   const panel = document.getElementById("link");
@@ -256,8 +256,7 @@ function confirmPage(name, origin) {
 <p class="crumbs"><a href="/_admin/connections">Connections</a> /</p>
 <h1>Connect with ${escape(name)}?</h1>
 <p>Their site is <strong>${escape(host(origin))}</strong>. Once connected you're friends: you'll each see the other's
-new posts in Feed, can comment on them, and can look round each other's whole site. Either of you can disconnect at any
-time, which ends all of it.</p>
+posts and photos on your own site, and can comment on them. Either of you can disconnect at any time, which ends all of it.</p>
 <p id="error" role="alert"></p>
 <div class="actions-row">
   <button class="chip primary" id="go">Connect</button>

@@ -41,8 +41,6 @@ function navItems(ctx) {
     const tools = OWNER_ITEMS.map((i) => (i.key === "update" && ctx.updateWaiting ? { ...i, label: "Update available", badge: true } : i));
     return [{ key: "feed", label: "Feed", href: "/feed" }, ...items, ...tools];
   }
-  // A connected friend, visiting from their own site.
-  if (ctx.user.site) items.push({ key: "home", label: "Back to my site", href: `${ctx.user.site}/`, tool: true });
   return items;
 }
 
@@ -699,7 +697,6 @@ function friendHead(ctx, c, tab) {
 ${c.cover && html`<section class="profile"><div class="cover"><img src="${c.cover.src}" alt=""></div></section>`}
 <div class="feed-head">
   <h1 class="friend-name">${c.avatar && html`<img class="avatar-small" src="${c.avatar.thumbSrc}" alt="">`}${c.name}</h1>
-  <a class="chip" href="/_feed/visit?to=${encodeURIComponent(c.origin)}" title="Go to ${c.name}'s site">${raw(icon("home"))}<span>Visit their site</span></a>
 </div>
 <p class="meta">${host(c.origin)} · a friend you're connected with. Only you see this here.</p>
 <nav class="tabs">

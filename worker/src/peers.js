@@ -1,30 +1,26 @@
 // What a connected friend's site may ask of this one, using the key this site gave it (see connect.js):
 //   GET  /_peer/hello?from=<origin>     who's here; only mid-connect, to prove to <origin> the key is ours for it
-//   GET  /_peer/feed                    the owner's newest posts written on afterwrd, with all their comments (a
-//                                       connected friend sees what they'd see visiting)
-//   GET  /_peer/posts?page=n            everything a visiting friend could read, through share.js:
+//   GET  /_peer/feed                    the owner's newest posts written on afterwrd, with all their comments
+//   GET  /_peer/posts?page=n            the owner's posts and photos, for their friend pages, through share.js:
 //   GET  /_peer/albums                    posts, albums, an album's photos, one photo; files come as signed links
 //   GET  /_peer/albums/<key>?page=n
 //   GET  /_peer/photos/<sha256>
 //   POST /_peer/comments                a Note inReplyTo a post or photo here: their owner comments on it
 //   POST /_peer/comments/<n>/delete     their owner deletes a comment they made
-//   POST /_peer/ticket                  {next}: a one-time pass for their owner to come in and look round (auth.js)
 //   POST /_peer/disconnect              they've disconnected
 // The feed and comments are ActivityStreams (public/static/activity.js). Only posts written on afterwrd are
 // shared, never the imported archive. Plus the helpers for calling other sites.
-import { actorId, commentId, CONTEXT, POST_KEY_RE, postId, tidy } from "../public/static/activity.js";
+import { commentId, CONTEXT, POST_KEY_RE, postId, tidy } from "../public/static/activity.js";
 import { findTarget, MAX_COMMENT } from "./archive/comments.js";
 import { SITE_ID } from "./posts.js";
 import { notes, ownerActor, shareAlbum, shareAlbums, sharePhoto, sharePosts } from "./share.js";
-import { json, now, randomToken, sha256 } from "./util.js";
+import { json, now, sha256 } from "./util.js";
 
 const FEED_POSTS = 30;
 const TIMEOUT_MS = 8000;
 const MAX_REPLY = 2_000_000;
 const RATE = { count: 30, seconds: 600 };
 const DAILY = 300; // comments from one site a day, whatever the pace
-const TICKET_SECONDS = 120;
-const LIVE_TICKETS = 10; // unused passes one site can hold at once
 export const KEY_RE = /^[\w-]{40,100}$/;
 
 /** An https site address as an origin, or null. http on this computer only when testing (ALLOW_LOCAL_SITES). */
@@ -86,15 +82,6 @@ async function readLimited(response, limit) {
   return new TextDecoder().decode(await new Blob(parts).arrayBuffer());
 }
 
-/** Statements that end a friend's visits: their sessions here, their person (revoked, kept for their comments). */
-export function forgetFriend(db, origin) {
-  return [
-    db.prepare("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE site = ?)").bind(origin),
-    db.prepare("UPDATE users SET revoked_at = ? WHERE site = ? AND revoked_at IS NULL").bind(now(), origin),
-    db.prepare("DELETE FROM friend_tickets WHERE connection_id IN (SELECT id FROM connections WHERE origin = ?)").bind(origin),
-  ];
-}
-
 /** The connection whose key this request carries (whether or not it's finished connecting), or null. */
 async function peerFrom(request, env) {
   const match = /^Bearer (\S+)$/.exec(request.headers.get("Authorization") ?? "");
@@ -128,22 +115,9 @@ export async function handlePeer(request, env, url) {
   }
   if (route === "POST /_peer/disconnect") {
     // The owner's copies of what they said on that site (comments_elsewhere) stay: they're theirs.
-    await db.batch([...forgetFriend(db, peer.origin), db.prepare("DELETE FROM connections WHERE id = ?").bind(peer.id)]);
+    await db.prepare("DELETE FROM connections WHERE id = ?").bind(peer.id).run();
     return json({ ok: true });
   }
-  if (route === "POST /_peer/ticket") {
-    const body = await request.json().catch(() => ({}));
-    const live = await db.prepare("SELECT COUNT(*) AS n FROM friend_tickets WHERE connection_id = ? AND expires_at > ?").bind(peer.id, now()).first();
-    if (live.n >= LIVE_TICKETS) return json({ error: "Too many visits started at once. Try again in a couple of minutes." }, 429);
-    const token = randomToken();
-    await db.batch([
-      db.prepare("DELETE FROM friend_tickets WHERE expires_at < ?").bind(now()),
-      db.prepare("INSERT INTO friend_tickets (token_hash, connection_id, next, expires_at) VALUES (?, ?, ?, ?)")
-        .bind(await sha256(token), peer.id, typeof body.next === "string" ? body.next.slice(0, 500) : "/", now() + TICKET_SECONDS),
-    ]);
-    return json({ url: `${url.origin}/_auth/friend?ticket=${token}` });
-  }
-
   if (route === "POST /_peer/comments") {
     const note = await request.json().catch(() => ({}));
     const text = note?.type === "Note" && typeof note.content === "string" ? note.content.replace(/\r\n?/g, "\n").trim() : "";

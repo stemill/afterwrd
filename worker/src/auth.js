@@ -8,15 +8,13 @@ import {
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
 import { createInvite, OWNER_INVITE_SECONDS } from "./admin.js";
-import { friendPage, invitePage, loginPage, messagePage, setupPage, signOutPage } from "./pages.js";
+import { invitePage, loginPage, messagePage, setupPage, signOutPage } from "./pages.js";
 import { fromBase64Url, html, json, now, randomToken, sha256, toBase64Url } from "./util.js";
 
 // __Host- cookies can only be set by this exact site, over HTTPS, for the whole site.
 const SESSION_COOKIE = "__Host-hb_session";
 const CHALLENGE_COOKIE = "__Host-hb_challenge";
 const SESSION_SECONDS = 30 * 24 * 3600;
-// A connected friend comes in through their own site, and can do so again whenever they like, so a week is plenty.
-const FRIEND_SESSION_SECONDS = 7 * 24 * 3600;
 const CHALLENGE_SECONDS = 5 * 60;
 
 export async function currentUser(request, env) {
@@ -53,8 +51,6 @@ export async function handleAuth(request, env, url) {
     if (route === "POST /_auth/register/verify") return await registerVerify(request, env, url, body);
     if (route === "POST /_auth/login/options") return await loginOptions(env, url);
     if (route === "POST /_auth/login/verify") return await loginVerify(request, env, url, body);
-    if (route === "GET /_auth/friend") return await friendWelcome(request, env, url);
-    if (route === "POST /_auth/friend") return await friendSignIn(request, env, url, body);
   } catch (error) {
     return json({ error: error.message }, 400);
   }
@@ -243,56 +239,15 @@ async function findInvite(env, token) {
   ).bind(await sha256(String(token)), now()).first();
 }
 
-// --- connected friends --------------------------------------------------------------------------------------
-
-// A connected friend's own site asks for a one-time pass (peers.js, POST /_peer/ticket) and sends them here with it.
-// They're a person here like anyone invited, marked with their site; disconnecting revokes them (connect.js).
-const TICKET_GONE = "This link has expired or has been used. Go back to your own site and try again.";
-
-// Someone already signed in here as themselves (the owner, or someone invited) keeps that: a friend's pass would
-// replace it with a lesser one. That happens when one person has sites of their own on both ends.
-async function signedInHere(request, env) {
-  const user = await currentUser(request, env);
-  return user && !user.site ? user : null;
-}
-
-async function friendWelcome(request, env, url) {
-  const ticket = await env.DB.prepare(`SELECT c.name, t.next FROM friend_tickets t JOIN connections c ON c.id = t.connection_id
-    WHERE t.token_hash = ? AND t.expires_at > ? AND c.connected_at IS NOT NULL`)
-    .bind(await sha256(url.searchParams.get("ticket") ?? ""), now()).first();
-  if (!ticket) return html(messagePage(TICKET_GONE), 404);
-  if (await signedInHere(request, env)) return Response.redirect(`${url.origin}${safeNext(ticket.next, url)}`, 302);
-  const owner = await env.DB.prepare("SELECT name FROM users WHERE is_owner = 1 ORDER BY id LIMIT 1").first();
-  return html(friendPage(ticket.name, owner?.name ?? "this"));
-}
-
-async function friendSignIn(request, env, url, body) {
-  const db = env.DB;
-  const ticket = await db.prepare("DELETE FROM friend_tickets WHERE token_hash = ? AND expires_at > ? RETURNING connection_id, next")
-    .bind(await sha256(String(body.ticket ?? "")), now()).first();
-  if (!ticket) return json({ error: TICKET_GONE }, 400);
-  if (await signedInHere(request, env)) return json({ ok: true, next: safeNext(ticket.next, url) });
-  const connection = await db.prepare("SELECT * FROM connections WHERE id = ? AND connected_at IS NOT NULL").bind(ticket.connection_id).first();
-  if (!connection) return json({ error: "Your sites aren't connected any more." }, 403);
-  let user = await db.prepare("SELECT id FROM users WHERE site = ? ORDER BY id LIMIT 1").bind(connection.origin).first();
-  if (user) {
-    await db.prepare("UPDATE users SET name = ?, revoked_at = NULL WHERE id = ?").bind(connection.name, user.id).run();
-  } else {
-    user = await db.prepare("INSERT INTO users (name, created_at, site) VALUES (?, ?, ?) RETURNING id")
-      .bind(connection.name, now(), connection.origin).first();
-  }
-  return startSession(env, user.id, json({ ok: true, next: safeNext(ticket.next, url) }), FRIEND_SESSION_SECONDS);
-}
-
-async function startSession(env, userId, response, seconds = SESSION_SECONDS) {
+async function startSession(env, userId, response) {
   const token = randomToken();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(now()),
     env.DB.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)")
-      .bind(await sha256(token), userId, now() + seconds),
+      .bind(await sha256(token), userId, now() + SESSION_SECONDS),
   ]);
   response.headers.append("Set-Cookie",
-    `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${seconds}; HttpOnly; Secure; SameSite=Lax`);
+    `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${SESSION_SECONDS}; HttpOnly; Secure; SameSite=Lax`);
   return response;
 }
 
