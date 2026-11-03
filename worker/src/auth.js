@@ -6,7 +6,8 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
-import { invitePage, loginPage, messagePage } from "./pages.js";
+import { createInvite } from "./admin.js";
+import { invitePage, loginPage, messagePage, setupPage } from "./pages.js";
 import { fromBase64Url, html, json, now, randomToken, sha256, toBase64Url } from "./util.js";
 
 const SESSION_COOKIE = "hb_session";
@@ -32,6 +33,7 @@ export async function handleAuth(request, env, url) {
   try {
     if (route === "GET /_auth/login") return html(loginPage(safeNext(url.searchParams.get("next"))));
     if (route === "GET /_auth/logout") return logout(request, env);
+    if (route === "GET /_auth/setup" || route === "POST /_auth/setup") return await setup(request, env, url, body);
     if (request.method === "GET" && url.pathname.startsWith("/_auth/invite/")) {
       const invite = await findInvite(env, url.pathname.slice("/_auth/invite/".length));
       return invite
@@ -47,6 +49,29 @@ export async function handleAuth(request, env, url) {
     return json({ error: error.message }, 400);
   }
   return new Response("Not found", { status: 404 });
+}
+
+// --- first-run setup (from the installer) ------------------------------------
+
+// The installer deploys heybert with a one-time SETUP_CODE and sends its owner to /_auth/setup?code=…; while the
+// site has no users, that link creates the owner and their invite. After that it does nothing.
+async function setup(request, env, url, body) {
+  const code = request.method === "POST" ? String(body.code ?? "") : url.searchParams.get("code") ?? "";
+  if (!env.SETUP_CODE || (await sha256(code)) !== (await sha256(env.SETUP_CODE))) {
+    return html(messagePage("This setup link isn't valid."), 403);
+  }
+  if (await env.DB.prepare("SELECT 1 FROM users LIMIT 1").first()) {
+    return html(messagePage("This site is already set up. Sign in with your passkey."), 409);
+  }
+  if (request.method === "GET") return html(setupPage());
+
+  const name = String(body.name ?? "").trim().slice(0, 100);
+  if (!name) return json({ error: "Give your name." }, 400);
+  // Only creates the owner while there's still no one, so two setups racing can't both succeed.
+  const owner = await env.DB.prepare(`INSERT INTO users (name, is_owner, created_at)
+    SELECT ?, 1, ? WHERE NOT EXISTS (SELECT 1 FROM users) RETURNING id`).bind(name, now()).first();
+  if (!owner) return json({ error: "This site is already set up." }, 409);
+  return json({ link: await createInvite(env, url, owner.id) });
 }
 
 // --- registration (from an invite) -----------------------------------------

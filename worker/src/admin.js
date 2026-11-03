@@ -47,7 +47,7 @@ export async function handleAdmin(request, env, url, owner) {
 }
 
 // Only a hash is stored, so the link can be shown once and never again.
-async function createInvite(env, url, userId) {
+export async function createInvite(env, url, userId) {
   const token = randomToken();
   await env.DB.prepare("INSERT INTO invites (token_hash, user_id, expires_at) VALUES (?, ?, ?)")
     .bind(await sha256(token), userId, now() + INVITE_SECONDS).run();

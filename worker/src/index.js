@@ -6,6 +6,7 @@ import { handleAdmin } from "./admin.js";
 import { renderArchive } from "./archive/routes.js";
 import { currentUser, handleAuth } from "./auth.js";
 import { HASH_RE, mediaStore } from "./media.js";
+import { ensureSchema } from "./migrate.js";
 
 export { MediaStore } from "./media.js";
 const HEADERS = {
@@ -25,6 +26,7 @@ export default {
 };
 
 async function route(request, env) {
+  await ensureSchema(env);
   const url = new URL(request.url);
   if (url.pathname.startsWith("/_auth/")) return handleAuth(request, env, url);
 

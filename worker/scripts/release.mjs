@@ -1,0 +1,102 @@
+// Packages a heybert release for the installer:
+//
+//   npm run release -- --base https://<where release/<version>/ will be published>
+//
+// writes release/<version>/:
+//   manifest.json    the code modules and site files, each with its SHA-256, plus the Worker settings
+//   files/<sha256>   every file, named by its hash
+//   installer.js     the installer people paste into a new Worker, with the manifest's hash built in
+// Publish the folder at --base unchanged; the installer refuses anything that doesn't match.
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { extname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const worker = fileURLToPath(new URL("..", import.meta.url));
+const args = process.argv.slice(2);
+const base = args[args.indexOf("--base") + 1];
+if (!args.includes("--base") || !/^https:\/\/\S+[^/]$/.test(base ?? "")) {
+  console.error("Give the https address the release folder will be published at, without a trailing slash: --base https://…");
+  process.exit(1);
+}
+
+const { version } = JSON.parse(readFileSync(join(worker, "package.json"), "utf8"));
+// wrangler.jsonc with its comments removed; no value in it contains "//".
+const config = JSON.parse(readFileSync(join(worker, "wrangler.jsonc"), "utf8").replace(/^\s*\/\/.*$/gm, ""));
+const out = join(worker, "release", version);
+const dist = join(worker, "release", ".build");
+rmSync(out, { recursive: true, force: true });
+rmSync(dist, { recursive: true, force: true });
+mkdirSync(join(out, "files"), { recursive: true });
+
+const build = spawnSync("npx", ["wrangler", "deploy", "--dry-run", "--outdir", dist], { cwd: worker, encoding: "utf8" });
+if (build.status !== 0) {
+  console.error(build.stderr || build.stdout);
+  process.exit(1);
+}
+
+const TYPES = {
+  ".js": "application/javascript", ".css": "text/css", ".html": "text/html", ".json": "application/json",
+  ".svg": "image/svg+xml", ".png": "image/png", ".wasm": "application/wasm",
+};
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+function add(bytes) {
+  const hash = sha256(bytes);
+  writeFileSync(join(out, "files", hash), bytes);
+  return { sha256: hash, size: bytes.length };
+}
+
+const modules = readdirSync(dist)
+  .filter((name) => name.endsWith(".js") || name.endsWith(".sql"))
+  .map((name) => ({
+    name,
+    type: name.endsWith(".js") ? "application/javascript+module" : "text/plain",
+    ...add(readFileSync(join(dist, name))),
+  }));
+
+const publicDir = join(worker, config.assets.directory);
+const walk = (dir) => readdirSync(dir, { withFileTypes: true })
+  .flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
+const assets = walk(publicDir).map((file) => {
+  const bytes = readFileSync(file);
+  return {
+    path: `/${relative(publicDir, file).split("\\").join("/")}`,
+    type: TYPES[extname(file)] ?? "text/plain",
+    // The upload session's own identifier for the file (32 hex characters), as in Cloudflare's examples.
+    hash: sha256(bytes.toString("base64") + extname(file).slice(1)).slice(0, 32),
+    ...add(bytes),
+  };
+});
+
+const manifest = {
+  name: "heybert",
+  version,
+  main_module: config.main.split("/").pop(),
+  compatibility_date: config.compatibility_date,
+  compatibility_flags: config.compatibility_flags ?? [],
+  modules,
+  assets,
+  assets_config: {
+    html_handling: config.assets.html_handling,
+    not_found_handling: config.assets.not_found_handling,
+    run_worker_first: config.assets.run_worker_first,
+  },
+  durable_objects: config.durable_objects.bindings,
+  migrations: { new_tag: config.migrations.at(-1).tag, new_sqlite_classes: config.migrations.flatMap((m) => m.new_sqlite_classes ?? []) },
+};
+const manifestBytes = Buffer.from(JSON.stringify(manifest, null, 2));
+writeFileSync(join(out, "manifest.json"), manifestBytes);
+
+const installer = readFileSync(join(worker, "installer", "installer.js"), "utf8")
+  .replaceAll("__RELEASE_BASE__", base)
+  .replaceAll("__MANIFEST_SHA256__", sha256(manifestBytes))
+  .replaceAll("__VERSION__", version);
+writeFileSync(join(out, "installer.js"), installer);
+rmSync(dist, { recursive: true, force: true });
+
+const total = [...modules, ...assets].reduce((n, f) => n + f.size, 0);
+console.log(`heybert ${version}: ${modules.length} code modules and ${assets.length} site files (${(total / 1e3).toFixed(0)} KB)`);
+console.log(`  ${relative(worker, out)}/  → publish at ${base}/`);
+console.log(`  installer: ${relative(worker, join(out, "installer.js"))} (manifest ${sha256(manifestBytes).slice(0, 12)}…)`);

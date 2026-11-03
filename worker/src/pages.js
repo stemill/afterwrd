@@ -19,6 +19,8 @@ const STYLE = `
            color: #fff; font: inherit; font-weight: 600; text-align: center; text-decoration: none; cursor: pointer; }
   button:disabled { opacity: 0.6; cursor: default; }
   #error { color: #d93025; margin: 12px 0 0; min-height: 1.5em; }
+  input { width: 100%; font: inherit; padding: 10px; border: 1px solid var(--border); border-radius: 8px;
+          background: var(--bg); color: var(--text); }
 `;
 
 // Turns WebAuthn's binary fields into base64url JSON and back; @simplewebauthn/server expects this shape.
@@ -120,6 +122,23 @@ will ask for your face, fingerprint or PIN. There's no password, and this link o
       excludeCredentials: ids(options.excludeCredentials) } });
     await post("/_auth/register/verify", { token, response: credentialJSON(credential) });
     location.replace("/");
+  });`);
+}
+
+export function setupPage() {
+  return page("Set up heybert", `
+<h1>Your archive is ready</h1>
+<p>heybert is installed in your Cloudflare account. Next, make yourself its owner: you'll create a passkey on
+this device, then you can import your Facebook download and invite people.</p>
+<p><input id="name" placeholder="Your name" autocomplete="name" maxlength="100"></p>
+<button id="go">Continue</button>
+<p id="error" role="alert"></p>`, `
+  const code = new URLSearchParams(location.search).get("code");
+  run(document.getElementById("go"), async () => {
+    const name = document.getElementById("name").value.trim();
+    if (!name) throw new Error("Give your name.");
+    const { link } = await post("/_auth/setup", { code, name });
+    location.replace(link);
   });`);
 }
 

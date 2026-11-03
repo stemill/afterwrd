@@ -15,3 +15,4 @@ data/
 # Cloudflare Worker
 worker/node_modules/
 worker/.wrangler/
+worker/release/
