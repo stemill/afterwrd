@@ -71,9 +71,17 @@ const assets = walk(publicDir).map((file) => {
   };
 });
 
+// What's new, for the Update page: the tagged commit's message, without its sign-off lines.
+const git = spawnSync("git", ["log", "-1", "--format=%B"], { cwd: worker, encoding: "utf8" });
+// Commit messages wrap at 72 characters; the page wraps for itself, so lines within a paragraph are joined.
+const notes = git.status === 0
+  ? git.stdout.replace(/^Co-Authored-By:.*$/gim, "").trim().split(/\n{2,}/).map((p) => p.replace(/\s*\n\s*/g, " ")).join("\n\n").slice(0, 3000)
+  : "";
+
 const manifest = {
   name: "afterwrd",
   version,
+  notes,
   main_module: config.main.split("/").pop(),
   compatibility_date: config.compatibility_date,
   compatibility_flags: config.compatibility_flags ?? [],

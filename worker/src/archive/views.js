@@ -37,7 +37,10 @@ function layout(ctx, { title, bodyClass = "", main }) {
 function navItems(ctx) {
   const items = NAV.filter(([, , s]) => ctx.sections.includes(s)).map(([path, label, key]) => ({ key, label, href: `/${path}` }));
   items.push({ key: "activity", label: "Activity", href: "/activity", badge: ctx.newComments });
-  if (ctx.user.is_owner) return [{ key: "feed", label: "Feed", href: "/feed" }, ...items, ...OWNER_ITEMS];
+  if (ctx.user.is_owner) {
+    const tools = OWNER_ITEMS.map((i) => (i.key === "update" && ctx.updateWaiting ? { ...i, label: "Update available", badge: true } : i));
+    return [{ key: "feed", label: "Feed", href: "/feed" }, ...items, ...tools];
+  }
   // A connected friend, visiting from their own site.
   if (ctx.user.site) items.push({ key: "home", label: "Back to my site", href: `${ctx.user.site}/`, tool: true });
   return items;

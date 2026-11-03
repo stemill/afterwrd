@@ -96,6 +96,10 @@ header.site button.chip { margin: 0; }
   display: inline-grid; place-items: center; min-width: 1.35rem; height: 1.35rem; padding: 0 0.35rem; margin-right: -0.3rem;
   border-radius: 999px; background: #e0533d; color: #fff; font-size: 0.72rem; font-weight: 800;
 }
+.chip .dot {
+  position: absolute; top: 0.1rem; right: 0.1rem; width: 0.65rem; height: 0.65rem; border-radius: 50%;
+  background: #e0533d; box-shadow: 0 0 0 2px var(--bg);
+}
 .hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 760px) {
   header.site { gap: 0.6rem; padding-block: 0.6rem; }

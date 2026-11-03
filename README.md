@@ -106,6 +106,10 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   *Posts*. Photos are resized to at most 2560px in the browser before uploading, which also removes the
   details phones hide in them (such as where a photo was taken), and they're collected in a *Posted on
   afterwrd* album. Importing again keeps them; deleting a post deletes its photos and comments.
+- **Update** (marked when a new version is out) shows what's new and installs it. It needs a Cloudflare API
+  token; tick *Remember* and it's kept as an encrypted secret of the site (unreadable, even by you), so later
+  updates are one click. *Forget it* removes it. A remembered token can change any Worker in that Cloudflare
+  account, so only remember it if the account is just for afterwrd.
 - **Download everything** (the download icon) saves the whole site as one zip: posts, photos and videos,
   albums, comments (those written here, and yours on friends' sites), likes, friends and connections, as
   [ActivityStreams](https://www.w3.org/TR/activitystreams-core/) JSON, the open format the fediverse uses, with

@@ -35,12 +35,12 @@ export const LOGO = `<span class="mark" aria-hidden="true"><svg viewBox="0 0 24 
 
 /**
  * items: [{ key, label, href, badge? }], each key one of ICONS; `current` is the key to mark as the page you're on;
- * `badge` is a count to show on the chip, such as new comments.
+ * `badge` is a count to show on the chip, such as new comments, or true for a dot (something's waiting).
  * Sign out is always last, as a small form (so another site can't sign people out with a link).
  */
 export function siteHeader(items, current) {
   const chip = ({ key, label, href, tool, badge }) =>
-    `<a href="${escape(href)}" class="chip${tool ? " tool" : ""}"${key === current ? ' aria-current="page"' : ""}${tool ? ` title="${escape(label)}" aria-label="${escape(label)}"` : ""}>${icon(key)}<span>${escape(label)}</span>${badge ? `<span class="count">${Number(badge)}<span class="hidden"> new</span></span>` : ""}</a>`;
+    `<a href="${escape(href)}" class="chip${tool ? " tool" : ""}"${key === current ? ' aria-current="page"' : ""}${tool ? ` title="${escape(label)}" aria-label="${escape(label)}"` : ""}>${icon(key)}<span>${escape(label)}</span>${badge === true ? '<span class="dot" aria-hidden="true"></span>' : badge ? `<span class="count">${Number(badge)}<span class="hidden"> new</span></span>` : ""}</a>`;
   const main = items.filter((i) => !i.tool).map(chip).join("");
   const tools = items.filter((i) => i.tool).map(chip).join("");
   return `<header class="site">
@@ -54,11 +54,11 @@ export function siteHeader(items, current) {
 export const OWNER_ITEMS = [
   { key: "people", label: "People", href: "/_admin", tool: true },
   { key: "import", label: "Import", href: "/_admin/import", tool: true },
-  { key: "export", label: "Download everything", href: "/_admin/export", tool: true },
+  { key: "export", label: "Download everything", short: "Download", href: "/_admin/export", tool: true },
   { key: "update", label: "Update", href: "/_admin/update", tool: true },
 ];
 
 /** The header for the owner's pages: back to the archive, then People, Import, Update (labelled, since they're the subject). */
 export function ownerHeader(current) {
-  return siteHeader([{ key: "archive", label: "Archive", href: "/" }, ...OWNER_ITEMS.map((i) => ({ ...i, tool: false }))], current);
+  return siteHeader([{ key: "archive", label: "Archive", href: "/" }, ...OWNER_ITEMS.map((i) => ({ ...i, label: i.short ?? i.label, tool: false }))], current);
 }

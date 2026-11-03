@@ -4,6 +4,7 @@ import { findTarget, latestComments, loadThreads, newCount, photoKey, postKey } 
 import { loadFeed } from "../feed.js";
 import { ownerName } from "../peers.js";
 import { SITE_ID } from "../posts.js";
+import { updateWaiting } from "../update.js";
 import { now } from "../util.js";
 import { fmtDate, fmtMonth } from "./format.js";
 import * as views from "./views.js";
@@ -51,7 +52,7 @@ const ROUTES = [
   [/^\/feed$/, null, feed],
 ];
 
-export async function renderArchive(request, env, url, user) {
+export async function renderArchive(request, env, url, user, work) {
   const db = env.DB;
   const [settings, me] = await db.batch([
     db.prepare("SELECT value FROM settings WHERE key = 'sections'"),
@@ -66,6 +67,7 @@ export async function renderArchive(request, env, url, user) {
   const sections = [...new Set([...chosen, "posts", "photos"])];
   const ctx = {
     db, url, user, chosen, sections, newComments: await newCount(db, user),
+    updateWaiting: user.is_owner ? await updateWaiting(env, work) : false,
     me: me.results[0] ?? { id: -1, name: await ownerName(db), is_me: 1 },
   };
 

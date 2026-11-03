@@ -1,16 +1,21 @@
 // The owner's Update page: installs a newer afterwrd release over this one, keeping the database, photos and
-// secrets, with a Cloudflare API token the owner makes for the purpose (and deletes afterwards).
-//   GET  /_admin/update            the page: this version, and the latest release if it's newer
+// secrets, with a Cloudflare API token the owner makes for the purpose. If they choose, the token is remembered as
+// the Worker secret UPDATE_TOKEN (encrypted, and unreadable through Cloudflare's API or dashboard), so later updates
+// are one click; otherwise it's used only while updating, and they delete it afterwards.
+//   GET  /_admin/update            the page: this version, and the latest release (with its notes) if it's newer
 //   GET  /_admin/update/version    this version, for the page to see when the update has taken over
-//   POST /_admin/update/check      {token, tag} -> which account this Worker is in
-//   POST /_admin/update/assets     {token, account, tag} -> upload the release's site files
-//   POST /_admin/update/deploy     {token, account, tag, jwt} -> the new version
+//   POST /_admin/update/check      {token?, tag} -> which account this Worker is in
+//   POST /_admin/update/assets     {token?, account, tag} -> upload the release's site files
+//   POST /_admin/update/deploy     {token?, account, tag, jwt} -> the new version
+//   POST /_admin/update/remember   {token}: keep it as the secret UPDATE_TOKEN (after an update, or any time)
+//   POST /_admin/update/forget     delete the remembered token from the Worker
+// Without a token in the request, the remembered one is used.
 // Releases come from the GitHub repository in package.json (afterwrd.releases). Every file is checked against
 // the release's manifest; as with installing, trust rests on that repository.
 import { asset, ownerHeader } from "./nav.js";
 import pkg from "../package.json";
 import { api, deployVersion, existingDatabase, findWorker, loadRelease, uploadAssets } from "./deploy.js";
-import { escape, html, json } from "./util.js";
+import { escape, html, json, now } from "./util.js";
 
 const VERSION = pkg.version;
 const REPO = pkg.afterwrd.releases;
@@ -19,26 +24,44 @@ const PERMISSIONS = [{ key: "workers_scripts", type: "edit" }, { key: "account_s
 const TOKEN_URL = "https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys="
   + encodeURIComponent(JSON.stringify(PERMISSIONS)) + "&accountId=*&zoneId=all&name=afterwrd%20update";
 const TOKENS_PAGE = "https://dash.cloudflare.com/profile/api-tokens";
+const CHECK_SECONDS = 6 * 3600;
 
 export async function handleUpdate(request, env, url, owner) {
   const path = url.pathname.slice("/_admin/update".length);
-  if (request.method === "GET" && path === "") return html(updatePage(owner, await latestRelease()));
+  if (request.method === "GET" && path === "") return html(updatePage(owner, await latestRelease(), Boolean(env.UPDATE_TOKEN)));
   if (request.method === "GET" && path === "/version") return json({ version: VERSION });
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
 
   const body = await request.json().catch(() => ({}));
   try {
     if (!url.hostname.endsWith(".workers.dev")) throw new Error("Updating works from the site's workers.dev address.");
-    if (!TAG_RE.test(body.tag ?? "")) throw new Error("Unknown release.");
     const script = url.hostname.split(".")[0];
+    const given = typeof body.token === "string" ? body.token.trim() : "";
+    const token = given || env.UPDATE_TOKEN;
+    if (!token) throw new Error("Paste your API token first.");
+    if (path === "/remember") {
+      if (!given) throw new Error("Paste your API token first.");
+      const { account } = await findWorker(given, script);
+      await api(given, `/accounts/${account}/workers/scripts/${script}/secrets`, {
+        method: "PUT", body: JSON.stringify({ name: "UPDATE_TOKEN", text: given, type: "secret_text" }),
+      });
+      return json({ ok: true });
+    }
+    if (path === "/forget") {
+      if (!env.UPDATE_TOKEN) return json({ ok: true });
+      const { account } = await findWorker(env.UPDATE_TOKEN, script);
+      await api(env.UPDATE_TOKEN, `/accounts/${account}/workers/scripts/${script}/secrets/UPDATE_TOKEN`, { method: "DELETE" });
+      return json({ ok: true });
+    }
+    if (!TAG_RE.test(body.tag ?? "")) throw new Error("Unknown release.");
     const release = () => loadRelease(`https://github.com/${REPO}/releases/download/${body.tag}`);
-    if (path === "/check") return json({ account: (await findWorker(body.token, script)).account });
-    if (path === "/assets") return json({ jwt: await uploadAssets(body.token, body.account, script, await release()) });
+    if (path === "/check") return json({ account: (await findWorker(token, script)).account });
+    if (path === "/assets") return json({ jwt: await uploadAssets(token, body.account, script, await release()) });
     if (path === "/deploy") {
-      const settings = await api(body.token, `/accounts/${body.account}/workers/scripts/${script}/settings`);
+      const settings = await api(token, `/accounts/${body.account}/workers/scripts/${script}/settings`);
       const databaseId = existingDatabase(settings);
       if (!databaseId) throw new Error("This Worker doesn't look like afterwrd, so it wasn't updated.");
-      await deployVersion(body.token, body.account, script, await release(), { jwt: body.jwt, databaseId, settings });
+      await deployVersion(token, body.account, script, await release(), { jwt: body.jwt, databaseId, settings });
       return json({ ok: true });
     }
   } catch (error) {
@@ -56,13 +79,29 @@ async function latestRelease() {
       headers: { "User-Agent": "afterwrd" },
     });
     if (!response.ok) return { error: `GitHub said ${response.status}.` };
-    const { version } = await response.json();
+    const { version, notes } = await response.json();
     const tag = `v${version}`;
     if (!TAG_RE.test(tag)) return { error: "The latest release has an unexpected version." };
-    return { tag, version, page: `https://github.com/${REPO}/releases/tag/${tag}` };
+    return { tag, version, notes: typeof notes === "string" ? notes.slice(0, 3000) : "", page: `https://github.com/${REPO}/releases/tag/${tag}` };
   } catch (error) {
     return { error: error.message };
   }
+}
+
+/**
+ * Whether a newer release is out, for a mark on the owner's Update button. Uses a copy of the latest version kept
+ * in settings and refreshed, after the page is sent (`work.waitUntil`), at most every six hours.
+ */
+export async function updateWaiting(env, work) {
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'latest_release'").first();
+  const known = row ? JSON.parse(row.value) : {};
+  if (!known.checked || now() - known.checked > CHECK_SECONDS) {
+    const refresh = latestRelease().then((latest) => env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('latest_release', ?)")
+      .bind(JSON.stringify({ version: latest.version ?? known.version ?? null, checked: now() })).run()).catch(() => {});
+    if (work?.waitUntil) work.waitUntil(refresh);
+    else await refresh;
+  }
+  return Boolean(known.version && TAG_RE.test(`v${known.version}`) && newer(known.version, VERSION));
 }
 
 function newer(a, b) {
@@ -71,31 +110,49 @@ function newer(a, b) {
   return false;
 }
 
-function updatePage(owner, latest) {
+function updatePage(owner, latest, remembered) {
   const available = latest.version && newer(latest.version, VERSION);
+  const forget = remembered ? `
+<p class="meta remembered">Your update token is remembered, so updating is one click.
+  <button class="link" id="forget">Forget it</button></p>` : "";
+  const notes = latest.notes ? `<section class="card notes"><h2>What's new</h2><p>${escape(latest.notes)}</p></section>` : "";
+  const fresh = `
+<li><a class="button" href="${TOKEN_URL}" target="_blank" rel="noopener">Create a token</a>
+  <span class="meta">The permissions are filled in: scroll down, press <b>Continue to summary</b>, <b>Create Token</b>, and copy it.</span></li>
+<li>Paste it here: <input id="token" type="text" autocomplete="off" spellcheck="false" placeholder="Your API token">
+  <label class="remember"><input type="checkbox" id="remember"> Remember it for future updates
+  <span class="meta">It's kept as an encrypted secret of your site, which no one can read back, not even you. It can
+  change the Workers in your Cloudflare account, so only tick this if the account is just for afterwrd. You can
+  forget it here at any time.</span></label></li>`;
+  const rememberNow = remembered ? "" : `
+<details class="other" id="save"><summary>Make updating one click next time</summary>
+  <ol class="how">${fresh.replace("Remember it for future updates", "Remember it").replace('type="checkbox" id="remember"', 'type="checkbox" id="remember" checked hidden')}
+    <li><button id="keep">Remember this token</button></li></ol>
+</details>`;
   let body;
   if (latest.error) {
-    body = `<p>Couldn't check for a newer version: ${escape(latest.error)}</p>`;
+    body = `<p>Couldn't check for a newer version: ${escape(latest.error)}</p>${forget}${rememberNow}<p id="error" role="alert"></p>`;
   } else if (!available) {
-    body = `<p>You have the latest version.</p>`;
+    body = `<p>You have the latest version.</p>${forget}${rememberNow}<p id="error" role="alert"></p>`;
   } else {
     body = `
-<p><b>afterwrd ${escape(latest.version)} is available.</b> <a href="${escape(latest.page)}" target="_blank" rel="noopener">What's new</a></p>
-<p class="meta">Updating keeps everyone's access, your archive and your photos. It needs a Cloudflare API token, used only while
-updating and not kept.</p>
-<ol class="how">
-  <li><a class="button" href="${TOKEN_URL}" target="_blank" rel="noopener">Create a token</a>
-    <span class="meta">The permissions are filled in: scroll down, press <b>Continue to summary</b>, <b>Create Token</b>, and copy it.</span></li>
-  <li>Paste it here: <input id="token" type="text" autocomplete="off" spellcheck="false" placeholder="Your API token"></li>
+<p><b>afterwrd ${escape(latest.version)} is available.</b> <a href="${escape(latest.page)}" target="_blank" rel="noopener">On GitHub</a></p>
+${notes}
+<p class="meta">Updating keeps everyone's access, your archive and your photos.</p>
+${remembered ? `${forget}
+<p><button id="go" data-tag="${escape(latest.tag)}" data-version="${escape(latest.version)}">Update to ${escape(latest.version)}</button></p>
+<details class="other"><summary>Use a different token</summary><ol class="how">${fresh}</ol></details>` : `
+<p class="meta">It needs a Cloudflare API token:</p>
+<ol class="how">${fresh}
   <li><button id="go" data-tag="${escape(latest.tag)}" data-version="${escape(latest.version)}">Update to ${escape(latest.version)}</button></li>
-</ol>
+</ol>`}
 <ol id="log"></ol>
 <p id="error" role="alert"></p>
 <section id="done" class="card" hidden>
-  <p><b>Updated to ${escape(latest.version)}.</b> Now delete the token: afterwrd doesn't keep it, but while it exists it can
-  change your Workers.</p>
-  <p><a class="button secondary" href="${TOKENS_PAGE}" target="_blank" rel="noopener">Open my API tokens</a>
-     <a class="button" href="/_admin/update">Done</a></p>
+  <p><b>Updated to ${escape(latest.version)}.</b> <span id="done-remembered" hidden>Your token is remembered for next time.</span></p>
+  <p id="done-delete" hidden>Now delete the token: afterwrd doesn't keep it, but while it exists it can change your Workers.
+  <a class="button secondary" href="${TOKENS_PAGE}" target="_blank" rel="noopener">Open my API tokens</a></p>
+  <p><a class="button" href="/_admin/update">Done</a></p>
 </section>`;
   }
   return `<!doctype html>
@@ -116,7 +173,14 @@ updating and not kept.</p>
   #token { width: 100%; font: inherit; padding: 0.5rem; margin-top: 0.3rem; border: 1px solid var(--border); border-radius: 999px;
     background: var(--bg); color: var(--text); -webkit-text-security: disc; }
   #error { color: #d93025; }
-  #done[hidden] { display: none; }
+  #done[hidden], #done [hidden] { display: none; }
+  .notes h2 { margin: 0 0 0.4rem; font-size: 1rem; }
+  .notes p { margin: 0; white-space: pre-wrap; }
+  .remember { display: block; margin-top: 0.6rem; }
+  .remember .meta { display: block; margin: 0.2rem 0 0 1.5rem; }
+  .other { margin: 1rem 0; }
+  .other summary { cursor: pointer; color: var(--muted); }
+  button.link { padding: 0; border: 0; background: none; color: var(--accent-strong); font: inherit; text-decoration: underline; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -128,29 +192,62 @@ ${body}
 </main>
 <script>
   const go = document.getElementById("go");
+  const remembered = ${remembered};
+  async function post(path, body) {
+    const res = await fetch("/_admin/update/" + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Something went wrong.");
+    return data;
+  }
+  const forget = document.getElementById("forget");
+  if (forget) forget.addEventListener("click", async () => {
+    if (!confirm("Forget the remembered token? Next time you'll paste one again. Afterwards, delete the token in Cloudflare too.")) return;
+    try {
+      await post("forget", {});
+      location.assign("${TOKENS_PAGE}");
+    } catch (err) {
+      alert("Couldn't forget it: " + err.message + " You can also delete the secret UPDATE_TOKEN in the Worker's settings in Cloudflare.");
+    }
+  });
+  const keep = document.getElementById("keep");
+  if (keep) keep.addEventListener("click", async () => {
+    const error = document.getElementById("error");
+    const token = document.getElementById("token").value.trim();
+    error.textContent = "";
+    if (!token) { error.textContent = "Paste your API token first."; return; }
+    keep.disabled = true;
+    try {
+      await post("remember", { token });
+      await new Promise((r) => setTimeout(r, 3000)); // the site restarts with the secret
+      location.reload();
+    } catch (err) {
+      error.textContent = err.message;
+      keep.disabled = false;
+    }
+  });
   if (go) go.addEventListener("click", async () => {
     const error = document.getElementById("error");
     const box = document.getElementById("token");
-    const token = box.value.trim();
+    const token = box ? box.value.trim() : "";
+    const remember = Boolean(document.getElementById("remember")?.checked);
     const { tag, version } = go.dataset;
     const log = (text) => { const li = document.createElement("li"); li.textContent = text; document.getElementById("log").append(li); };
-    async function post(path, body) {
-      const res = await fetch("/_admin/update/" + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Something went wrong.");
-      return data;
-    }
     error.textContent = "";
-    if (!token) { error.textContent = "Paste your API token first."; return; }
+    if (!token && !remembered) { error.textContent = "Paste your API token first."; return; }
     go.disabled = true;
     try {
-      log("Checking the token…");
+      log(token ? "Checking the token…" : "Using your remembered token…");
       const { account } = await post("check", { token, tag });
       log("Uploading " + version + "'s site files…");
       const { jwt } = await post("assets", { token, account, tag });
       log("Installing " + version + "…");
       await post("deploy", { token, account, tag, jwt });
-      box.value = "";
+      if (token && remember) {
+        log("Remembering your token…");
+        await post("remember", { token });
+      }
+      if (box) box.value = "";
+      document.getElementById(remembered || (token && remember) ? "done-remembered" : "done-delete").hidden = false;
       log("Waiting for the new version to start…");
       for (let i = 0; i < 30; i++) {
         const res = await fetch("/_admin/update/version", { cache: "no-store" }).catch(() => null);
@@ -159,7 +256,9 @@ ${body}
       }
       document.getElementById("done").hidden = false;
     } catch (err) {
-      error.textContent = err.message;
+      // Cloudflare turning the remembered token away usually means it was deleted there.
+      error.textContent = err.message + (remembered && !token && /Cloudflare said|Couldn't find a Worker/.test(err.message)
+        ? " If you've deleted the remembered token in Cloudflare, use a different token below and tick Remember." : "");
       go.disabled = false;
     }
   });

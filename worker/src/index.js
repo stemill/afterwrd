@@ -26,15 +26,15 @@ const HEADERS = {
 };
 
 export default {
-  async fetch(request, env) {
-    const response = await route(request, env);
+  async fetch(request, env, work) {
+    const response = await route(request, env, work);
     const headers = new Headers(response.headers);
     for (const [name, value] of Object.entries(HEADERS)) headers.set(name, value);
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   },
 };
 
-async function route(request, env) {
+async function route(request, env, work) {
   await ensureSchema(env);
   const url = new URL(request.url);
   if (url.pathname.startsWith("/_auth/")) return handleAuth(request, env, url);
@@ -66,7 +66,7 @@ async function route(request, env) {
     response.headers.set("Cache-Control", "private, no-cache");
     return response;
   }
-  return renderArchive(request, env, url, user);
+  return renderArchive(request, env, url, user, work);
 }
 
 // A file's address is its contents' hash, so it can be cached for good.
