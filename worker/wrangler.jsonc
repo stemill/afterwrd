@@ -24,13 +24,12 @@
 		"bindings": [{ "name": "MEDIA", "class_name": "MediaStore" }]
 	},
 	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["MediaStore"] }],
-	// Created on first deploy if it doesn't exist yet.
+	// Found by name, or created on first deploy. (The installer creates its own, named after the Worker.)
 	"d1_databases": [
 		{
 			"binding": "DB",
 			"database_name": "heybert",
-			"migrations_dir": "migrations",
-			"database_id": "a9674acd-d970-4f99-8225-e42324d89687"
+			"migrations_dir": "migrations"
 		}
 	]
 }

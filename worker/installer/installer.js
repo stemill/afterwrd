@@ -118,7 +118,7 @@ async function release() {
 }
 
 async function file(hash) {
-  const bytes = await download(`${RELEASE}/files/${hash}`);
+  const bytes = await download(`${RELEASE}/${hash}`);
   if ((await sha256(bytes)) !== hash) throw new Error("A release file doesn't match its fingerprint, so nothing was installed.");
   return bytes;
 }

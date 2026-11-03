@@ -1,10 +1,39 @@
 # heybert
 
-A local web app for browsing a Facebook "Download your information" export:
-friends, posts, photos, comments and likes. Ads, messages, logins and the rest
-of the export are ignored.
+Your Facebook archive as a private website that only people you invite can see: your posts, photos and
+videos (and, if you choose, comments, likes and friends), with search. It runs in your own free Cloudflare
+account, so no one else holds your data, and setting it up needs no terminal, no GitHub account and no card.
 
-## Usage
+## Install your own
+
+You need your Facebook download and a free Cloudflare account. It takes about 15 minutes, most of it waiting
+for Facebook.
+
+1. **Get your Facebook download.** On Facebook: Settings → *Download your information* → choose your
+   profile, *All available information*, format **JSON**, media quality *High*. Facebook emails you when it's
+   ready (from minutes to a day); download the zip file(s).
+2. **Make a Cloudflare account** at <https://dash.cloudflare.com/sign-up>. An email address is all it asks
+   for; don't add a card.
+3. **Create a Worker.** In the Cloudflare dashboard: *Workers & Pages* → *Create* → *Start with Hello World*.
+   Name it what you like (it becomes your address, e.g. `heybert.<your-name>.workers.dev`) and press
+   *Deploy*. The first time, Cloudflare asks you to choose `<your-name>`.
+4. **Paste in the installer.** Download `installer.js` from the
+   [latest release](https://github.com/stemill/heybert/releases/latest), then in the Worker press
+   *Edit code*, delete everything there, paste the whole of `installer.js` and press *Deploy*.
+5. **Run it.** Open your Worker's address. Press **Create a token**: Cloudflare's token page opens with the
+   permissions filled in; scroll down, press *Continue to summary*, *Create Token*, and copy the token. Paste it
+   into the installer and press **Install heybert**.
+6. **Make yourself the owner.** The installer hands over to heybert: give your name and create a passkey
+   (your face, fingerprint or device PIN; there's no password).
+7. **Import.** Choose *Import* in the menu, pick your Facebook zip file(s), tick what to publish and press
+   *Import and publish*. Your browser reads the download; only what you tick is uploaded.
+8. **Invite people** from *People* in the menu: each gets a one-time link to make their own passkey.
+
+Afterwards you can delete the token (Cloudflare: *My Profile* → *API Tokens*); it's only used while
+installing. The installer checks every file it downloads against the fingerprint built into it, so what's
+installed is exactly the published release. Cloudflare's free plan allows 5 GB of photos and videos.
+
+## Browsing an export locally
 
 Request the export from Facebook in **JSON** format, unzip it, then:
 
@@ -18,7 +47,7 @@ and videos to `data/media/`, so the original export can be archived. Re-running
 it rebuilds the database from scratch. `data/` is git-ignored: it's personal.
 Set `HEYBERT_DATA` to keep it somewhere else.
 
-## Publishing to people you invite
+## Running and developing the Worker
 
 `worker/` is a Cloudflare Worker that shows your archive only to people who've signed in with a passkey.
 You import from a page on the site itself: your browser reads the Facebook download and uploads only the
@@ -64,6 +93,14 @@ default (posts and photos):
 
 Files over 95 MB (the most Cloudflare accepts in one upload) are left out with a note. The free plan allows
 5 GB of photos and videos in all.
+
+**Releasing.** In `worker/`, bump `version` in `package.json`, then:
+```sh
+npm run release -- --base https://github.com/stemill/heybert/releases/download/v<version>
+```
+Create a GitHub release with the tag `v<version>` and attach every file in `worker/release/<version>/`
+(the manifest, the files named by hash, and `installer.js`). The installer only accepts files matching the
+fingerprints it was built with, so the assets must be uploaded unchanged.
 
 **Testing.** `npm run test:ingest -- <export folder>` checks the browser importer against
 `uv run heybert-ingest` row by row. To try the site locally: `npx wrangler d1 migrations apply heybert --local`,

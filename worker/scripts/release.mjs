@@ -1,12 +1,12 @@
 // Packages a heybert release for the installer:
 //
-//   npm run release -- --base https://<where release/<version>/ will be published>
+//   npm run release -- --base https://github.com/<owner>/heybert/releases/download/v<version>
 //
-// writes release/<version>/:
+// writes release/<version>/, a flat folder so every file can be a GitHub release asset:
 //   manifest.json    the code modules and site files, each with its SHA-256, plus the Worker settings
-//   files/<sha256>   every file, named by its hash
+//   <sha256>         every file, named by its hash
 //   installer.js     the installer people paste into a new Worker, with the manifest's hash built in
-// Publish the folder at --base unchanged; the installer refuses anything that doesn't match.
+// Publish every file in the folder at --base unchanged; the installer refuses anything that doesn't match.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -28,7 +28,7 @@ const out = join(worker, "release", version);
 const dist = join(worker, "release", ".build");
 rmSync(out, { recursive: true, force: true });
 rmSync(dist, { recursive: true, force: true });
-mkdirSync(join(out, "files"), { recursive: true });
+mkdirSync(out, { recursive: true });
 
 const build = spawnSync("npx", ["wrangler", "deploy", "--dry-run", "--outdir", dist], { cwd: worker, encoding: "utf8" });
 if (build.status !== 0) {
@@ -44,7 +44,7 @@ const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 function add(bytes) {
   const hash = sha256(bytes);
-  writeFileSync(join(out, "files", hash), bytes);
+  writeFileSync(join(out, hash), bytes);
   return { sha256: hash, size: bytes.length };
 }
 
