@@ -104,7 +104,9 @@ async function run() {
   const { tables, me } = await ingest(source, { log: () => {} });
   progress(1, 1, `${me}: ${tables.posts.length.toLocaleString("en-GB")} posts, ${tables.media.length.toLocaleString("en-GB")} photos and videos`);
 
-  const { tables: publish, tooBig } = select(tables, sections, (m) => (source.has(m.file) ? source.size(m.file) : null));
+  const locations = document.getElementById("locations").checked;
+  const { tables: publish, tooBig } = select(tables, sections, (m) => (source.has(m.file) ? source.size(m.file) : null),
+    { locations });
   for (const [path, size] of tooBig) note(`Left out ${path} (${sizeText(size)}): too big for the site.`);
 
   step("Uploading photos and videos");

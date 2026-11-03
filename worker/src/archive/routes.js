@@ -330,11 +330,12 @@ async function friends(ctx, params) {
   if (show === "friends") f.add("p.friend_since IS NOT NULL");
   else if (show === "removed") f.add("p.unfriended_at IS NOT NULL");
   if (q) f.add("p.name LIKE ?", `%${q}%`);
-  const order = {
+  const orders = {
     name: "p.name COLLATE NOCASE",
     since: "p.friend_since IS NULL, p.friend_since",
     activity: "comments + reactions DESC, p.name COLLATE NOCASE",
-  }[sort] ?? "p.name COLLATE NOCASE";
+  };
+  const order = Object.hasOwn(orders, sort) ? orders[sort] : orders.name;
   const people = await all(ctx.db, `
     SELECT p.*,
       (SELECT COUNT(*) FROM comments c WHERE c.target_owner_id = p.id) AS comments,
@@ -354,7 +355,7 @@ async function person(ctx, params, id) {
   const countRows = await db.batch(keys.map((k) => db.prepare(`SELECT COUNT(*) AS n FROM (${PERSON_TABS[k][1]})`).bind(personId)));
   const counts = Object.fromEntries(keys.map((k, i) => [k, countRows[i].results[0].n]));
   let tab = params.get("tab") ?? "";
-  if (!PERSON_TABS[tab]) tab = keys.find((k) => counts[k]) ?? "comments";
+  if (!Object.hasOwn(PERSON_TABS, tab)) tab = keys.find((k) => counts[k]) ?? "comments";
   let { rows, paging } = await paginate(db, PERSON_TABS[tab][1], [personId], pageNumber(params));
   if (tab === "comments") rows = await loadComments(db, rows);
   else if (tab === "wall" || tab === "tags") rows = await loadPosts(db, rows);

@@ -54,6 +54,11 @@ header.site nav a, .tabs a {
 }
 header.site nav a[aria-current], .tabs a[aria-current] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 header.site nav a:hover, .tabs a:hover { text-decoration: none; background: var(--accent-soft); }
+/* Sign out is a small form, so another site can't sign people out with a link; it looks like the other links. */
+header.site nav form { display: contents; }
+header.site nav button.link { font: inherit; border: 0; background: none; padding: 0.3rem 0.7rem; border-radius: 999px;
+  color: var(--text); cursor: pointer; }
+header.site nav button.link:hover { background: var(--accent-soft); }
 
 main { max-width: 860px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
 

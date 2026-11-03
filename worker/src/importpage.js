@@ -49,7 +49,7 @@ export function importPage(owner) {
 <body>
 <header class="site">
   <a class="brand" href="/">heybert</a>
-  <nav><a href="/">← Back to the archive</a><a href="/_admin">People</a><a href="/_admin/import" aria-current="page">Import</a><a href="/_auth/logout">Sign out</a></nav>
+  <nav><a href="/">← Back to the archive</a><a href="/_admin">People</a><a href="/_admin/import" aria-current="page">Import</a><a href="/_admin/update">Update</a><form method="post" action="/_auth/logout"><button class="link">Sign out</button></form></nav>
 </header>
 <main>
 <h1>Import your Facebook archive</h1>
@@ -72,6 +72,14 @@ what's published now; visitors see the old version until the new one is complete
     ${label}<span>${about}</span></label>`).join("")}
   <p class="meta">Comments, likes and friends are mostly about other people, so they're off by default. Whatever
   you leave unticked stays on this computer.</p>
+</fieldset>
+
+<fieldset>
+  <legend>Privacy</legend>
+  <label><input type="checkbox" id="locations">
+    Photo locations<span>Where photos were taken, from the map positions your phone saved in them, and the
+    coordinates of check-ins. Off by default: they can show where you live. Place names you wrote in posts are kept
+    either way.</span></label>
 </fieldset>
 
 <button id="go" disabled>Import and publish</button>

@@ -6,8 +6,11 @@ import { MAX_FILE } from "./schema.js";
 export const SECTIONS = ["overview", "timeline", "posts", "photos", "comments", "likes", "friends"];
 export const DEFAULT_SECTIONS = ["posts", "photos"];
 
-/** `sizeOf(media)` gives a file's size in bytes, or null if it's missing. */
-export function select(tables, sections, sizeOf) {
+/**
+ * `sizeOf(media)` gives a file's size in bytes, or null if it's missing. Map coordinates (from photos' EXIF
+ * data and check-ins) are left out unless `locations` is set: they can give away where someone lives.
+ */
+export function select(tables, sections, sizeOf, { locations = false } = {}) {
   const on = (...names) => names.some((s) => sections.includes(s));
   const withMedia = (key) => new Set(tables.media.map((m) => m[key]));
 
@@ -59,8 +62,12 @@ export function select(tables, sections, sizeOf) {
       cover_media_id: mediaIds.has(p.cover_media_id) ? p.cover_media_id : null,
     }));
 
+  const placeless = (rows) => (locations ? rows : rows.map((r) => ({ ...r, latitude: null, longitude: null })));
   return {
-    tables: { people, albums, posts, post_tags: postTags, comments, reactions, media, tagged_photos: tagged },
+    tables: {
+      people, albums, posts: placeless(posts), post_tags: postTags, comments, reactions, media: placeless(media),
+      tagged_photos: tagged,
+    },
     tooBig,
   };
 }

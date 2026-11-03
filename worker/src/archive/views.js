@@ -29,8 +29,8 @@ function layout(ctx, { title, bodyClass = "", main }) {
     <nav>
       ${NAV.filter(([, , s]) => ctx.sections.includes(s)).map(([path, label]) =>
         html`<a href="/${path}" ${current(path) && raw('aria-current="page"')}>${label}</a>`)}
-      ${ctx.user.is_owner ? html`<a href="/_admin">People</a><a href="/_admin/import">Import</a>` : ""}
-      <a href="/_auth/logout">Sign out</a>
+      ${ctx.user.is_owner ? html`<a href="/_admin">People</a><a href="/_admin/import">Import</a><a href="/_admin/update">Update</a>` : ""}
+      <form method="post" action="/_auth/logout"><button class="link">Sign out</button></form>
     </nav>
   </header>
   ${main}
@@ -62,7 +62,7 @@ function mediaImg(m) {
   if (m.kind === "video") {
     return html`<video src="${mediaUrl(m)}#t=0.5" preload="metadata" muted playsinline></video><span class="play" aria-hidden="true"></span>`;
   }
-  return html`<img src="${thumbUrl(m)}" loading="lazy" alt="${m.description || ""}" ${m.width && raw(`width="${m.width}" height="${m.height}"`)}>`;
+  return html`<img src="${thumbUrl(m)}" loading="lazy" alt="${m.description || ""}" ${m.width && html`width="${Number(m.width)}" height="${Number(m.height)}"`}>`;
 }
 
 /** Rows of photos at a shared height, each keeping its own shape (like Google Photos). */
@@ -78,7 +78,7 @@ function collage(items) {
   const n = items.length;
   return html`<div class="collage collage-${Math.min(n, 4)}">
     ${items.slice(0, 4).map((m, i) => html`
-      <a href="/photos/${m.id}" class="tile" ${n === 1 && m.kind === "photo" && raw(`style="--bg-img: url('${thumbUrl(m)}')"`)}>
+      <a href="/photos/${m.id}" class="tile" ${n === 1 && m.kind === "photo" && html`style="--bg-img: url('${thumbUrl(m)}')"`}>
         ${mediaImg(m)}
         ${i === 3 && n > 4 && html`<span class="more">+${n - 4}</span>`}
       </a>`)}
@@ -360,7 +360,7 @@ export function photoPage(ctx, { m, setKey, setTitle, prev, next, index, total, 
 <main class="theatre">
   <section class="stage">
     ${m.kind === "video" ? html`<video src="${mediaUrl(m)}" controls autoplay playsinline preload="metadata"></video>`
-      : html`<img src="${mediaUrl(m)}" alt="${m.description || ""}" ${m.width && raw(`width="${m.width}" height="${m.height}"`)}
+      : html`<img src="${mediaUrl(m)}" alt="${m.description || ""}" ${m.width && html`width="${Number(m.width)}" height="${Number(m.height)}"`}
            style="background-image: url('${thumbUrl(m)}')">`}
 
     <a class="close" id="close" href="${back}" title="Back to ${setTitle} (Esc)" aria-label="Back to album">✕</a>

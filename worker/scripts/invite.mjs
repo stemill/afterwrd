@@ -12,7 +12,8 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 
-const INVITE_DAYS = 7;
+const INVITE_SECONDS = 7 * 86400;
+const OWNER_INVITE_SECONDS = 3600; // a link for the owner grants owner access, so it's short-lived
 
 const args = process.argv.slice(2);
 const local = take("--local");
@@ -32,12 +33,12 @@ switch (command) {
     }
     const [user] = sql(`INSERT INTO users (name, is_owner, created_at) VALUES (${quote(value)}, ${owner ? 1 : 0}, ${now})
                         RETURNING id`);
-    printInvite(user.id, value);
+    printInvite(user.id, value, owner);
     break;
   }
   case "again": {
     const user = findUser(value);
-    printInvite(user.id, user.name);
+    printInvite(user.id, user.name, user.is_owner);
     break;
   }
   case "list": {
@@ -70,18 +71,20 @@ switch (command) {
     fail("Commands: add <name> | again <id> | list | revoke <id>   (add --local for the dev server)");
 }
 
-function printInvite(userId, name) {
+function printInvite(userId, name, isOwner) {
+  const seconds = isOwner ? OWNER_INVITE_SECONDS : INVITE_SECONDS;
   if (!siteUrl) fail("Where is the site? Pass --url https://heybert.<you>.workers.dev or set HEYBERT_URL.");
   const token = randomBytes(32).toString("base64url");
   const hash = createHash("sha256").update(token).digest("hex");
-  sql(`INSERT INTO invites (token_hash, user_id, expires_at) VALUES ('${hash}', ${userId}, ${now + INVITE_DAYS * 86400})`);
-  console.log(`Invite for ${name} (works once, for ${INVITE_DAYS} days):\n\n  ${siteUrl}/_auth/invite/${token}\n`);
+  sql(`INSERT INTO invites (token_hash, user_id, expires_at) VALUES ('${hash}', ${userId}, ${now + seconds})`);
+  const lasts = isOwner ? "one hour, and gives OWNER access" : "7 days";
+  console.log(`Invite for ${name} (works once, for ${lasts}):\n\n  ${siteUrl}/_auth/invite/${token}\n`);
   console.log("Send it somewhere only they will see it; whoever opens it first gets in.");
 }
 
 function findUser(id) {
   if (!/^\d+$/.test(id ?? "")) fail("Give the person's number from: npm run invite -- list");
-  const [user] = sql(`SELECT id, name FROM users WHERE id = ${id} AND revoked_at IS NULL`);
+  const [user] = sql(`SELECT id, name, is_owner FROM users WHERE id = ${id} AND revoked_at IS NULL`);
   if (!user) fail(`No current person with number ${id}.`);
   return user;
 }

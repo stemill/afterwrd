@@ -33,6 +33,10 @@
   summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
   textarea { width: 100%; height: 260px; margin-top: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 8px;
     background: var(--bg); color: var(--text); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+  .safe { margin-top: 28px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }
+  .safe h2 { margin-top: 0; }
+  .safe ul { margin: 0; padding-left: 1.2rem; }
+  .safe li { margin: 0.4rem 0; }
   footer { margin-top: 28px; color: var(--muted); font-size: 0.85rem; }
   code { font-size: 0.9em; }
 </style>
@@ -80,6 +84,20 @@ free Cloudflare account: no one else holds your data, and there's nothing to pay
     then importing your Facebook zip and inviting people.</p>
   </li>
 </ol>
+
+<section class="safe">
+  <h2>Keeping it safe</h2>
+  <ul>
+    <li><b>Turn on two-factor authentication</b> for your Cloudflare account (My Profile → Authentication). Anyone who gets
+      into that account can see your whole archive.</li>
+    <li><b>Delete the installer's token</b> when it's finished (it reminds you). heybert doesn't keep it, but while it exists
+      it can change your Workers.</li>
+    <li><b>Send invite links somewhere only that person will see them.</b> Whoever opens a link first gets in. Under
+      <b>People → Devices &amp; links</b> you can cancel links that haven't been used, delete a passkey or sign someone out.</li>
+    <li><b>Photo locations are left out</b> unless you choose to include them when importing: they can show where you live.</li>
+    <li><b>Keep it up to date</b> from the <b>Update</b> page, so security fixes reach your site.</li>
+  </ul>
+</section>
 
 <footer>
   <p>The installer downloads heybert __VERSION__ from its <a href="__RELEASE_PAGE__">published release</a> and checks every file

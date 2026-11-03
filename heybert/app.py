@@ -14,6 +14,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from markupsafe import Markup, escape
 
 from heybert.config import DB_PATH, MEDIA_DIR, THUMB_DIR, thumb_name
@@ -24,6 +25,9 @@ PAGE_SIZE = 50
 PHOTO_PAGE_SIZE = 150
 
 app = FastAPI(title="heybert")
+# Only answer to this computer's own names, so a web page can't reach the archive by pointing its domain here
+# (DNS rebinding).
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 # The stylesheet is shared with the published site, which serves it from worker/public.
 app.mount("/static", StaticFiles(directory=HERE.parent / "worker" / "public" / "static"), name="static")
 app.mount("/media", StaticFiles(directory=MEDIA_DIR, check_dir=False), name="media")

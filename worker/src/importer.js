@@ -56,7 +56,7 @@ async function rows(env, { table, rows: list }) {
     if (!row || typeof row !== "object" || Object.keys(row).some((k) => !columns.includes(k))) {
       throw new Error(`Unexpected columns for ${table}.`);
     }
-    return `(${columns.map((c) => literal(row[c])).join(", ")})`;
+    return `(${columns.map((c) => literal(checked(table, c, spec.columns[c], row[c]))).join(", ")})`;
   });
   const statements = [];
   let batch = [];
@@ -75,6 +75,21 @@ async function rows(env, { table, rows: list }) {
   if (statements.length > 40) throw new Error("Too many rows in one request.");
   await env.DB.batch(statements.map((s) => env.DB.prepare(s)));
   return json({ ok: true });
+}
+
+// Every value must suit its column, so nothing unexpected (markup in a number, a fake file address) can reach
+// the pages even if the uploader were tampered with.
+function checked(table, column, type, value) {
+  if (value === null || value === undefined) return null;
+  const bad = () => new Error(`Unexpected value for ${table}.${column}.`);
+  if (type.startsWith("INTEGER")) {
+    if (!Number.isSafeInteger(value)) throw bad();
+  } else if (type.startsWith("REAL")) {
+    if (typeof value !== "number" || !Number.isFinite(value)) throw bad();
+  } else if (typeof value !== "string" || value.length > 1_000_000) throw bad();
+  if (table === "media" && (column === "hash" || column === "thumb_hash") && !HASH_RE.test(value)) throw bad();
+  if (table === "media" && column === "type" && !SERVABLE_TYPES.has(value)) throw bad();
+  return value;
 }
 
 function literal(value) {

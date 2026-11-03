@@ -10,8 +10,12 @@ import { ensureSchema } from "./migrate.js";
 
 export { MediaStore } from "./media.js";
 const HEADERS = {
-  "Content-Security-Policy": "frame-ancestors 'none'",
-  "Referrer-Policy": "no-referrer",
+  // No framing, plugins, <base> tricks or forms posting elsewhere. (Scripts aren't restricted: the pages use
+  // small inline scripts, and everything interpolated into a page is escaped.)
+  "Content-Security-Policy": "frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'",
+  // Other sites never learn where a visitor came from. (Not "no-referrer": that makes browsers send
+  // "Origin: null" on this site's own forms, which the cross-site check then refuses.)
+  "Referrer-Policy": "same-origin",
   "X-Content-Type-Options": "nosniff",
   "X-Robots-Tag": "noindex, nofollow",
 };

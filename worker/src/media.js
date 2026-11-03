@@ -28,7 +28,7 @@ export class MediaStore extends DurableObject {
     return hashes.filter((h) => this.sql.exec("SELECT 1 FROM files WHERE hash = ?", h).toArray().length);
   }
 
-  /** Delete every file not in `hashes`; returns how many went. */
+  /** Delete every file not in `hashes`, and any pieces left by uploads that never finished; returns how many went. */
   keepOnly(hashes) {
     const keep = new Set(hashes);
     let removed = 0;
@@ -38,6 +38,7 @@ export class MediaStore extends DurableObject {
       this.sql.exec("DELETE FROM files WHERE hash = ?", hash);
       removed++;
     }
+    this.sql.exec("DELETE FROM chunks WHERE hash NOT IN (SELECT hash FROM files)");
     return removed;
   }
 
@@ -50,7 +51,21 @@ export class MediaStore extends DurableObject {
   }
 
   // Streams the upload into chunks while hashing it; a file whose contents don't match its name is discarded.
+  // A file that's already stored is left alone, so a failed or duplicate upload can never damage it.
   async store(hash, request) {
+    if (this.sql.exec("SELECT 1 FROM files WHERE hash = ?", hash).toArray().length) {
+      await request.body?.cancel();
+      return Response.json({ ok: true, existing: true });
+    }
+    try {
+      return await this.receive(hash, request);
+    } catch (error) {
+      this.sql.exec("DELETE FROM chunks WHERE hash = ?", hash);
+      throw error;
+    }
+  }
+
+  async receive(hash, request) {
     const type = request.headers.get("Content-Type");
     const digest = new crypto.DigestStream("SHA-256");
     const hasher = digest.getWriter();

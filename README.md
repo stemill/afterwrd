@@ -38,6 +38,18 @@ Afterwards you can delete the token (Cloudflare: *My Profile* → *API Tokens*);
 installing. The installer checks every file it downloads against the fingerprint built into it, so what's
 installed is exactly the published release. Cloudflare's free plan allows 5 GB of photos and videos.
 
+### Keeping it safe
+
+- **Turn on two-factor authentication for your Cloudflare account** (My Profile → Authentication). Anyone who gets
+  into that account can see your whole archive.
+- **Delete the installer's token afterwards.** heybert doesn't keep it, but while it exists it can change your Workers.
+- **Send invite links somewhere only that person will see them**: whoever opens a link first gets in. Under
+  *People → Devices & links* you can cancel unused links, delete a passkey or sign someone out everywhere. Links for
+  your own account (to add a device) give owner access, so they last only an hour.
+- **Photo locations are left out** unless you tick *Photo locations* when importing; they can show where you live.
+- **Keep it up to date.** The owner's *Update* page installs a newer release, keeping everyone's access and your
+  archive. (Pasting a newer `installer.js` over your heybert Worker does the same.)
+
 ## Browsing an export locally
 
 Request the export from Facebook in **JSON** format, unzip it, then:

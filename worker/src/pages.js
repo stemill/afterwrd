@@ -142,6 +142,13 @@ this device, then you can import your Facebook download and invite people.</p>
   });`);
 }
 
+export function signOutPage() {
+  return page("Sign out", `
+<h1>Sign out?</h1>
+<p>You'll need your passkey to sign in again.</p>
+<form method="post" action="/_auth/logout"><button>Sign out</button></form>`);
+}
+
 export function messagePage(message, link = { href: "/_auth/login", label: "Go to sign in" }) {
   return page("heybert", `<p>${escape(message)}</p><a class="button" href="${link.href}">${escape(link.label)}</a>`);
 }

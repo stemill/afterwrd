@@ -9,6 +9,7 @@
 // Publish every file in the folder at --base unchanged; the installer refuses anything that doesn't match.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { build as bundle } from "esbuild";
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { extname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -89,7 +90,15 @@ const manifest = {
 const manifestBytes = Buffer.from(JSON.stringify(manifest, null, 2));
 writeFileSync(join(out, "manifest.json"), manifestBytes);
 
-const installer = readFileSync(join(worker, "installer", "installer.js"), "utf8")
+// The installer and the deploy code it shares with the Update page (src/deploy.js), as one file people can
+// paste. Bundling drops comments, so the installer's opening explanation is put back as a header.
+const installerPath = join(worker, "installer", "installer.js");
+const header = readFileSync(installerPath, "utf8").match(/^(\/\/.*\n)+/)[0];
+const bundled = await bundle({
+  entryPoints: [installerPath], bundle: true, format: "esm", target: "es2022", write: false, legalComments: "none",
+  banner: { js: header },
+});
+const installer = bundled.outputFiles[0].text
   .replaceAll("__RELEASE_BASE__", base)
   .replaceAll("__MANIFEST_SHA256__", sha256(manifestBytes))
   .replaceAll("__VERSION__", version);
