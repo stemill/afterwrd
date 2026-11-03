@@ -1,9 +1,11 @@
 // The archive's pages, ported from the routes in afterwrd/app.py and reading the D1 copy that
 // `npm run publish` uploads. Only the sections chosen at publish time are served.
 import { findTarget, latestComments, loadThreads, newCount, photoKey, postKey } from "./comments.js";
-import { loadFeed } from "../feed.js";
+import { connectionById, loadFeed, markMine } from "../feed.js";
+import * as friend from "../friends.js";
 import { ownerName } from "../peers.js";
 import { SITE_ID } from "../posts.js";
+import { profilePictures } from "../photos.js";
 import { updateWaiting } from "../update.js";
 import { now } from "../util.js";
 import { fmtDate, fmtMonth } from "./format.js";
@@ -50,6 +52,11 @@ const ROUTES = [
   [/^\/people\/(\d+)$/, "friends", person],
   [/^\/activity$/, null, activity],
   [/^\/feed$/, null, feed],
+  [/^\/friend\/(\d+)$/, null, friendHome],
+  [/^\/friend\/(\d+)\/posts$/, null, friendPosts],
+  [/^\/friend\/(\d+)\/photos$/, null, friendPhotos],
+  [/^\/friend\/(\d+)\/photos\/album\/(\d+|other|videos)$/, null, friendAlbum],
+  [/^\/friend\/(\d+)\/photos\/([0-9a-f]{64})$/, null, friendPhoto],
 ];
 
 export async function renderArchive(request, env, url, user, work) {
@@ -69,7 +76,11 @@ export async function renderArchive(request, env, url, user, work) {
     db, url, user, chosen, sections, newComments: await newCount(db, user),
     updateWaiting: user.is_owner ? await updateWaiting(env, work) : false,
     me: me.results[0] ?? { id: -1, name: await ownerName(db), is_me: 1 },
+    profile: await profilePictures(db),
   };
+  // A profile picture or cover chosen here takes over from Facebook's.
+  if (ctx.profile.profile) Object.assign(ctx.me, { profile_hash: ctx.profile.profile.hash, profile_media_id: ctx.profile.profile.id });
+  if (ctx.profile.cover) Object.assign(ctx.me, { cover_hash: ctx.profile.cover.hash, cover_media_id: ctx.profile.cover.id });
 
   if (url.pathname === "/" && !sections.includes("overview")) {
     return Response.redirect(`${url.origin}/${sections[0]}`, 302);
@@ -265,7 +276,7 @@ async function likes(ctx, params) {
 }
 
 /** Filter for a photo set: an album id, 'other' (unalbumed photos) or 'videos'. */
-function mediaSet(key) {
+export function mediaSet(key) {
   if (key === "videos") return { title: "Videos", where: "album_id IS NULL AND kind = 'video'", params: [] };
   if (key === "other") return { title: "Other photos", where: "album_id IS NULL AND kind = 'photo'", params: [] };
   if (/^\d+$/.test(key)) return { title: null, where: "album_id = ?", params: [Number(key)] };
@@ -427,4 +438,47 @@ async function feed(ctx) {
 async function photoByHash(ctx, params, hash) {
   const m = await first(ctx.db, "SELECT id FROM media WHERE hash = ? ORDER BY id LIMIT 1", [hash]);
   return m ? Response.redirect(`${ctx.url.origin}/photos/${m.id}${ctx.url.hash}`, 302) : null;
+}
+
+// --- a connected friend's posts and photos, read from their site (friends.js) ---------------------------------------
+
+/** Only the owner reads friends' sites from here; `load` gets the connection and returns the page. */
+async function fromFriend(ctx, id, load) {
+  if (!ctx.user.is_owner) return null;
+  const connection = await connectionById(ctx.db, id);
+  if (!connection) return null;
+  try {
+    return await load(connection);
+  } catch (error) {
+    return views.friendProblem(ctx, connection, error.message);
+  }
+}
+
+async function friendHome(ctx, params, id) {
+  return Response.redirect(`${ctx.url.origin}/friend/${id}/posts`, 302);
+}
+
+async function friendPosts(ctx, params, id) {
+  return fromFriend(ctx, id, async (c) => {
+    const { posts, paging, avatar, cover } = await friend.friendPosts(c, pageNumber(params));
+    Object.assign(c, { avatar, cover });
+    for (const p of posts) p.comments = await markMine(ctx.db, c.id, p.comments);
+    return views.friendPostsPage(ctx, c, { posts, paging });
+  });
+}
+
+async function friendPhotos(ctx, params, id) {
+  return fromFriend(ctx, id, async (c) => views.friendPhotosPage(ctx, c, await friend.friendAlbums(c)));
+}
+
+async function friendAlbum(ctx, params, id, key) {
+  return fromFriend(ctx, id, async (c) => views.friendAlbumPage(ctx, c, await friend.friendAlbum(c, key, pageNumber(params))));
+}
+
+async function friendPhoto(ctx, params, id, hash) {
+  return fromFriend(ctx, id, async (c) => {
+    const m = await friend.friendPhoto(c, hash);
+    m.comments = await markMine(ctx.db, c.id, m.comments);
+    return views.friendPhotoPage(ctx, c, m);
+  });
 }

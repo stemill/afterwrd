@@ -215,7 +215,7 @@ on their site, as part of their archive. Disconnecting ends all of it at once.</
 ${connections.length ? `<table class="numbers">
   <thead><tr><th>Friend</th><th>Site</th><th>Since</th><th></th></tr></thead>
   <tbody>${connections.map((c) => `<tr>
-    <th>${escape(c.name)}</th>
+    <th><a href="/friend/${c.id}/posts">${escape(c.name)}</a></th>
     <td><a href="${escape(c.origin)}" target="_blank" rel="noopener noreferrer">${escape(host(c.origin))}</a></td>
     <td>${day(c.connected_at)}</td>
     <td><a class="chip" href="/_feed/visit?to=${encodeURIComponent(c.origin)}">Visit</a>

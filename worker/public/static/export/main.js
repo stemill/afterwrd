@@ -3,7 +3,7 @@
 // the browser allows it (Chrome, Edge) and in memory otherwise.
 /* global zip */
 import {
-  actorId, commentAuthor, commentId, commentNote, CONTEXT, iso, mediaObject, postId, postKey, tidy,
+  actorId, commentAuthor, commentId, commentNote, CONTEXT, iso, mediaObject, postId, postKey, targetId, tidy,
 } from "../activity.js";
 
 const SITE_POSTS_FROM = 1_000_000_000; // posts written on afterwrd (src/posts.js)
@@ -58,6 +58,11 @@ function documents(t) {
   const media = (m) => mediaObject(site, m, { "afterwrd:file": fileFor(m) });
   const person = (id) => (people.get(id) ? { type: "Person", name: people.get(id).name } : undefined);
   const link = (url) => (url ? { type: "Link", href: url } : undefined);
+  const picture = (key, fallbackId) => {
+    const chosen = t.settings.find((s) => s.key === key)?.value;
+    const m = (chosen && byHash.get(chosen)) || t.media.find((x) => x.id === fallbackId && x.hash);
+    return m ? media(m) : undefined;
+  };
 
   // Comments written on this site, by what they're on.
   const threads = new Map();
@@ -117,10 +122,9 @@ function documents(t) {
       url: actorId(site),
       name: owner.name,
       "afterwrd:facebookName": me?.name,
-      icon: me?.profile_media_id && t.media.find((m) => m.id === me.profile_media_id)?.hash
-        ? media(t.media.find((m) => m.id === me.profile_media_id)) : undefined,
-      image: me?.cover_media_id && t.media.find((m) => m.id === me.cover_media_id)?.hash
-        ? media(t.media.find((m) => m.id === me.cover_media_id)) : undefined,
+      // The picture and cover chosen on afterwrd, or else Facebook's.
+      icon: picture("profile_hash", me?.profile_media_id),
+      image: picture("cover_hash", me?.cover_media_id),
       "afterwrd:sections": JSON.parse(t.settings.find((s) => s.key === "sections")?.value ?? "[]"),
     },
     "posts.json": collection(posts, { name: "Posts" }),
@@ -173,7 +177,7 @@ function documents(t) {
         type: "Note",
         id: commentId(c.site, c.target, c.remote_id),
         attributedTo: actorId(site),
-        inReplyTo: postId(c.site, c.target),
+        inReplyTo: targetId(c.site, c.target),
         published: iso(c.created_at),
         mediaType: "text/plain",
         content: c.text,

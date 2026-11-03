@@ -2,19 +2,23 @@
 // through the import's file endpoints first):
 //   POST /_admin/posts                {text, photos: [{hash, thumb_hash, width, height, size}]}
 //   POST /_admin/posts/<id>/delete    a form on the post itself
-// They're kept in site_posts and site_photos and copied into the archive's tables by mirror().
+// They're kept in site_posts and site_photos (with albums in site_albums, photos.js) and copied into the archive's
+// tables by mirror().
 import { photoKey, postKey } from "./archive/comments.js";
 import { HASH_RE, mediaStore } from "./media.js";
 import { json, now } from "./util.js";
 
 // Copies take ids from here up, far beyond any an import gives out.
 export const SITE_ID = 1_000_000_000;
-const ALBUM = "Posted on afterwrd";
+const ALBUM = "Posted on afterwrd"; // photos posted without an album of their own
 const MAX_TEXT = 5000;
 const MAX_PHOTOS = 20;
 const MAX_SIDE = 20_000;
 
-/** Statements that rebuild the archive's copy of the owner's posts; run with every change and every import. */
+/**
+ * Statements that rebuild the archive's copy of the owner's posts, albums and photos; run with every change and
+ * every import. A site album n becomes album SITE_ID + n; SITE_ID itself is "Posted on afterwrd".
+ */
 export function mirror(db) {
   return [
     db.prepare("DELETE FROM posts WHERE id >= ?").bind(SITE_ID),
@@ -23,15 +27,53 @@ export function mirror(db) {
     db.prepare(`INSERT INTO posts (id, timestamp, kind, title, text)
       SELECT ?1 + p.id, p.created_at,
         CASE WHEN EXISTS (SELECT 1 FROM site_photos f WHERE f.post_id = p.id) THEN 'photo' ELSE 'status' END,
-        'Posted on afterwrd.', p.text
+        COALESCE(p.title, 'Posted on afterwrd.'), p.text
       FROM site_posts p`).bind(SITE_ID),
     db.prepare(`INSERT INTO media (id, path, kind, timestamp, width, height, album_id, post_id, hash, thumb_hash, size, type)
-      SELECT ?1 + f.id, 'afterwrd/' || f.hash || '.jpg', 'photo', p.created_at, f.width, f.height, ?1, ?1 + p.id,
+      SELECT ?1 + f.id, 'afterwrd/' || f.hash || '.jpg', 'photo', COALESCE(f.created_at, p.created_at), f.width, f.height,
+        CASE WHEN f.album_id IS NULL THEN ?1 ELSE ?1 + f.album_id END, CASE WHEN f.post_id IS NULL THEN NULL ELSE ?1 + f.post_id END,
         f.hash, f.thumb_hash, f.size, 'image/jpeg'
-      FROM site_photos f JOIN site_posts p ON p.id = f.post_id`).bind(SITE_ID),
+      FROM site_photos f LEFT JOIN site_posts p ON p.id = f.post_id`).bind(SITE_ID),
     db.prepare(`INSERT INTO albums (id, name, last_modified, cover_media_id)
       SELECT ?1, ?2, MAX(timestamp), MAX(id) FROM media WHERE album_id = ?1 HAVING COUNT(*) > 0`).bind(SITE_ID, ALBUM),
+    db.prepare(`INSERT INTO albums (id, name, description, last_modified, cover_media_id)
+      SELECT ?1 + a.id, a.name, a.description,
+        (SELECT MAX(timestamp) FROM media WHERE album_id = ?1 + a.id), (SELECT MAX(id) FROM media WHERE album_id = ?1 + a.id)
+      FROM site_albums a`).bind(SITE_ID),
   ];
+}
+
+/** An error message if these uploaded photos' details aren't right, or they aren't all stored yet; else null. */
+export async function checkPhotos(env, photos, max = MAX_PHOTOS) {
+  if (!Array.isArray(photos) || photos.length > max) return `Up to ${max} photos at a time.`;
+  const side = (n) => Number.isSafeInteger(n) && n > 0 && n <= MAX_SIDE;
+  if (!photos.every((f) => f && HASH_RE.test(f.hash) && HASH_RE.test(f.thumb_hash) && side(f.width) && side(f.height)
+    && Number.isSafeInteger(f.size) && f.size > 0)) {
+    return "Unexpected photo details.";
+  }
+  const hashes = [...new Set(photos.flatMap((f) => [f.hash, f.thumb_hash]))];
+  const stored = (await Promise.all([...new Set(hashes.map((h) => h[0]))].map((shard) =>
+    mediaStore(env, shard).has(hashes.filter((h) => h[0] === shard))))).flat();
+  return stored.length === hashes.length ? null : "Some photos didn't finish uploading. Try again.";
+}
+
+/** Statements adding photos (in order) to the newest site post if `inPost`, and to a site album if given. */
+export function addPhotos(db, photos, { inPost = false, albumId = null } = {}) {
+  return photos.map((f) => db.prepare(`INSERT INTO site_photos (post_id, album_id, hash, thumb_hash, width, height, size, created_at)
+    VALUES (${inPost ? "(SELECT MAX(id) FROM site_posts)" : "NULL"}, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(albumId, f.hash, f.thumb_hash, f.width, f.height, f.size, now()));
+}
+
+/** Deletes stored files nothing in the archive uses any more (a photo can share a file with an imported one). */
+export async function removeUnusedFiles(env, files) {
+  files = [...new Set(files.filter(Boolean))];
+  if (!files.length) return;
+  const marks = files.map(() => "?").join(",");
+  const { results: used } = await env.DB.prepare(`SELECT hash FROM media WHERE hash IN (${marks})
+    UNION SELECT thumb_hash FROM media WHERE thumb_hash IN (${marks})`).bind(...files, ...files).all();
+  const unused = files.filter((h) => !used.some((u) => u.hash === h));
+  await Promise.all([...new Set(unused.map((h) => h[0]))].map((shard) =>
+    mediaStore(env, shard).remove(unused.filter((h) => h[0] === shard))));
 }
 
 export async function handlePosts(request, env, url) {
@@ -47,51 +89,35 @@ async function create(env, body) {
   const text = typeof body.text === "string" ? body.text.replace(/\r\n?/g, "\n").trim() : "";
   const photos = Array.isArray(body.photos) ? body.photos : [];
   if (text.length > MAX_TEXT) return json({ error: `Posts can be up to ${MAX_TEXT} characters.` }, 400);
-  if (photos.length > MAX_PHOTOS) return json({ error: `Up to ${MAX_PHOTOS} photos in a post.` }, 400);
   if (!text && !photos.length) return json({ error: "Write something or add a photo." }, 400);
-  const side = (n) => Number.isSafeInteger(n) && n > 0 && n <= MAX_SIDE;
-  if (!photos.every((f) => f && HASH_RE.test(f.hash) && HASH_RE.test(f.thumb_hash) && side(f.width) && side(f.height)
-    && Number.isSafeInteger(f.size) && f.size > 0)) {
-    return json({ error: "Unexpected photo details." }, 400);
-  }
-  // Every file must already be in the media store.
-  const hashes = [...new Set(photos.flatMap((f) => [f.hash, f.thumb_hash]))];
-  const stored = (await Promise.all([...new Set(hashes.map((h) => h[0]))].map((shard) =>
-    mediaStore(env, shard).has(hashes.filter((h) => h[0] === shard))))).flat();
-  if (stored.length !== hashes.length) return json({ error: "Some photos didn't finish uploading. Try again." }, 400);
-
-  // One transaction: the post, its photos (in order) and the archive's copy.
+  const problem = await checkPhotos(env, photos);
+  if (problem) return json({ error: problem }, 400);
+  // One transaction: the post, its photos and the archive's copy.
   await db.batch([
     db.prepare("INSERT INTO site_posts (created_at, text) VALUES (?, ?)").bind(now(), text || null),
-    ...photos.map((f) => db.prepare(`INSERT INTO site_photos (post_id, hash, thumb_hash, width, height, size)
-      VALUES ((SELECT MAX(id) FROM site_posts), ?, ?, ?, ?, ?)`).bind(f.hash, f.thumb_hash, f.width, f.height, f.size)),
+    ...addPhotos(db, photos, { inPost: true }),
     ...mirror(db),
   ]);
   return json({ ok: true });
 }
 
-// Deletes the post, its photos' files (unless something else uses the same file) and the comments on them.
+// Deletes the post and the comments on it. Its photos go too (files included, unless something else uses them),
+// apart from any that were added to an album, which stay there.
 async function remove(env, url, id) {
   const db = env.DB;
   const post = await db.prepare("SELECT * FROM posts WHERE id = ?").bind(SITE_ID + id).first();
   if (post && id > 0) {
-    const { results: photos } = await db.prepare("SELECT * FROM media WHERE post_id = ? AND id >= ?").bind(post.id, SITE_ID).all();
-    const targets = [postKey(post), ...photos.map(photoKey)];
+    const { results: photos } = await db.prepare("SELECT * FROM site_photos WHERE post_id = ?").bind(id).all();
+    const going = photos.filter((f) => f.album_id === null);
+    const targets = [postKey(post), ...going.map(photoKey)];
     await db.batch([
       db.prepare(`DELETE FROM site_comments WHERE target IN (${targets.map(() => "?").join(",")})`).bind(...targets),
-      db.prepare("DELETE FROM site_photos WHERE post_id = ?").bind(id),
+      db.prepare("DELETE FROM site_photos WHERE post_id = ? AND album_id IS NULL").bind(id),
+      db.prepare("UPDATE site_photos SET post_id = NULL WHERE post_id = ?").bind(id),
       db.prepare("DELETE FROM site_posts WHERE id = ?").bind(id),
       ...mirror(db),
     ]);
-    const files = [...new Set(photos.flatMap((m) => [m.hash, m.thumb_hash]))];
-    if (files.length) {
-      const marks = files.map(() => "?").join(",");
-      const { results: used } = await db.prepare(`SELECT hash FROM media WHERE hash IN (${marks})
-        UNION SELECT thumb_hash FROM media WHERE thumb_hash IN (${marks})`).bind(...files, ...files).all();
-      const unused = files.filter((h) => !used.some((u) => u.hash === h));
-      await Promise.all([...new Set(unused.map((h) => h[0]))].map((shard) =>
-        mediaStore(env, shard).remove(unused.filter((h) => h[0] === shard))));
-    }
+    await removeUnusedFiles(env, going.flatMap((f) => [f.hash, f.thumb_hash]));
   }
   return Response.redirect(`${url.origin}/posts`, 303);
 }

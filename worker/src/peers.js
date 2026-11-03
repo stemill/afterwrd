@@ -2,19 +2,20 @@
 //   GET  /_peer/hello?from=<origin>     who's here; only mid-connect, to prove to <origin> the key is ours for it
 //   GET  /_peer/feed                    the owner's newest posts written on afterwrd, with the owner's comments
 //                                       and the caller's own (not those of other visitors or other friends)
-//   GET  /_peer/files/<sha256>          a photo or thumbnail from one of those posts
-//   POST /_peer/comments                a Note inReplyTo one of those posts: their owner comments on it
+//   GET  /_peer/posts?page=n            everything a visiting friend could read, through share.js:
+//   GET  /_peer/albums                    posts, albums, an album's photos, one photo; files come as signed links
+//   GET  /_peer/albums/<key>?page=n
+//   GET  /_peer/photos/<sha256>
+//   POST /_peer/comments                a Note inReplyTo a post or photo here: their owner comments on it
 //   POST /_peer/comments/<n>/delete     their owner deletes a comment they made
 //   POST /_peer/ticket                  {next}: a one-time pass for their owner to come in and look round (auth.js)
 //   POST /_peer/disconnect              they've disconnected
 // The feed and comments are ActivityStreams (public/static/activity.js). Only posts written on afterwrd are
 // shared, never the imported archive. Plus the helpers for calling other sites.
-import {
-  actorId, commentAuthor, commentId, commentNote, CONTEXT, iso, mediaObject, POST_KEY_RE, postId, seconds, tidy,
-} from "../public/static/activity.js";
-import { findTarget, loadThreads, MAX_COMMENT, postKey } from "./archive/comments.js";
-import { HASH_RE, mediaStore } from "./media.js";
+import { actorId, commentId, CONTEXT, POST_KEY_RE, postId, tidy } from "../public/static/activity.js";
+import { findTarget, MAX_COMMENT } from "./archive/comments.js";
 import { SITE_ID } from "./posts.js";
+import { notes, ownerActor, shareAlbum, shareAlbums, sharePhoto, sharePosts } from "./share.js";
 import { json, now, randomToken, sha256 } from "./util.js";
 
 const FEED_POSTS = 30;
@@ -115,7 +116,15 @@ export async function handlePeer(request, env, url) {
   }
   if (!peer?.connected_at) return json({ error: "Not connected." }, 401);
 
-  if (route === "GET /_peer/feed") return json(await feed(db, url.origin, peer));
+  if (route === "GET /_peer/feed") return json(await feed(env, url.origin));
+  const page = Math.max(1, Number.parseInt(url.searchParams.get("page"), 10) || 1);
+  if (route === "GET /_peer/posts") return json(await sharePosts(env, url.origin, page, await ownerName(db)));
+  if (route === "GET /_peer/albums") return json(await shareAlbums(env, url.origin));
+  const shared = /^GET \/_peer\/(albums\/(\d+|other|videos)|photos\/([0-9a-f]{64}))$/.exec(route);
+  if (shared) {
+    const found = shared[2] ? await shareAlbum(env, url.origin, shared[2], page) : await sharePhoto(env, url.origin, shared[3]);
+    return found ? json(found) : json({ error: "That isn't there any more." }, 404);
+  }
   if (route === "POST /_peer/disconnect") {
     // The owner's copies of what they said on that site (comments_elsewhere) stay: they're theirs.
     await db.batch([...forgetFriend(db, peer.origin), db.prepare("DELETE FROM connections WHERE id = ?").bind(peer.id)]);
@@ -132,22 +141,16 @@ export async function handlePeer(request, env, url) {
     return json({ url: `${url.origin}/_auth/friend?ticket=${token}` });
   }
 
-  const file = /^GET \/_peer\/files\/([0-9a-f]{64})$/.exec(route);
-  if (file) {
-    const shared = await db.prepare("SELECT 1 FROM media WHERE id >= ? AND (hash = ?2 OR thumb_hash = ?2)").bind(SITE_ID, file[1]).first();
-    if (!shared) return new Response("Not found", { status: 404 });
-    const stored = await mediaStore(env, file[1]).fetch(new Request(`https://media/${file[1]}`));
-    return new Response(stored.body, stored);
-  }
-
   if (route === "POST /_peer/comments") {
     const note = await request.json().catch(() => ({}));
     const text = note?.type === "Note" && typeof note.content === "string" ? note.content.replace(/\r\n?/g, "\n").trim() : "";
     if (!text || text.length > MAX_COMMENT) return json({ error: `Comments need 1 to ${MAX_COMMENT} characters.` }, 400);
-    const prefix = postId(url.origin, "");
-    const target = typeof note.inReplyTo === "string" && note.inReplyTo.startsWith(prefix) ? note.inReplyTo.slice(prefix.length) : "";
-    const found = POST_KEY_RE.test(target) && (await findTarget(db, target));
-    if (!found?.post || found.post.id < SITE_ID) return json({ error: "That post isn't there any more." }, 404);
+    // Connected friends can comment on anything here they can see: a post, or a photo.
+    const reply = typeof note.inReplyTo === "string" ? note.inReplyTo : "";
+    const target = reply.startsWith(postId(url.origin, "")) ? reply.slice(postId(url.origin, "").length)
+      : reply.startsWith(`${url.origin}/photos/sha256/`) ? `photo-${reply.slice(`${url.origin}/photos/sha256/`.length)}` : "";
+    const found = (POST_KEY_RE.test(target) || /^photo-[0-9a-f]{64}$/.test(target)) && (await findTarget(db, target));
+    if (!found) return json({ error: "That isn't there any more." }, 404);
     const [recent, today] = await db.batch([
       db.prepare("SELECT COUNT(*) AS n FROM site_comments WHERE origin = ? AND created_at > ?").bind(peer.origin, now() - RATE.seconds),
       db.prepare("SELECT COUNT(*) AS n FROM site_comments WHERE origin = ? AND created_at > ?").bind(peer.origin, now() - 86400),
@@ -169,68 +172,15 @@ export async function handlePeer(request, env, url) {
 }
 
 /** The owner's newest afterwrd posts as an OrderedCollection of Notes, each with its photos and replies. */
-async function feed(db, site, peer) {
-  const owner = { type: "Person", id: actorId(site), name: await ownerName(db) };
-  const { results: posts } = await db.prepare("SELECT * FROM posts WHERE id >= ? ORDER BY timestamp DESC, id DESC LIMIT ?")
+/** The owner's newest afterwrd posts as an OrderedCollection of Notes, each with its photos and comments. */
+async function feed(env, site) {
+  const { results: posts } = await env.DB.prepare("SELECT * FROM posts WHERE id >= ? ORDER BY timestamp DESC, id DESC LIMIT ?")
     .bind(SITE_ID, FEED_POSTS).all();
-  const ids = posts.map((p) => p.id);
-  const { results: photos } = ids.length ? await db.prepare(`SELECT * FROM media
-    WHERE id >= ? AND post_id IN (${ids.map(() => "?").join(",")}) ORDER BY id`).bind(SITE_ID, ...ids).all() : { results: [] };
-  const keys = posts.map(postKey);
-  const threads = await loadThreads(db, keys);
   return tidy({
     "@context": CONTEXT,
     type: "OrderedCollection",
-    attributedTo: owner,
+    attributedTo: await ownerActor(env, site, await ownerName(env.DB)),
     totalItems: posts.length,
-    orderedItems: posts.map((p, i) => {
-      // Visitors commented for this site's eyes, and other friends for this owner's; neither is passed on.
-      const replies = threads.get(keys[i]).filter((c) => c.author_is_owner || c.origin === peer.origin);
-      return {
-        type: "Note",
-        id: postId(site, keys[i]),
-        attributedTo: owner.id,
-        published: iso(p.timestamp),
-        mediaType: "text/plain",
-        content: p.text ?? "",
-        attachment: photos.filter((m) => m.post_id === p.id).map((m) => mediaObject(site, m)),
-        replies: { type: "Collection", totalItems: replies.length, items: replies.map((c) => commentNote(site, c, commentAuthor(site, c))) },
-      };
-    }),
+    orderedItems: await notes(env, site, posts),
   });
-}
-
-/**
- * A friend's feed as their site (`site`) sent it, in the shape Feed shows: only well-formed parts, and only
- * addresses on their own site.
- */
-export function cleanFeed(data, site) {
-  const text = (v, max) => (typeof v === "string" && v.length <= max ? v : null);
-  const own = (url, prefix) => (typeof url === "string" && url.startsWith(site + prefix) ? url.slice(site.length + prefix.length) : null);
-  const items = Array.isArray(data?.orderedItems) ? data.orderedItems.slice(0, 50) : [];
-  const posts = [];
-  for (const note of items) {
-    const key = own(note?.id, "/posts/");
-    const created = seconds(note?.published);
-    if (note?.type !== "Note" || !POST_KEY_RE.test(key ?? "") || created === null) continue;
-    const photos = (Array.isArray(note.attachment) ? note.attachment.slice(0, 20) : []).flatMap((m) => {
-      const hash = own(m?.url, "/files/");
-      const thumb = own(m?.preview?.url, "/files/");
-      const size = (n) => Number.isSafeInteger(n) && n > 0;
-      return m?.type === "Image" && HASH_RE.test(hash ?? "") && HASH_RE.test(thumb ?? "") && size(m.width) && size(m.height)
-        ? [{ hash, thumb_hash: thumb, width: m.width, height: m.height, kind: "photo" }] : [];
-    });
-    // Which comments are the owner's own is decided here (feed.js), not taken from their site.
-    const replies = Array.isArray(note.replies?.items) ? note.replies.items.slice(0, 300) : [];
-    const comments = replies.flatMap((c) => {
-      const n = /^#c(\d{1,15})$/.exec((typeof c?.id === "string" && c.id.startsWith(note.id) && c.id.slice(note.id.length)) || "");
-      const name = typeof c?.attributedTo === "string" ? (c.attributedTo === actorId(site) ? data.attributedTo?.name : null)
-        : c?.attributedTo?.name;
-      const at = seconds(c?.published);
-      return c?.type === "Note" && n && text(name, 100) && text(c.content, MAX_COMMENT) && at !== null
-        ? [{ id: Number(n[1]), name, text: c.content, created_at: at }] : [];
-    });
-    posts.push({ key, created_at: created, text: text(note.content, 5000) || null, photos, comments });
-  }
-  return { name: text(data?.attributedTo?.name, 100), posts };
 }

@@ -17,7 +17,7 @@ const NAV = [["", "Overview", "overview"], ["timeline", "Timeline", "timeline"],
 
 function layout(ctx, { title, bodyClass = "", main }) {
   const top = ctx.url.pathname.split("/")[1];
-  const currentSection = { "": "overview", people: "friends" }[top] ?? top;
+  const currentSection = { "": "overview", people: "friends", friend: "feed" }[top] ?? top;
   return html`<!doctype html>
 <html lang="en-GB">
 <head>
@@ -288,9 +288,33 @@ function composer() {
 <script type="module" src="${asset("/static/compose.js")}"></script>`;
 }
 
+/** The top of Posts, which is the owner's profile: cover, picture and name (with ways to change them, for the owner). */
+function profileHeader(ctx) {
+  const { profile, cover } = ctx.profile;
+  const owner = ctx.user.is_owner;
+  if (!profile && !cover) {
+    return owner ? html`<p class="card profile-prompt">Make this page yours:
+  <a class="chip" href="/_admin/photos/add?for=profile">Add a profile picture</a>
+  <a class="chip" href="/_admin/photos/add?for=cover">Add a cover photo</a></p>` : "";
+  }
+  return html`<section class="profile">
+  <div class="cover-wrap">
+    ${cover ? html`<a class="cover" href="/photos/${cover.id}"><img src="/files/${cover.hash}" alt="Cover photo"></a>` : raw('<div class="cover"></div>')}
+    ${owner && html`<a class="chip change-cover" href="/_admin/photos/add?for=cover">${cover ? "Change cover" : "Add a cover"}</a>`}
+  </div>
+  <div class="identity">
+    ${profile ? html`<a class="avatar" href="/photos/${profile.id}"><img src="/files/${profile.thumb_hash ?? profile.hash}" alt="Profile picture"></a>`
+      : owner && html`<a class="avatar empty" href="/_admin/photos/add?for=profile" title="Add a profile picture" aria-label="Add a profile picture">+</a>`}
+    <div><p class="name">${ctx.me.name}</p>
+      ${owner && profile && html`<a class="meta" href="/_admin/photos/add?for=profile">Change picture</a>`}</div>
+  </div>
+</section>`;
+}
+
 export function postsPage(ctx, { posts, paging, q, year, kind, years, kinds }) {
   const fresh = paging.page === 1 && !q && !year && !kind;
   return page(ctx, "Posts", html`
+${fresh && profileHeader(ctx)}
 <h1>Posts</h1>
 ${ctx.user.is_owner && fresh && composer()}
 <form class="filters">
@@ -346,7 +370,10 @@ export function photosPage(ctx, { byYear, collections, tagged }) {
     ? html`<video src="${mediaUrl(m)}#t=0.5" preload="metadata" muted playsinline></video>`
     : html`<img src="${thumbUrl(m)}" loading="lazy" alt="">`;
   return page(ctx, "Photos", html`
-<h1>Photos &amp; videos</h1>
+<div class="feed-head">
+  <h1>Photos &amp; videos</h1>
+  ${ctx.user.is_owner && html`<a class="chip primary" href="/_admin/photos/add">${raw(icon("photos"))}<span>Add photos</span></a>`}
+</div>
 
 <div class="albums">
   ${collections.map((c) => html`
@@ -382,12 +409,27 @@ ${byYear.map(([year, albums]) => html`
 }
 
 export function albumPage(ctx, { key, title, info, stats, groups, paging }) {
+  const mine = ctx.user.is_owner && Number(key) > SITE_ID; // an album made here, not imported or "Posted on afterwrd"
   return page(ctx, title, html`
 <p class="crumbs"><a href="/photos">Photos</a> /</p>
 <header class="album-head">
   <h1>${title}</h1>
   <p class="meta">${number(stats.count)} ${key === "videos" ? "videos" : "photos"} · ${dateRange(stats.first_ts, stats.last_ts)}</p>
   ${info?.description && html`<p>${info.description}</p>`}
+  ${mine && html`<div class="album-tools">
+    <a class="chip primary" href="/_admin/photos/add?album=${key}">${raw(icon("photos"))}<span>Add photos</span></a>
+    <details class="edit-album"><summary class="chip">Edit</summary>
+      <form class="card" method="post" action="/_admin/albums/${key}/edit">
+        <input name="name" value="${title}" maxlength="200" required aria-label="Album name">
+        <textarea name="description" rows="2" maxlength="2000" placeholder="What's it about? (optional)" aria-label="Album description">${info?.description ?? ""}</textarea>
+        <button class="chip primary">Save</button>
+      </form>
+    </details>
+    <form method="post" action="/_admin/albums/${key}/delete"
+      onsubmit="return confirm('Delete this album and its photos? Photos that are also in a post stay, under Posted on afterwrd.')">
+      <button class="chip danger">Delete album</button>
+    </form>
+  </div>`}
 </header>
 ${groups.map(([month, items]) => html`${month && html`<h2 class="month">${month}</h2>`}${justified(items)}`)}
 ${(paging.page > 1 || paging.hasNext) && pager(ctx, paging)}`, "wide");
@@ -439,6 +481,15 @@ export function photoPage(ctx, { m, setKey, setTitle, prev, next, index, total, 
         <dd><a href="https://www.openstreetmap.org/?mlat=${m.latitude}&amp;mlon=${m.longitude}#map=15/${m.latitude}/${m.longitude}" target="_blank" rel="noopener noreferrer">View on map ↗</a></dd>`}
     </dl>
 
+    ${ctx.user.is_owner && m.hash && html`<div class="photo-tools">
+      ${m.kind === "photo" && ["profile", "cover"].map((role) => html`<form method="post" action="/_admin/profile">
+        <input type="hidden" name="role" value="${role}"><input type="hidden" name="hash" value="${m.hash}">
+        <input type="hidden" name="back" value="${ctx.url.pathname}">
+        <button class="chip">${role === "profile" ? "Make profile picture" : "Make cover"}</button>
+      </form>`)}
+      ${m.id >= SITE_ID && html`<form method="post" action="/_admin/photos/${m.id}/delete"
+        onsubmit="return confirm('Delete this photo and its comments? This can’t be undone.')"><button class="chip danger">Delete photo</button></form>`}
+    </div>`}
     ${key && html`<h2>Comments</h2>${thread(ctx, key, comments)}`}
     ${post && html`<h2>Posted with</h2>${postCard(ctx, post)}`}
     ${comment && html`<h2>Attached to your comment</h2>${commentCard(ctx, comment)}`}
@@ -566,52 +617,170 @@ export function feedPage(ctx, { posts, connections, unreachable }) {
 <p class="meta">New posts from friends' afterwrd sites you're connected with. Only you see this page.</p>
 ${unreachable.map((u) => html`<p class="notice">Couldn't load ${u.connection.name}'s posts: ${u.error}</p>`)}
 ${connections.length
-    ? feed(posts, (p) => feedCard(ctx, p), "No posts from your connections yet. New ones will appear here.")
+    ? feed(posts, (p) => remoteCard(ctx, p.connection, p), "No posts from your connections yet. New ones will appear here.")
     : html`<div class="empty">
   <p>Connect with friends who have their own afterwrd site to see their new posts here.</p>
   <a class="chip primary" href="/_admin/connections">${raw(icon("connections"))}<span>Connect with a friend</span></a>
 </div>`}`);
 }
 
-/** A post from a friend's site; photos come through this site, and comments go to theirs. */
-function feedCard(ctx, p) {
-  const c = p.connection;
-  const file = (hash) => `/_feed/files/${c.id}/${hash}`;
+// --- a connected friend's posts and photos, read from their site (friends.js) ----------------------------------
+
+const friendBase = (c) => `/friend/${c.id}`;
+
+/** A photo or video from a friend's site: its signed link loads straight from there. */
+function remoteMedia(m, { full = false } = {}) {
+  if (m.kind === "video") {
+    return full ? html`<video src="${m.src}" controls autoplay playsinline preload="metadata"></video>`
+      : html`<video src="${m.src}#t=0.5" preload="metadata" muted playsinline></video><span class="play" aria-hidden="true"></span>`;
+  }
+  return html`<img src="${full ? m.src : m.thumbSrc}" ${full && html`style="background-image: url('${m.thumbSrc}')"`} loading="${full ? "eager" : "lazy"}"
+    alt="${m.description || ""}" ${m.width && html`width="${m.width}" height="${m.height}"`}>`;
+}
+
+/** Comments on a friend's post or photo; yours are sent to their site (feed.js), which keeps them. */
+function remoteThread(ctx, c, target, comments) {
+  const back = ctx.url.pathname + ctx.url.search;
+  return html`<section class="thread" id="t-${target}" aria-label="Comments">
+  ${comments.map((r) => html`<div class="comment" id="r${c.id}-${r.id}">
+    <span class="who who-${r.mine ? ctx.user.id % 6 : r.id % 6}" aria-hidden="true">${initial(r.mine ? ctx.user.name : r.name)}</span>
+    <div class="bubble"><strong>${r.mine ? ctx.user.name : r.name}</strong>${!r.mine && r.from && html`<span class="from">${host(r.from)}</span>`}<span class="said">${linkify(r.text)}</span></div>
+    <div class="under">
+      <time title="${fmtDatetime(r.created_at)}">${fmtAgo(r.created_at)}</time>
+      ${r.mine && html`<form method="post" action="/_feed/comments/${c.id}/${r.id}/delete" onsubmit="return confirm('Delete this comment?')">
+        <input type="hidden" name="back" value="${back}"><button>Delete</button>
+      </form>`}
+    </div>
+  </div>`)}
+  <form class="say" method="post" action="/_feed/comments">
+    <input type="hidden" name="connection" value="${c.id}">
+    <input type="hidden" name="target" value="${target}">
+    <input type="hidden" name="back" value="${back}">
+    <textarea name="text" rows="1" maxlength="${MAX_COMMENT}" required placeholder="Write a comment…" aria-label="Write a comment"></textarea>
+    <button>Post</button>
+  </form>
+</section>`;
+}
+
+/** A post from a friend's site, in Feed or on their posts page. */
+/** A friend's profile picture, or the first letter of their name. */
+const friendFace = (c) => (c.avatar
+  ? html`<img class="who" src="${c.avatar.thumbSrc}" alt="" aria-hidden="true">`
+  : html`<span class="who who-${c.id % 6}" aria-hidden="true">${initial(c.name)}</span>`);
+
+function remoteCard(ctx, c, p, { thread = true } = {}) {
   const n = p.photos.length;
+  const what = p.title && p.title !== "Posted on afterwrd." ? summary(p.title, c.name) : "";
   return html`<article class="card from-friend">
   <header>
-    <span class="who who-${c.id % 6}" aria-hidden="true">${initial(c.name)}</span>
-    <span class="what"><strong>${c.name}</strong>
-      <a class="meta" href="/_feed/visit?to=${encodeURIComponent(c.origin)}" title="Look round ${c.name}'s site">${host(c.origin)}</a></span>
+    ${friendFace(c)}
+    <span class="what"><a href="${friendBase(c)}/posts"><strong>${c.name}</strong></a>
+      <span class="meta">${what || host(c.origin)}</span></span>
     <time title="${fmtDatetime(p.created_at)}">${fmtAgo(p.created_at)}</time>
   </header>
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
   ${n > 0 && html`<div class="collage collage-${Math.min(n, 4)}">
     ${p.photos.slice(0, 4).map((m, i) => html`
-      <a href="${file(m.hash)}" class="tile" target="_blank" ${n === 1 && html`style="--bg-img: url('${file(m.thumb_hash)}')"`}>
-        <img src="${file(m.thumb_hash)}" loading="lazy" alt="" width="${m.width}" height="${m.height}">
+      <a href="${friendBase(c)}/photos/${m.hash}" class="tile" ${n === 1 && m.kind === "photo" && html`style="--bg-img: url('${m.thumbSrc}')"`}>
+        ${remoteMedia(m)}
         ${i === 3 && n > 4 && html`<span class="more">+${n - 4}</span>`}
       </a>`)}
   </div>`}
-  <section class="thread" aria-label="Comments">
-    ${p.comments.map((r) => html`<div class="comment" id="r${c.id}-${r.id}">
-      <span class="who who-${r.mine ? ctx.user.id % 6 : r.id % 6}" aria-hidden="true">${initial(r.mine ? ctx.user.name : r.name)}</span>
-      <div class="bubble"><strong>${r.mine ? ctx.user.name : r.name}</strong><span class="said">${linkify(r.text)}</span></div>
-      <div class="under">
-        <time title="${fmtDatetime(r.created_at)}">${fmtAgo(r.created_at)}</time>
-        ${r.mine && html`<form method="post" action="/_feed/comments/${c.id}/${r.id}/delete" onsubmit="return confirm('Delete this comment?')">
-          <button>Delete</button>
-        </form>`}
-      </div>
-    </div>`)}
-    <form class="say" method="post" action="/_feed/comments">
-      <input type="hidden" name="connection" value="${c.id}">
-      <input type="hidden" name="target" value="${p.key}">
-      <textarea name="text" rows="1" maxlength="${MAX_COMMENT}" required placeholder="Write a comment…" aria-label="Write a comment"></textarea>
-      <button>Post</button>
-    </form>
-  </section>
+  ${safeUrl(p.link_url) && !(p.text || "").includes(p.link_url) &&
+    html`<p class="link"><a href="${p.link_url}" target="_blank" rel="noopener noreferrer">${p.link_url}</a></p>`}
+  ${p.place && html`<p class="meta">📍 ${p.place}</p>`}
+  ${p.tags?.length > 0 && html`<p class="meta">With ${p.tags.join(", ")}</p>`}
+  ${thread && remoteThread(ctx, c, p.key, p.comments)}
 </article>`;
+}
+
+function friendHead(ctx, c, tab) {
+  return html`
+${c.cover && html`<section class="profile"><div class="cover"><img src="${c.cover.src}" alt=""></div></section>`}
+<div class="feed-head">
+  <h1 class="friend-name">${c.avatar && html`<img class="avatar-small" src="${c.avatar.thumbSrc}" alt="">`}${c.name}</h1>
+  <a class="chip" href="/_feed/visit?to=${encodeURIComponent(c.origin)}" title="Go to ${c.name}'s site">${raw(icon("home"))}<span>Visit their site</span></a>
+</div>
+<p class="meta">${host(c.origin)} · a friend you're connected with. Only you see this here.</p>
+<nav class="tabs">
+  ${[["posts", "Posts"], ["photos", "Photos"]].map(([key, label]) =>
+    html`<a href="${friendBase(c)}/${key}" ${key === tab && raw('aria-current="page"')}>${label}</a>`)}
+</nav>`;
+}
+
+export function friendPostsPage(ctx, c, { posts, paging }) {
+  return page(ctx, c.name, html`
+${friendHead(ctx, c, "posts")}
+${feed(posts, (p) => remoteCard(ctx, c, p), "Nothing posted yet.")}
+${(paging.page > 1 || paging.hasNext) && pager(ctx, paging)}`);
+}
+
+export function friendPhotosPage(ctx, c, albums) {
+  return page(ctx, `${c.name}: photos`, html`
+${friendHead(ctx, c, "photos")}
+${albums.length ? html`<div class="albums">
+  ${albums.map((a) => html`
+  <a class="album" href="${friendBase(c)}/photos/album/${a.key}">
+    <div class="cover">${a.cover && (a.cover.kind === "video"
+      ? html`<video src="${a.cover.src}#t=0.5" preload="metadata" muted playsinline></video>`
+      : html`<img src="${a.cover.thumbSrc}" loading="lazy" alt="">`)}</div>
+    <div class="label">
+      <strong>${a.name}</strong>
+      <span>${number(a.count)} · ${dateRange(a.first_ts, a.last_ts)}</span>
+    </div>
+  </a>`)}
+</div>` : html`<p class="empty">No photos yet.</p>`}`, "wide");
+}
+
+export function friendAlbumPage(ctx, c, album) {
+  return page(ctx, album.name, html`
+<p class="crumbs"><a href="${friendBase(c)}/photos">${c.name}'s photos</a> /</p>
+<header class="album-head">
+  <h1>${album.name}</h1>
+  <p class="meta">${number(album.total)} · ${dateRange(album.first_ts, album.last_ts)}</p>
+  ${album.description && html`<p>${album.description}</p>`}
+</header>
+<div class="justified">
+  ${album.media.map((m) => html`<a href="${friendBase(c)}/photos/${m.hash}" class="tile" style="--r: ${aspect(m)}" title="${fmtDate(m.timestamp)}">${remoteMedia(m)}</a>`)}
+</div>
+${(album.paging.page > 1 || album.paging.hasNext) && pager(ctx, album.paging)}`, "wide");
+}
+
+export function friendPhotoPage(ctx, c, m) {
+  const back = m.album ? `${friendBase(c)}/photos/album/${m.album.key}` : `${friendBase(c)}/photos`;
+  const main = html`
+<main class="theatre">
+  <section class="stage">
+    ${remoteMedia(m, { full: true })}
+    <a class="close" id="close" href="${back}" title="Back (Esc)" aria-label="Back to album">✕</a>
+    ${m.album && html`<span class="counter">${m.album.index} / ${m.album.total}</span>`}
+    ${m.prev && html`<a class="nav prev" id="prev" href="${friendBase(c)}/photos/${m.prev}" title="Previous (←)" aria-label="Previous"></a>`}
+    ${m.next && html`<a class="nav next" id="next" href="${friendBase(c)}/photos/${m.next}" title="Next (→)" aria-label="Next"></a>`}
+  </section>
+  <aside class="info">
+    <a class="album-link" href="${back}">${m.album?.name ?? `${c.name}'s photos`}</a>
+    <time class="when">${fmtDatetime(m.timestamp)}</time>
+    <p class="meta"><a href="${friendBase(c)}/posts">${c.name}</a> · ${host(c.origin)}</p>
+    ${m.description && !(m.post && m.post.text === m.description) && html`<div class="caption">${linkify(m.description)}</div>`}
+    <h2>Comments</h2>
+    ${remoteThread(ctx, c, `photo-${m.hash}`, m.comments)}
+    ${m.post && html`<h2>Posted with</h2>${remoteCard(ctx, c, m.post, { thread: false })}`}
+  </aside>
+</main>
+<script>
+  document.addEventListener('keydown', e => {
+    if (e.target.matches('input, textarea, select') || e.metaKey || e.ctrlKey) return;
+    const link = document.getElementById({ ArrowLeft: 'prev', ArrowRight: 'next', Escape: 'close' }[e.key]);
+    if (link) link.click();
+  });
+</script>`;
+  return layout(ctx, { title: m.album?.name ?? c.name, bodyClass: "viewer", main });
+}
+
+export function friendProblem(ctx, c, message) {
+  return page(ctx, c.name, html`
+${friendHead(ctx, c, "")}
+<p class="notice">Couldn't load this from ${c.name}'s site: ${message}</p>`);
 }
 
 

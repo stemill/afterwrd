@@ -5,6 +5,7 @@ import { handleConnections } from "./connect.js";
 import { handleExport } from "./export.js";
 import { asset, ownerHeader } from "./nav.js";
 import { handleImport } from "./importer.js";
+import { handlePhotos } from "./photos.js";
 import { handlePosts } from "./posts.js";
 import { handleUpdate } from "./update.js";
 import { escape, html, json, now, randomToken, sha256 } from "./util.js";
@@ -24,6 +25,7 @@ export async function handleAdmin(request, env, url, owner) {
     return handleUpdate(request, env, url, owner);
   }
   if (url.pathname === "/_admin/posts" || url.pathname.startsWith("/_admin/posts/")) return handlePosts(request, env, url);
+  if (/^\/_admin\/(photos|albums|profile)(\/|$)/.test(url.pathname)) return handlePhotos(request, env, url);
   if (url.pathname === "/_admin/export" || url.pathname.startsWith("/_admin/export/")) return handleExport(request, env, url);
   if (url.pathname === "/_admin/connections" || url.pathname.startsWith("/_admin/connections/")) {
     return handleConnections(request, env, url);

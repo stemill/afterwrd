@@ -102,6 +102,10 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   until the new one is complete.
 - **People** invites someone (copy or share their one-time link), sends a fresh link for a new phone or lost
   passkey, and revokes access, which signs the person out at once and deletes their passkeys.
+- **Photos and albums.** *Add photos* (on Photos) puts photos into a new or existing album, optionally shared
+  as a post so friends see them in Feed. Albums you make can be renamed, described or deleted, and photos added
+  here can be deleted. Any photo can be made your profile picture or cover, or upload one for it; they head
+  your Posts page, and friends see your picture beside your posts.
 - **New posts.** The owner can write posts on the site, with up to 20 photos, from the box at the top of
   *Posts*. Photos are resized to at most 2560px in the browser before uploading, which also removes the
   details phones hide in them (such as where a photo was taken), and they're collected in a *Posted on
@@ -120,8 +124,9 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   link under *Feed → Connections* and send it to them; they open it, say where their site is, and confirm there.
   Connections are mutual, and make you friends: *Feed* (only the owner sees it) shows the newest posts written on
   each connected site, comments you make there are stored on your friend's site with a copy kept on yours, and
-  either of you can look round the other's whole site (everything published, as an invited person would) by
-  coming in through your own: *Visit* in Feed or Connections, or "Connected friend?" on their sign-in page.
+  either of you can read the other's posts and photos without leaving your own site (press their name), or
+  look round their whole site by coming in through your own: *Visit*, or "Connected friend?" on their sign-in
+  page. Their photos and videos load straight from their site through links it signs, which last an hour or two.
   No invite or passkey is needed, and disconnecting ends it at once. Invites stay for people without a site. Sites exchange posts
   and comments as ActivityStreams too. Only posts written on
   afterwrd are shared, never an imported archive. Either side can disconnect. Two sites in the same Cloudflare

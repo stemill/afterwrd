@@ -12,6 +12,7 @@ import { handleFeed } from "./feed.js";
 import { HASH_RE, mediaStore } from "./media.js";
 import { ensureSchema } from "./migrate.js";
 import { handlePeer } from "./peers.js";
+import { signedFor } from "./share.js";
 
 export { MediaStore } from "./media.js";
 const HEADERS = {
@@ -41,8 +42,15 @@ async function route(request, env, work) {
   // A friend's Connect link, and their site's calls once connected, which carry a key instead of a session.
   if (url.pathname.startsWith("/_connect/")) return handleConnectLink(request, env, url);
   if (url.pathname.startsWith("/_peer/")) return handlePeer(request, env, url);
-
   const reading = request.method === "GET" || request.method === "HEAD";
+  const [, top, rest] = url.pathname.split("/");
+  // A photo or video a connected friend's site was given a signed link to (share.js): no session needed until it
+  // expires, and only that one file.
+  if (reading && top === "files" && HASH_RE.test(rest ?? "") && url.searchParams.has("sig")) {
+    const left = await signedFor(env, rest, url.searchParams);
+    return left ? serveFile(request, env, rest, `private, max-age=${left}`) : new Response("This link has expired", { status: 403 });
+  }
+
   const user = await currentUser(request, env);
   if (!user) {
     if (!reading) return new Response("Not signed in", { status: 401 });
@@ -57,7 +65,6 @@ async function route(request, env, work) {
   }
   if (!reading) return new Response("Method not allowed", { status: 405 });
 
-  const [, top, rest] = url.pathname.split("/");
   if (top === "files" && HASH_RE.test(rest ?? "")) return serveFile(request, env, rest);
   if (top === "static") {
     const asset = await env.ASSETS.fetch(request);
@@ -69,13 +76,13 @@ async function route(request, env, work) {
   return renderArchive(request, env, url, user, work);
 }
 
-// A file's address is its contents' hash, so it can be cached for good.
-async function serveFile(request, env, hash) {
+// A file's address is its contents' hash, so it can be cached for good (or, through a signed link, while it lasts).
+async function serveFile(request, env, hash, cacheControl = "private, max-age=31536000, immutable") {
   const stored = await mediaStore(env, hash).fetch(new Request(`https://media/${hash}`, {
     method: request.method,
     headers: ["Range", "If-None-Match"].filter((h) => request.headers.has(h)).map((h) => [h, request.headers.get(h)]),
   }));
   const response = new Response(stored.body, stored);
-  if (stored.ok || stored.status === 304) response.headers.set("Cache-Control", "private, max-age=31536000, immutable");
+  if (stored.ok || stored.status === 304) response.headers.set("Cache-Control", cacheControl);
   return response;
 }

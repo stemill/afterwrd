@@ -9,7 +9,8 @@ import { html, json } from "./util.js";
 
 const PAGE = 1000;
 const TABLES = {
-  settings: { columns: "key, value", where: "key = 'sections'" }, // the rest are the site's own keys
+  // The rest of settings are the site's own keys.
+  settings: { columns: "key, value", where: "key IN ('sections', 'profile_hash', 'cover_hash')" },
   people: { columns: "*" },
   albums: { columns: "*" },
   posts: { columns: "*" },
