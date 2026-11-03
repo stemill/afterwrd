@@ -106,14 +106,10 @@ def page_url(request: Request, page: int):
     return f"{url.path}?{url.query}"
 
 
-# heybert.export narrows these when publishing: only the chosen sections get nav entries and links, and
-# search/filter forms are hidden because a static site can't answer them.
-SECTIONS = ("overview", "timeline", "posts", "photos", "comments", "likes", "friends")
-
 templates.env.filters.update(dt=fmt_datetime, date=fmt_date, month=fmt_month, linkify=linkify, safe_url=safe_url,
                              summary=summary, thumb=thumb_url, aspect=aspect)
 templates.env.globals.update(date_range=date_range)
-templates.env.globals.update(emoji=EMOJI, page_url=page_url, sections=SECTIONS, published=False)
+templates.env.globals.update(emoji=EMOJI, page_url=page_url)
 
 
 # --- data access -------------------------------------------------------------

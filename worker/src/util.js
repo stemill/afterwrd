@@ -10,8 +10,11 @@ export function html(body, status = 200) {
   return new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
 }
 
+const ENTITIES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&#34;", "'": "&#39;" };
+
+// Same output as Jinja's escaping, so pages match the local app's.
 export function escape(text) {
-  return String(text).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  return String(text).replace(/[&<>"']/g, (c) => ENTITIES[c]);
 }
 
 export function randomToken() {

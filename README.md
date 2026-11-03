@@ -20,9 +20,11 @@ Set `HEYBERT_DATA` to keep it somewhere else.
 
 ## Publishing to people you invite
 
-`heybert-export` renders the site to static files in `data/site/`. `worker/` is a Cloudflare Worker that
-serves them only to people who've signed in with a passkey. Cloudflare's free plan covers it with no card
-needed: Workers, static assets and D1 only, no R2 or Zero Trust.
+`worker/` is a Cloudflare Worker that shows your archive only to people who've signed in with a passkey.
+`npm run publish` copies the parts of `data/heybert.db` you choose into the Worker's D1 database, and the
+photos they use into static files. The Worker builds pages from the database, so search and filters work as
+they do locally. Cloudflare's free plan covers it with no card needed: Workers, static assets and D1 only,
+no R2 or Zero Trust.
 
 **One-off setup.** Every command below runs in `worker/`.
 
@@ -52,12 +54,17 @@ needed: Workers, static assets and D1 only, no R2 or Zero Trust.
 After re-importing your archive, run `npm run publish` again. It exports the site, updates the database
 tables, then deploys. `npm run invite` still has `list`, `again` and `revoke` for use from the terminal.
 
-**What's published.** Only pages reachable from the chosen sections, and the media they show. Search and
-filter boxes are left out, because a static site can't answer them. Files over 25 MB (Cloudflare's limit)
-are skipped with a warning. Friends, likes and comments aren't published by default, because they're
-mostly about other people.
+**What's published.** Only what the chosen sections show; the rest never leaves your computer. With the
+default (posts and photos):
+- comments are published only when a photo is attached to them;
+- likes and your friends list stay on your computer;
+- people appear by name only where a post or photo mentions them, without friendship dates.
 
-**Testing locally:** `npm run dev` in `worker/`, then `npm run invite -- add "Test" --owner --local`.
+Choose more with `npm run publish -- --sections all`, or a list from overview, timeline, posts, photos,
+comments, likes and friends. Files over 25 MB (Cloudflare's limit) are left out with a warning.
+
+**Testing locally:** in `worker/`, run `npm run publish -- --local` to load the local database, then
+`npm run dev` and `npm run invite -- add "Test" --owner --local`.
 Passkeys work on `http://localhost:8787` but not on `127.0.0.1`.
 
 ## What the import does

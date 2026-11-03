@@ -3,7 +3,6 @@
 {% block title %}Likes{% endblock %}
 {% block content %}
 <h1>Likes &amp; reactions</h1>
-{% if not published %}
 <form class="filters">
   <input type="search" name="q" value="{{ q }}" placeholder="Search people or groups">
   <select name="reaction" onchange="this.form.submit()">
@@ -13,7 +12,6 @@
   {{ ui.year_select(years, year) }}
   <button>Search</button>
 </form>
-{% endif %}
 
 <ul class="reactions">
   {% for r in reactions %}{{ ui.reaction_row(r) }}{% else %}<li class="empty">No reactions match.</li>{% endfor %}

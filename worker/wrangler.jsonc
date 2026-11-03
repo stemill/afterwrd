@@ -6,8 +6,9 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
-	// The site from `uv run heybert-export`. run_worker_first sends every request through the login check,
-	// and the Worker picks exact files itself, so Cloudflare's own HTML and 404 handling is off.
+	// Photos, videos, thumbnails and the stylesheet, gathered by `npm run publish` (pages are built from D1).
+	// run_worker_first sends every request through the login check, and the Worker picks exact files itself,
+	// so Cloudflare's own HTML and 404 handling is off.
 	"assets": {
 		"directory": "../data/site",
 		"binding": "ASSETS",

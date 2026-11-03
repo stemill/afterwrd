@@ -4,7 +4,6 @@
 {% block content %}
 <h1>Comments</h1>
 <p class="meta">Everything you've commented, including on other people's posts and photos that aren't in this export.</p>
-{% if not published %}
 <form class="filters">
   <input type="search" name="q" value="{{ q }}" placeholder="Search text, people or groups">
   <select name="kind" onchange="this.form.submit()">
@@ -14,7 +13,6 @@
   {{ ui.year_select(years, year) }}
   <button>Search</button>
 </form>
-{% endif %}
 
 <div class="feed">
   {% for c in comments %}{{ ui.comment_card(c) }}{% else %}<p class="empty">No comments match.</p>{% endfor %}

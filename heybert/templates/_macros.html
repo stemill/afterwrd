@@ -1,13 +1,12 @@
 {% macro person_link(id, name) -%}
   {%- if id == me.id -%}you
-  {%- elif id and 'friends' in sections -%}<a href="/people/{{ id }}">{{ name }}</a>
+  {%- elif id -%}<a href="/people/{{ id }}">{{ name }}</a>
   {%- else -%}{{ name }}{%- endif -%}
 {%- endmacro %}
 
 {% macro owner_phrase(owner_id, owner_name, author_id=None) -%}
   {%- if owner_id and (owner_id == me.id or owner_id == author_id) -%}your own
-  {%- elif owner_id and 'friends' in sections -%}<a href="/people/{{ owner_id }}">{{ owner_name }}</a>'s
-  {%- elif owner_id -%}{{ owner_name }}'s
+  {%- elif owner_id -%}<a href="/people/{{ owner_id }}">{{ owner_name }}</a>'s
   {%- else -%}a{%- endif -%}
 {%- endmacro %}
 
