@@ -51,8 +51,8 @@ export async function handleAuth(request, env, url) {
     if (route === "POST /_auth/register/verify") return await registerVerify(request, env, url, body);
     if (route === "POST /_auth/login/options") return await loginOptions(env, url);
     if (route === "POST /_auth/login/verify") return await loginVerify(request, env, url, body);
-    if (route === "GET /_auth/friend") return await friendWelcome(env, url);
-    if (route === "POST /_auth/friend") return await friendSignIn(env, url, body);
+    if (route === "GET /_auth/friend") return await friendWelcome(request, env, url);
+    if (route === "POST /_auth/friend") return await friendSignIn(request, env, url, body);
   } catch (error) {
     return json({ error: error.message }, 400);
   }
@@ -247,20 +247,29 @@ async function findInvite(env, token) {
 // They're a person here like anyone invited, marked with their site; disconnecting revokes them (connect.js).
 const TICKET_GONE = "This link has expired or has been used. Go back to your own site and try again.";
 
-async function friendWelcome(env, url) {
-  const ticket = await env.DB.prepare(`SELECT c.name FROM friend_tickets t JOIN connections c ON c.id = t.connection_id
+// Someone already signed in here as themselves (the owner, or someone invited) keeps that: a friend's pass would
+// replace it with a lesser one. That happens when one person has sites of their own on both ends.
+async function signedInHere(request, env) {
+  const user = await currentUser(request, env);
+  return user && !user.site ? user : null;
+}
+
+async function friendWelcome(request, env, url) {
+  const ticket = await env.DB.prepare(`SELECT c.name, t.next FROM friend_tickets t JOIN connections c ON c.id = t.connection_id
     WHERE t.token_hash = ? AND t.expires_at > ? AND c.connected_at IS NOT NULL`)
     .bind(await sha256(url.searchParams.get("ticket") ?? ""), now()).first();
   if (!ticket) return html(messagePage(TICKET_GONE), 404);
+  if (await signedInHere(request, env)) return Response.redirect(`${url.origin}${safeNext(ticket.next, url)}`, 302);
   const owner = await env.DB.prepare("SELECT name FROM users WHERE is_owner = 1 ORDER BY id LIMIT 1").first();
   return html(friendPage(ticket.name, owner?.name ?? "this"));
 }
 
-async function friendSignIn(env, url, body) {
+async function friendSignIn(request, env, url, body) {
   const db = env.DB;
   const ticket = await db.prepare("DELETE FROM friend_tickets WHERE token_hash = ? AND expires_at > ? RETURNING connection_id, next")
     .bind(await sha256(String(body.ticket ?? "")), now()).first();
   if (!ticket) return json({ error: TICKET_GONE }, 400);
+  if (await signedInHere(request, env)) return json({ ok: true, next: safeNext(ticket.next, url) });
   const connection = await db.prepare("SELECT * FROM connections WHERE id = ? AND connected_at IS NOT NULL").bind(ticket.connection_id).first();
   if (!connection) return json({ error: "Your sites aren't connected any more." }, 403);
   let user = await db.prepare("SELECT id FROM users WHERE site = ? ORDER BY id LIMIT 1").bind(connection.origin).first();
