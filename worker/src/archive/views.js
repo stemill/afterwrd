@@ -4,7 +4,8 @@ import { MAX_COMMENT } from "./comments.js";
 import {
   aspect, dateRange, EMOJI, fmtAgo, fmtDate, fmtDatetime, linkify, mediaUrl, number, safeUrl, summary, thumbUrl,
 } from "./format.js";
-import { asset, OWNER_ITEMS, siteHeader } from "../nav.js";
+import { asset, icon, OWNER_ITEMS, siteHeader } from "../nav.js";
+import { SITE_ID } from "../posts.js";
 import { html, raw } from "./html.js";
 
 const NAV = [["", "Overview", "overview"], ["timeline", "Timeline", "timeline"], ["posts", "Posts", "posts"],
@@ -122,6 +123,8 @@ function postCard(ctx, p) {
     <span class="what">${what}</span>
     ${p.thread ? html`<a class="when" href="/posts/${p.key}" title="Link to this post"><time>${fmtDatetime(p.timestamp)}</time></a>`
       : html`<time>${fmtDatetime(p.timestamp)}</time>`}
+    ${ctx.user.is_owner && p.id >= SITE_ID && p.thread && html`<form method="post" action="/_admin/posts/${p.id}/delete"
+      onsubmit="return confirm('Delete this post, its photos and its comments? This can’t be undone.')"><button class="delete">Delete</button></form>`}
   </header>
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
   ${collage(p.media)}
@@ -263,9 +266,26 @@ export function timelinePage(ctx, { items, paging, years, year }) {
 ${pager(ctx, paging)}`);
 }
 
+/** The owner's box for a new post, top of Posts. compose.js does the work; without it, it does nothing. */
+function composer() {
+  return html`<form class="card composer" id="composer">
+  <textarea name="text" rows="2" maxlength="5000" placeholder="Write something, or add photos" aria-label="New post"></textarea>
+  <ul class="picked" hidden></ul>
+  <p class="error" role="alert"></p>
+  <div class="actions">
+    <label class="chip">${raw(icon("photos"))}<span>Add photos</span><input type="file" accept="image/*" multiple class="hidden"></label>
+    <span class="status meta" role="status"></span>
+    <button class="post">Post</button>
+  </div>
+</form>
+<script type="module" src="${asset("/static/compose.js")}"></script>`;
+}
+
 export function postsPage(ctx, { posts, paging, q, year, kind, years, kinds }) {
+  const fresh = paging.page === 1 && !q && !year && !kind;
   return page(ctx, "Posts", html`
 <h1>Posts</h1>
+${ctx.user.is_owner && fresh && composer()}
 <form class="filters">
   <input type="search" name="q" value="${q}" placeholder="Search posts">
   <select name="kind" onchange="this.form.submit()">

@@ -9,6 +9,7 @@
 import { ARCHIVE, MAX_FILE, SERVABLE_TYPES } from "../public/static/import/schema.js";
 import { SECTIONS } from "../public/static/import/select.js";
 import { importPage } from "./importpage.js";
+import { mirror } from "./posts.js";
 import { HASH_RE, mediaStore } from "./media.js";
 import { html, json } from "./util.js";
 
@@ -131,9 +132,11 @@ async function finish(env, { sections }) {
     `ALTER TABLE ${table}_next RENAME TO ${table}`,
     ...Object.entries(indexes).map(([name, column]) => `CREATE INDEX ${name} ON ${table}(${column})`),
   ]);
+  // The owner's own posts (src/posts.js) are copied back in, so their files count as in use below.
   await env.DB.batch([
     ...statements.map((s) => env.DB.prepare(s)),
     env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('sections', ?)").bind(JSON.stringify(sections)),
+    ...mirror(env.DB),
   ]);
 
   const { results } = await env.DB.prepare(`

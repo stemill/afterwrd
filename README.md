@@ -102,6 +102,10 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   until the new one is complete.
 - **People** invites someone (copy or share their one-time link), sends a fresh link for a new phone or lost
   passkey, and revokes access, which signs the person out at once and deletes their passkeys.
+- **New posts.** The owner can write posts on the site, with up to 20 photos, from the box at the top of
+  *Posts*. Photos are resized to at most 2560px in the browser before uploading, which also removes the
+  details phones hide in them (such as where a photo was taken), and they're collected in a *Posted on
+  afterwrd* album. Importing again keeps them; deleting a post deletes its photos and comments.
 - **Comments.** Anyone who can see the site can comment under a post or photo; comments show straight away.
   People can delete their own, and the owner can delete any. *Activity* lists the latest, with a count in the
   menu of those that are new to you. Comments are kept when you import again, and stay (under the person's

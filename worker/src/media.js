@@ -42,6 +42,16 @@ export class MediaStore extends DurableObject {
     return removed;
   }
 
+  /** Delete these files (when the owner deletes a post); returns how many went. */
+  remove(hashes) {
+    let removed = 0;
+    for (const hash of hashes) {
+      this.sql.exec("DELETE FROM chunks WHERE hash = ?", hash);
+      removed += this.sql.exec("DELETE FROM files WHERE hash = ?", hash).rowsWritten;
+    }
+    return removed;
+  }
+
   async fetch(request) {
     const hash = new URL(request.url).pathname.slice(1);
     if (!HASH_RE.test(hash)) return new Response("Bad hash", { status: 400 });

@@ -160,6 +160,35 @@ main { max-width: 900px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
 }
 
 .card header .when:hover { text-decoration: none; }
+.card header form { display: contents; }
+.card header .delete { padding: 0; border: 0; background: none; font: 600 0.8rem var(--sans); color: var(--muted); cursor: pointer; }
+.card header .delete:hover { color: #c0392b; text-decoration: underline; }
+
+/* the owner's composer, top of Posts */
+.composer { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.25rem; }
+.composer textarea {
+  width: 100%; min-height: 4rem; max-height: 24rem; field-sizing: content; resize: none;
+  padding: 0.25rem 0; border: 0; background: none; color: var(--text); font: inherit; font-size: 1.1rem;
+}
+.composer textarea:focus { outline: none; }
+.composer .picked { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 0.5rem; }
+.composer .picked li { position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; background: var(--sunken); }
+.composer .picked img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.composer .picked button {
+  position: absolute; top: 0.3rem; right: 0.3rem; width: 1.9rem; height: 1.9rem; border: 0; border-radius: 50%;
+  background: rgb(0 0 0 / 0.6); color: #fff; font-size: 0.85rem; cursor: pointer;
+}
+.composer .actions { display: flex; align-items: center; gap: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+.composer .actions .status { flex: 1; }
+.composer label.chip:focus-within { outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
+.composer .post {
+  min-height: 2.6rem; padding: 0 1.4rem; border: 0; border-radius: 999px; cursor: pointer;
+  background: var(--accent); color: var(--on-accent); font: 700 0.95rem var(--sans);
+}
+.composer .post:hover { background: var(--accent-strong); }
+.composer .post:disabled { opacity: 0.6; cursor: progress; }
+.composer .error { margin: 0; color: #c0392b; font-weight: 600; }
+.composer .error:empty { display: none; }
 .card header .when:hover time { color: var(--accent-strong); }
 
 /* comments written on the site: a bubble each, then a box to add one */

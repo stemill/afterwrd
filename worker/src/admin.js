@@ -3,6 +3,7 @@
 // scripts/invite.mjs does the same from the terminal.
 import { asset, ownerHeader } from "./nav.js";
 import { handleImport } from "./importer.js";
+import { handlePosts } from "./posts.js";
 import { handleUpdate } from "./update.js";
 import { escape, html, json, now, randomToken, sha256 } from "./util.js";
 
@@ -20,6 +21,7 @@ export async function handleAdmin(request, env, url, owner) {
   if (url.pathname === "/_admin/update" || url.pathname.startsWith("/_admin/update/")) {
     return handleUpdate(request, env, url, owner);
   }
+  if (url.pathname === "/_admin/posts" || url.pathname.startsWith("/_admin/posts/")) return handlePosts(request, env, url);
   if (request.method === "GET" && url.pathname === "/_admin") {
     const [{ results: list }, { results: passkeys }] = await env.DB.batch([
       env.DB.prepare(`

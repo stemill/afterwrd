@@ -7,6 +7,7 @@ import m0003 from "../migrations/0003_archive.sql";
 import m0004 from "../migrations/0004_media_store.sql";
 import m0005 from "../migrations/0005_stateless_challenges.sql";
 import m0006 from "../migrations/0006_site_comments.sql";
+import m0007 from "../migrations/0007_site_posts.sql";
 
 // Every file in migrations/, in order. A new migration needs adding here too.
 const MIGRATIONS = [
@@ -16,6 +17,7 @@ const MIGRATIONS = [
   ["0004_media_store.sql", m0004],
   ["0005_stateless_challenges.sql", m0005],
   ["0006_site_comments.sql", m0006],
+  ["0007_site_posts.sql", m0007],
 ];
 
 let ready = null;
