@@ -19,6 +19,7 @@ const ICONS = {
   people: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M19 8v6M16 11h6"/>',
   import: '<path d="M12 15V4M7 9l5-5 5 5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
   update: '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/>',
+  activity: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
   signout: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 16l-4-4 4-4M6 12h10"/>',
 };
 
@@ -29,12 +30,13 @@ export const icon = (name) =>
 export const LOGO = `<span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 3h10a1 1 0 0 1 1 1v17l-6-4-6 4V4a1 1 0 0 1 1-1z"/></svg></span>afterwrd`;
 
 /**
- * items: [{ key, label, href }], each key one of ICONS; `current` is the key to mark as the page you're on.
+ * items: [{ key, label, href, badge? }], each key one of ICONS; `current` is the key to mark as the page you're on;
+ * `badge` is a count to show on the chip, such as new comments.
  * Sign out is always last, as a small form (so another site can't sign people out with a link).
  */
 export function siteHeader(items, current) {
-  const chip = ({ key, label, href, tool }) =>
-    `<a href="${escape(href)}" class="chip${tool ? " tool" : ""}"${key === current ? ' aria-current="page"' : ""}${tool ? ` title="${escape(label)}" aria-label="${escape(label)}"` : ""}>${icon(key)}<span>${escape(label)}</span></a>`;
+  const chip = ({ key, label, href, tool, badge }) =>
+    `<a href="${escape(href)}" class="chip${tool ? " tool" : ""}"${key === current ? ' aria-current="page"' : ""}${tool ? ` title="${escape(label)}" aria-label="${escape(label)}"` : ""}>${icon(key)}<span>${escape(label)}</span>${badge ? `<span class="count">${Number(badge)}<span class="hidden"> new</span></span>` : ""}</a>`;
   const main = items.filter((i) => !i.tool).map(chip).join("");
   const tools = items.filter((i) => i.tool).map(chip).join("");
   return `<header class="site">

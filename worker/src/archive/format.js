@@ -25,6 +25,15 @@ export function fmtDatetime(ts) {
   return `${WEEKDAYS[t.weekday]} ${t.day} ${MONTHS[t.month - 1]} ${t.year}, ${pad(t.hour)}:${pad(t.minute)}`;
 }
 
+/** 'just now', '5 min ago', '3 hr ago', then the date: for comments, which are mostly read soon after. */
+export function fmtAgo(ts) {
+  const seconds = Math.floor(Date.now() / 1000) - ts;
+  if (seconds < 60) return "just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} hr ago`;
+  return fmtDate(ts);
+}
+
 export function fmtDate(ts) {
   if (!ts) return "";
   const t = local(ts);

@@ -1,5 +1,7 @@
 // The archive's pages, ported from the routes in afterwrd/app.py and reading the D1 copy that
 // `npm run publish` uploads. Only the sections chosen at publish time are served.
+import { findTarget, latestComments, loadThreads, newCount, photoKey, postKey } from "./comments.js";
+import { now } from "../util.js";
 import { fmtDate, fmtMonth } from "./format.js";
 import * as views from "./views.js";
 
@@ -26,11 +28,13 @@ const PERSON_TABS = {
   photos: ["Photos of you", "SELECT * FROM tagged_photos t WHERE t.owner_id = ? ORDER BY t.timestamp DESC"],
 };
 
-// [pattern, section, handler]; handlers return a page, a Response, or null for 404.
+// [pattern, section(s) any of which must be published (null: always), handler]; handlers return a page, a
+// Response, or null for 404.
 const ROUTES = [
   [/^\/$/, "overview", overview],
   [/^\/timeline$/, "timeline", timeline],
   [/^\/posts$/, "posts", posts],
+  [/^\/posts\/(post-\d+-[0-9a-f]{8})$/, ["posts", "timeline", "friends"], post],
   [/^\/comments$/, "comments", comments],
   [/^\/likes$/, "likes", likes],
   [/^\/photos$/, "photos", photos],
@@ -39,6 +43,7 @@ const ROUTES = [
   [/^\/photos\/(\d+)$/, "photos", photo],
   [/^\/friends$/, "friends", friends],
   [/^\/people\/(\d+)$/, "friends", person],
+  [/^\/activity$/, null, activity],
 ];
 
 export async function renderArchive(request, env, url, user) {
@@ -51,7 +56,7 @@ export async function renderArchive(request, env, url, user) {
       WHERE p.is_me = 1`),
   ]);
   const sections = settings.results[0] ? JSON.parse(settings.results[0].value) : [];
-  const ctx = { db, url, user, sections, me: me.results[0] };
+  const ctx = { db, url, user, sections, me: me.results[0], newComments: await newCount(db, user) };
   if (!ctx.me || !sections.length) return page(views.emptyPage(ctx, "Nothing has been published here yet."));
 
   if (url.pathname === "/" && !sections.includes("overview")) {
@@ -59,7 +64,7 @@ export async function renderArchive(request, env, url, user) {
   }
   for (const [pattern, section, handler] of ROUTES) {
     const match = pattern.exec(url.pathname);
-    if (!match || !sections.includes(section)) continue;
+    if (!match || (section && ![section].flat().some((s) => sections.includes(s)))) continue;
     const result = await handler(ctx, url.searchParams, ...match.slice(1));
     if (result instanceof Response) return result;
     if (result) return page(result);
@@ -116,13 +121,18 @@ async function withMedia(db, rows, column) {
   return rows.map((r) => ({ ...r, media: media.filter((m) => m[column] === r.id) }));
 }
 
-async function loadPosts(db, rows) {
+/** Posts with their photos, tags and (unless `threads` is false) the comments written on them here. */
+async function loadPosts(db, rows, { threads = true } = {}) {
   const posts = await withMedia(db, rows, "post_id");
   if (!posts.length) return posts;
   const ids = posts.map((p) => p.id);
   const tags = await all(db, `SELECT t.post_id, p.id, p.name FROM post_tags t JOIN people p ON p.id = t.person_id
     WHERE t.post_id IN (${marks(ids)})`, ids);
-  return posts.map((p) => ({ ...p, tags: tags.filter((t) => t.post_id === p.id) }));
+  const keys = posts.map(postKey);
+  const comments = threads ? await loadThreads(db, keys) : null;
+  return posts.map((p, i) => ({
+    ...p, tags: tags.filter((t) => t.post_id === p.id), key: keys[i], thread: comments?.get(keys[i]),
+  }));
 }
 
 const loadComments = (db, rows) => withMedia(db, rows, "comment_id");
@@ -314,12 +324,15 @@ async function photo(ctx, params, id) {
     db.prepare(`SELECT COUNT(*) AS n FROM media WHERE ${where} AND ${order} < (?, ?)`).bind(...setParams, ...position),
   ]);
   const before = index.results[0].n;
-  const post = m.post_id ? (await loadPosts(db, await all(db, `${POST_SQL} WHERE p.id = ?`, [m.post_id])))[0] : null;
+  // The post a photo came with is shown for context; comments here are on the photo itself.
+  const post = m.post_id
+    ? (await loadPosts(db, await all(db, `${POST_SQL} WHERE p.id = ?`, [m.post_id]), { threads: false }))[0] : null;
   const comment = m.comment_id
     ? (await loadComments(db, await all(db, `${COMMENT_SQL} WHERE c.id = ?`, [m.comment_id])))[0] : null;
   return views.photoPage(ctx, {
     m, setKey, setTitle, prev: prev.results[0], next: next.results[0], index: before + 1,
     total: (await setStats(db, where, setParams)).count, albumPage: Math.floor(before / PHOTO_PAGE_SIZE) + 1, post, comment,
+    key: photoKey(m), thread: (await loadThreads(db, [photoKey(m)])).get(photoKey(m)),
   });
 }
 
@@ -361,4 +374,26 @@ async function person(ctx, params, id) {
   else if (tab === "wall" || tab === "tags") rows = await loadPosts(db, rows);
   const tabs = Object.fromEntries(keys.map((k) => [k, PERSON_TABS[k][0]]));
   return views.personPage(ctx, { person: p, tabs, counts, tab, rows, paging });
+}
+
+async function post(ctx, params, key) {
+  const found = await findTarget(ctx.db, key);
+  if (!found) return null;
+  const [p] = await loadPosts(ctx.db, await all(ctx.db, `${POST_SQL} WHERE p.id = ?`, [found.post.id]));
+  return views.postPage(ctx, p);
+}
+
+/** The newest comments from everyone, marking what's new since this person last looked. */
+async function activity(ctx, params) {
+  const { db, user } = ctx;
+  const { rows, paging } = await latestComments(db, pageNumber(params), PAGE_SIZE);
+  const targets = new Map();
+  for (const key of new Set(rows.map((c) => c.target))) targets.set(key, await findTarget(db, key));
+  const seen = user.activity_seen_at ?? 0;
+  if (paging.page === 1) {
+    await db.prepare("UPDATE users SET activity_seen_at = ? WHERE id = ?").bind(now(), user.id).run();
+    ctx.newComments = 0;
+  }
+  const items = rows.map((c) => ({ ...c, on: targets.get(c.target), isNew: c.created_at > seen && c.author_id !== user.id }));
+  return views.activityPage(ctx, { items, paging });
 }

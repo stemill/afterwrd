@@ -1,7 +1,8 @@
 # afterwrd
 
 Your Facebook archive as a private website that only people you invite can see: your posts, photos and
-videos (and, if you choose, comments, likes and friends), with search. It runs in your own free Cloudflare
+videos (and, if you choose, comments, likes and friends), with search. The people you invite can comment on
+your posts and photos, and those comments become part of your archive. It runs in your own free Cloudflare
 account, so no one else holds your data, and setting it up needs no terminal, no GitHub account and no card.
 
 afterwrd isn't affiliated with or endorsed by Meta. It only reads the "Download your information" file Facebook
@@ -101,6 +102,10 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   until the new one is complete.
 - **People** invites someone (copy or share their one-time link), sends a fresh link for a new phone or lost
   passkey, and revokes access, which signs the person out at once and deletes their passkeys.
+- **Comments.** Anyone who can see the site can comment under a post or photo; comments show straight away.
+  People can delete their own, and the owner can delete any. *Activity* lists the latest, with a count in the
+  menu of those that are new to you. Comments are kept when you import again, and stay (under the person's
+  name) if you revoke someone, until you delete them.
 
 `npm run deploy` is only for new versions of afterwrd's code; it never touches your archive.
 `npm run invite` still has `list`, `again` and `revoke` for use from the terminal.

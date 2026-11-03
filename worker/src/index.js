@@ -1,8 +1,9 @@
 // Serves the archive to people who have signed in with a passkey: pages are built from D1, photos and videos
 // come from the media store (/files/<sha256>), and the stylesheet and import scripts from public/static.
-// Everything the owner imports arrives through /_admin/import. Every request comes through here first
-// (run_worker_first), so nothing is reachable without a session.
+// Everything the owner imports arrives through /_admin/import, and comments through /_comments. Every request
+// comes through here first (run_worker_first), so nothing is reachable without a session.
 import { handleAdmin } from "./admin.js";
+import { handleComments } from "./archive/comments.js";
 import { renderArchive } from "./archive/routes.js";
 import { currentUser, handleAuth } from "./auth.js";
 import { HASH_RE, mediaStore } from "./media.js";
@@ -43,6 +44,7 @@ async function route(request, env) {
   if (url.pathname === "/_admin" || url.pathname.startsWith("/_admin/")) {
     return user.is_owner ? handleAdmin(request, env, url, user) : new Response("Not found", { status: 404 });
   }
+  if (url.pathname === "/_comments" || url.pathname.startsWith("/_comments/")) return handleComments(request, env, url, user);
   if (!reading) return new Response("Method not allowed", { status: 405 });
 
   const [, top, rest] = url.pathname.split("/");

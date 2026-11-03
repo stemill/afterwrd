@@ -1,7 +1,8 @@
 // Page templates, ported from afterwrd/templates. `ctx` carries me, the published sections, the signed-in user
 // and the request URL.
+import { MAX_COMMENT } from "./comments.js";
 import {
-  aspect, dateRange, EMOJI, fmtDate, fmtDatetime, linkify, mediaUrl, number, safeUrl, summary, thumbUrl,
+  aspect, dateRange, EMOJI, fmtAgo, fmtDate, fmtDatetime, linkify, mediaUrl, number, safeUrl, summary, thumbUrl,
 } from "./format.js";
 import { asset, OWNER_ITEMS, siteHeader } from "../nav.js";
 import { html, raw } from "./html.js";
@@ -33,6 +34,7 @@ function layout(ctx, { title, bodyClass = "", main }) {
 
 function navItems(ctx) {
   const items = NAV.filter(([, , s]) => ctx.sections.includes(s)).map(([path, label, key]) => ({ key, label, href: `/${path}` }));
+  items.push({ key: "activity", label: "Activity", href: "/activity", badge: ctx.newComments });
   return ctx.user.is_owner ? [...items, ...OWNER_ITEMS] : items;
 }
 
@@ -83,6 +85,32 @@ function collage(items) {
   </div>`;
 }
 
+const initial = (name) => [...String(name).trim()][0]?.toUpperCase() ?? "?";
+
+/** The comments written here on a post or photo, then a box to add one. Forms work without JavaScript. */
+function thread(ctx, key, comments) {
+  const back = ctx.url.pathname + ctx.url.search;
+  const canDelete = (c) => c.author_id === ctx.user.id || Boolean(ctx.user.is_owner);
+  return html`<section class="thread" id="t-${key}" aria-label="Comments">
+  ${comments.map((c) => html`<div class="comment" id="c${c.id}">
+    <span class="who who-${(c.author_id ?? 0) % 6}" aria-hidden="true">${initial(c.name)}</span>
+    <div class="bubble"><strong>${c.name}</strong><span class="said">${linkify(c.text)}</span></div>
+    <div class="under">
+      <time title="${fmtDatetime(c.created_at)}">${fmtAgo(c.created_at)}</time>
+      ${canDelete(c) && html`<form method="post" action="/_comments/${c.id}/delete" onsubmit="return confirm('Delete this comment?')">
+        <input type="hidden" name="back" value="${back}"><button>Delete</button>
+      </form>`}
+    </div>
+  </div>`)}
+  <form class="say" method="post" action="/_comments">
+    <input type="hidden" name="target" value="${key}">
+    <input type="hidden" name="back" value="${back}">
+    <textarea name="text" rows="1" maxlength="${MAX_COMMENT}" required placeholder="Write a comment…" aria-label="Write a comment"></textarea>
+    <button>Post</button>
+  </form>
+</section>`;
+}
+
 function postCard(ctx, p) {
   let what;
   if (p.kind === "wall") what = html`Wrote on ${personLink(ctx, p.target_id, p.target_name)}'s profile`;
@@ -92,7 +120,8 @@ function postCard(ctx, p) {
   <header>
     <span class="badge badge-${p.kind}">${p.kind}</span>
     <span class="what">${what}</span>
-    <time>${fmtDatetime(p.timestamp)}</time>
+    ${p.thread ? html`<a class="when" href="/posts/${p.key}" title="Link to this post"><time>${fmtDatetime(p.timestamp)}</time></a>`
+      : html`<time>${fmtDatetime(p.timestamp)}</time>`}
   </header>
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
   ${collage(p.media)}
@@ -100,6 +129,7 @@ function postCard(ctx, p) {
     html`<p class="link"><a href="${p.link_url}" target="_blank" rel="noopener noreferrer">${p.link_url}</a></p>`}
   ${p.place_name && html`<p class="meta">📍 ${p.place_name}${p.place_address && `, ${p.place_address}`}</p>`}
   ${p.tags?.length > 0 && html`<p class="meta">With ${p.tags.map((t, i) => html`${personLink(ctx, t.id, t.name)}${i < p.tags.length - 1 && ", "}`)}</p>`}
+  ${p.thread && thread(ctx, p.key, p.thread)}
 </article>`;
 }
 
@@ -352,7 +382,7 @@ export function taggedPage(ctx, { tagged, paging }) {
 ${pager(ctx, paging)}`);
 }
 
-export function photoPage(ctx, { m, setKey, setTitle, prev, next, index, total, albumPage, post, comment }) {
+export function photoPage(ctx, { m, setKey, setTitle, prev, next, index, total, albumPage, post, comment, key, thread: comments }) {
   const back = `/photos/album/${setKey}${albumPage > 1 ? `?page=${albumPage}` : ""}`;
   const main = html`
 <main class="theatre">
@@ -382,6 +412,7 @@ export function photoPage(ctx, { m, setKey, setTitle, prev, next, index, total, 
         <dd><a href="https://www.openstreetmap.org/?mlat=${m.latitude}&amp;mlon=${m.longitude}#map=15/${m.latitude}/${m.longitude}" target="_blank" rel="noopener noreferrer">View on map ↗</a></dd>`}
     </dl>
 
+    ${key && html`<h2>Comments</h2>${thread(ctx, key, comments)}`}
     ${post && html`<h2>Posted with</h2>${postCard(ctx, post)}`}
     ${comment && html`<h2>Attached to your comment</h2>${commentCard(ctx, comment)}`}
 
@@ -462,6 +493,41 @@ export function personPage(ctx, { person, tabs, counts, tab, rows, paging }) {
 </nav>
 ${body}
 ${pager(ctx, paging)}`);
+}
+
+export function postPage(ctx, p) {
+  return page(ctx, summary(p.title, ctx.me.name) || "Post", html`
+${has(ctx, "posts") && html`<p class="crumbs"><a href="/posts">Posts</a> /</p>`}
+<div class="feed">${postCard(ctx, p)}</div>`);
+}
+
+export function activityPage(ctx, { items, paging }) {
+  const whose = ctx.user.is_owner ? "your" : `${ctx.me.name}'s`;
+  return page(ctx, "Activity", html`
+<h1>Activity</h1>
+<p class="meta">The latest comments on ${whose} posts and photos, from everyone who can see this site.</p>
+${feed(items, (c) => activityItem(ctx, c, whose), "No comments yet. Write one under any post or photo.")}
+${(paging.page > 1 || paging.hasNext) && pager(ctx, paging)}`);
+}
+
+function activityItem(ctx, c, whose) {
+  const { photo, post } = c.on ?? {};
+  const href = photo ? `/photos/${photo.id}#c${c.id}` : post ? `/posts/${c.target}#c${c.id}` : null;
+  const what = photo ? photo.kind : "post";
+  const snippet = post && (post.text ? post.text.slice(0, 140) + (post.text.length > 140 ? "…" : "") : summary(post.title, ctx.me.name));
+  return html`<article class="card activity${c.isNew ? " new" : ""}">
+  ${photo && html`<a class="thumb" href="${href}" aria-hidden="true" tabindex="-1">${mediaImg(photo)}</a>`}
+  <div class="body">
+    <header>
+      <span class="what"><strong>${c.author_id === ctx.user.id ? "You" : c.name}</strong>
+        ${href ? html`commented on <a href="${href}">${whose} ${what}</a>` : "commented on something that's no longer in the archive"}</span>
+      ${c.isNew && raw('<span class="badge badge-new">New</span>')}
+      <time title="${fmtDatetime(c.created_at)}">${fmtAgo(c.created_at)}</time>
+    </header>
+    <div class="text">${linkify(c.text)}</div>
+    ${snippet && html`<p class="meta on">On “${snippet}”</p>`}
+  </div>
+</article>`;
 }
 
 export function emptyPage(ctx, message) {

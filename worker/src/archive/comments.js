@@ -1,0 +1,107 @@
+// Comments written on the site by anyone who can see it, under the owner's posts and photos. They show straight
+// away; the author or the owner can delete one. Forms post here and land back on the page they came from:
+//   POST /_comments                 target, text, back
+//   POST /_comments/<id>/delete     back
+// See migrations/0006_site_comments.sql for how `target` survives a re-import.
+import { safeNext } from "../auth.js";
+import { messagePage } from "../pages.js";
+import { html, now } from "../util.js";
+
+export const MAX_COMMENT = 2000;
+// Plenty for a conversation, too few for a runaway script.
+const RATE = { count: 30, seconds: 600 };
+const TARGET_RE = /^(?:post-(\d+)-[0-9a-f]{8}|photo-([0-9a-f]{64}))$/;
+
+// FNV-1a: not for security, just to tell apart posts made in the same second.
+function fingerprint(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+export const postKey = (p) =>
+  `post-${p.timestamp}-${fingerprint([p.kind, p.title, p.text, p.link_url, p.group_name].map((v) => v ?? "").join("\0"))}`;
+export const photoKey = (m) => (m.hash ? `photo-${m.hash}` : null);
+
+const COMMENT_SQL = `
+  SELECT c.*, COALESCE(u.name, c.author_name) AS name FROM site_comments c
+  LEFT JOIN users u ON u.id = c.author_id`;
+
+/** Map of target -> its comments, oldest first. */
+export async function loadThreads(db, keys) {
+  const wanted = [...new Set(keys.filter(Boolean))];
+  const threads = new Map(wanted.map((k) => [k, []]));
+  if (!wanted.length) return threads;
+  const { results } = await db.prepare(`${COMMENT_SQL} WHERE c.target IN (${wanted.map(() => "?").join(",")})
+    ORDER BY c.created_at, c.id`).bind(...wanted).all();
+  for (const c of results) threads.get(c.target).push(c);
+  return threads;
+}
+
+/** The newest comments across the site, for Activity. */
+export async function latestComments(db, page, size) {
+  const [count, rows] = await db.batch([
+    db.prepare("SELECT COUNT(*) AS n FROM site_comments"),
+    db.prepare(`${COMMENT_SQL} ORDER BY c.created_at DESC, c.id DESC LIMIT ? OFFSET ?`).bind(size, (page - 1) * size),
+  ]);
+  const total = count.results[0].n;
+  return { rows: rows.results, paging: { page, total, hasNext: page * size < total } };
+}
+
+/** How many comments by other people arrived since this person last opened Activity. */
+export async function newCount(db, user) {
+  const row = await db.prepare(`SELECT COUNT(*) AS n FROM site_comments
+    WHERE created_at > ? AND (author_id IS NULL OR author_id != ?)`).bind(user.activity_seen_at ?? 0, user.id).first();
+  return row.n;
+}
+
+/** The post or photo a target names, if it's still in the archive: { post } or { photo }. */
+export async function findTarget(db, target) {
+  const match = TARGET_RE.exec(target ?? "");
+  if (!match) return null;
+  if (match[2]) {
+    const photo = await db.prepare("SELECT * FROM media WHERE hash = ? ORDER BY id LIMIT 1").bind(match[2]).first();
+    return photo && { photo };
+  }
+  const { results } = await db.prepare("SELECT * FROM posts WHERE timestamp = ? ORDER BY id").bind(Number(match[1])).all();
+  const post = results.find((p) => postKey(p) === target);
+  return post && { post };
+}
+
+export async function handleComments(request, env, url, user) {
+  if (request.method !== "POST") return new Response("Not found", { status: 404 });
+  if (request.headers.get("Origin") !== url.origin) return new Response("Request from another site", { status: 403 });
+  const form = await request.formData().catch(() => new FormData());
+  const back = new URL(safeNext(String(form.get("back") ?? "/"), url), url.origin);
+  const db = env.DB;
+
+  if (url.pathname === "/_comments") {
+    const target = String(form.get("target") ?? "");
+    const text = String(form.get("text") ?? "").replace(/\r\n?/g, "\n").trim();
+    if (!text) return Response.redirect(back, 303);
+    if (text.length > MAX_COMMENT) return message(`Comments can be up to ${MAX_COMMENT} characters.`, back, 400);
+    if (!(await findTarget(db, target))) return message("That's no longer in the archive.", back, 404);
+    const recent = await db.prepare("SELECT COUNT(*) AS n FROM site_comments WHERE author_id = ? AND created_at > ?")
+      .bind(user.id, now() - RATE.seconds).first();
+    if (recent.n >= RATE.count) return message("That's a lot of comments in a few minutes. Try again shortly.", back, 429);
+    const row = await db.prepare(`INSERT INTO site_comments (target, author_id, author_name, text, created_at)
+      VALUES (?, ?, ?, ?, ?) RETURNING id`).bind(target, user.id, user.name, text, now()).first();
+    back.hash = `c${row.id}`;
+    return Response.redirect(back, 303);
+  }
+
+  const del = /^\/_comments\/(\d+)\/delete$/.exec(url.pathname);
+  if (del) {
+    const comment = await db.prepare("SELECT * FROM site_comments WHERE id = ?").bind(Number(del[1])).first();
+    if (comment && (comment.author_id === user.id || user.is_owner)) {
+      await db.prepare("DELETE FROM site_comments WHERE id = ?").bind(comment.id).run();
+      back.hash = `t-${comment.target}`;
+    }
+    return Response.redirect(back, 303);
+  }
+  return new Response("Not found", { status: 404 });
+}
+
+function message(text, back, status) {
+  return html(messagePage(text, { href: back.pathname + back.search, label: "Go back" }), status);
+}

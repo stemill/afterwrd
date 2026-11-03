@@ -255,7 +255,7 @@ async function startSession(env, userId, response) {
 
 // Only a path on this site, resolved the way the browser will resolve it: "/\evil.example" and "/\t/evil.example"
 // both look like paths but take browsers to another site.
-function safeNext(next, url) {
+export function safeNext(next, url) {
   if (!next) return "/";
   let target;
   try {
