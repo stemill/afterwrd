@@ -104,10 +104,8 @@ export async function handleConnections(request, env, url) {
     if (connection) {
       // Tell them, if they can be reached; either way this side forgets them.
       await callSite(connection.origin, "/_peer/disconnect", { key: connection.their_key, body: {} }).catch(() => {});
-      await db.batch([
-        db.prepare("DELETE FROM connections WHERE id = ?").bind(connection.id),
-        db.prepare("DELETE FROM comments_elsewhere WHERE connection_id = ?").bind(connection.id),
-      ]);
+      // The owner's copies of what they said on that site (comments_elsewhere) stay: they're theirs.
+      await db.prepare("DELETE FROM connections WHERE id = ?").bind(connection.id).run();
     }
     return json({ ok: true });
   }

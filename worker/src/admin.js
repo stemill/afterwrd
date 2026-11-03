@@ -2,6 +2,7 @@
 // person's passkeys, cancel links that haven't been used, sign someone out everywhere, revoke access.
 // scripts/invite.mjs does the same from the terminal.
 import { handleConnections } from "./connect.js";
+import { handleExport } from "./export.js";
 import { asset, ownerHeader } from "./nav.js";
 import { handleImport } from "./importer.js";
 import { handlePosts } from "./posts.js";
@@ -23,6 +24,7 @@ export async function handleAdmin(request, env, url, owner) {
     return handleUpdate(request, env, url, owner);
   }
   if (url.pathname === "/_admin/posts" || url.pathname.startsWith("/_admin/posts/")) return handlePosts(request, env, url);
+  if (url.pathname === "/_admin/export" || url.pathname.startsWith("/_admin/export/")) return handleExport(request, env, url);
   if (url.pathname === "/_admin/connections" || url.pathname.startsWith("/_admin/connections/")) {
     return handleConnections(request, env, url);
   }

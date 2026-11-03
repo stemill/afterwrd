@@ -42,6 +42,7 @@ const ROUTES = [
   [/^\/photos\/tagged$/, "photos", tagged],
   [/^\/photos\/album\/([^/]+)$/, "photos", album],
   [/^\/photos\/(\d+)$/, "photos", photo],
+  [/^\/photos\/sha256\/([0-9a-f]{64})$/, "photos", photoByHash],
   [/^\/friends$/, "friends", friends],
   [/^\/people\/(\d+)$/, "friends", person],
   [/^\/activity$/, null, activity],
@@ -405,4 +406,10 @@ async function activity(ctx, params) {
 async function feed(ctx) {
   if (!ctx.user.is_owner) return null;
   return views.feedPage(ctx, await loadFeed(ctx.db));
+}
+
+/** A photo's permanent address (public/static/activity.js), which survives re-imports, leads to its page. */
+async function photoByHash(ctx, params, hash) {
+  const m = await first(ctx.db, "SELECT id FROM media WHERE hash = ? ORDER BY id LIMIT 1", [hash]);
+  return m ? Response.redirect(`${ctx.url.origin}/photos/${m.id}${ctx.url.hash}`, 302) : null;
 }

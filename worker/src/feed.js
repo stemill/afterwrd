@@ -3,6 +3,7 @@
 //   GET  /_feed/files/<connection>/<sha256>                     a photo from their site, passed through
 //   POST /_feed/comments                                       connection, target, text (a form)
 //   POST /_feed/comments/<connection>/<remote id>/delete       (a form)
+import { actorId, commentId, postId } from "../public/static/activity.js";
 import { MAX_COMMENT } from "./archive/comments.js";
 import { SERVABLE_TYPES } from "../public/static/import/schema.js";
 import { callSite, cleanFeed } from "./peers.js";
@@ -19,7 +20,8 @@ export async function loadFeed(db) {
     ORDER BY name COLLATE NOCASE LIMIT ?`).bind(MAX_SITES).all();
   const replies = await Promise.all(connections.map(async (connection) => {
     try {
-      return { connection, feed: cleanFeed(await callSite(connection.origin, "/_peer/feed", { key: connection.their_key })) };
+      const feed = await callSite(connection.origin, "/_peer/feed", { key: connection.their_key });
+      return { connection, feed: cleanFeed(feed, connection.origin) };
     } catch (error) {
       return { connection, error: error.message };
     }
@@ -70,15 +72,25 @@ export async function handleFeed(request, env, url) {
   if (url.pathname === "/_feed/comments") {
     const connection = await connectionById(db, form.get("connection"));
     const target = String(form.get("target") ?? "");
+    const owner = await db.prepare("SELECT name FROM users WHERE is_owner = 1 ORDER BY id LIMIT 1").first();
     const text = String(form.get("text") ?? "").replace(/\r\n?/g, "\n").trim();
     if (!connection) return problem("You're no longer connected with them.");
     if (!text) return Response.redirect(`${url.origin}/feed`, 303);
     if (text.length > MAX_COMMENT) return problem(`Comments can be up to ${MAX_COMMENT} characters.`);
     try {
-      const { id } = await callSite(connection.origin, "/_peer/comments", { key: connection.their_key, body: { target, text } });
-      if (!Number.isSafeInteger(id)) throw new Error("Their site sent something unexpected.");
-      await db.prepare(`INSERT INTO comments_elsewhere (connection_id, remote_id, target, text, created_at)
-        VALUES (?, ?, ?, ?, ?)`).bind(connection.id, id, target, text, now()).run();
+      const reply = await callSite(connection.origin, "/_peer/comments", {
+        key: connection.their_key,
+        body: {
+          "@context": "https://www.w3.org/ns/activitystreams", type: "Note", mediaType: "text/plain", content: text,
+          attributedTo: { type: "Person", id: actorId(url.origin), name: owner?.name }, inReplyTo: postId(connection.origin, target),
+        },
+      });
+      // Their address for it: <their site>/posts/<key>#c<n>.
+      const n = /#c(\d{1,15})$/.exec(typeof reply.id === "string" && reply.id.startsWith(postId(connection.origin, target)) ? reply.id : "");
+      if (!n || reply.id !== commentId(connection.origin, target, n[1])) throw new Error("Their site sent something unexpected.");
+      const id = Number(n[1]);
+      await db.prepare(`INSERT INTO comments_elsewhere (connection_id, site, remote_id, target, text, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)`).bind(connection.id, connection.origin, id, target, text, now()).run();
       return Response.redirect(`${url.origin}/feed#r${connection.id}-${id}`, 303);
     } catch (error) {
       return problem(`Couldn't send your comment: ${error.message}`);

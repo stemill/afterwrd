@@ -3,6 +3,7 @@
 //   POST /_comments                 target, text, back
 //   POST /_comments/<id>/delete     back
 // See migrations/0006_site_comments.sql for how `target` survives a re-import.
+import { postKey } from "../../public/static/activity.js";
 import { safeNext } from "../auth.js";
 import { messagePage } from "../pages.js";
 import { html, now } from "../util.js";
@@ -12,15 +13,7 @@ export const MAX_COMMENT = 2000;
 const RATE = { count: 30, seconds: 600 };
 const TARGET_RE = /^(?:post-(\d+)-[0-9a-f]{8}|photo-([0-9a-f]{64}))$/;
 
-// FNV-1a: not for security, just to tell apart posts made in the same second.
-function fingerprint(text) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
-  return (h >>> 0).toString(16).padStart(8, "0");
-}
-
-export const postKey = (p) =>
-  `post-${p.timestamp}-${fingerprint([p.kind, p.title, p.text, p.link_url, p.group_name].map((v) => v ?? "").join("\0"))}`;
+export { postKey };
 export const photoKey = (m) => (m.hash ? `photo-${m.hash}` : null);
 
 const COMMENT_SQL = `

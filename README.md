@@ -106,10 +106,17 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   *Posts*. Photos are resized to at most 2560px in the browser before uploading, which also removes the
   details phones hide in them (such as where a photo was taken), and they're collected in a *Posted on
   afterwrd* album. Importing again keeps them; deleting a post deletes its photos and comments.
+- **Download everything** (the download icon) saves the whole site as one zip: posts, photos and videos,
+  albums, comments (those written here, and yours on friends' sites), likes, friends and connections, as
+  [ActivityStreams](https://www.w3.org/TR/activitystreams-core/) JSON, the open format the fediverse uses, with
+  every photo and video. Everything has a permanent address (`https://<site>/posts/<key>`,
+  `…/photos/sha256/<fingerprint>`, `…#c<n>` for a comment), so two friends' downloads agree on which comment
+  replied to which post. The README inside explains the files. Keys and sign-in details are never included.
 - **Feed and connections.** Connect with friends who have their own afterwrd site: make a one-time Connect
   link under *Feed → Connections* and send it to them; they open it, say where their site is, and confirm there.
   Connections are mutual. *Feed* (only the owner sees it) shows the newest posts written on each connected site,
-  and comments you make there are stored on your friend's site, with a copy kept on yours. Only posts written on
+  and comments you make there are stored on your friend's site, with a copy kept on yours. Sites exchange posts
+  and comments as ActivityStreams too. Only posts written on
   afterwrd are shared, never an imported archive. Either side can disconnect. Two sites in the same Cloudflare
   account can connect too.
 - **Comments.** Anyone who can see the site can comment under a post or photo; comments show straight away.
