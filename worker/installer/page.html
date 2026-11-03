@@ -27,6 +27,9 @@
   ol.steps > li.optional::before { content: "+"; background: var(--surface); color: var(--text); }
   h2 { font: 900 1.2rem var(--round); margin: 2px 0 6px; }
   h2 .meta { font: 600 0.85rem system-ui, sans-serif; }
+  details.by-hand { margin-top: 14px; }
+  details.by-hand > ol { padding-left: 1.2rem; }
+  details.by-hand > ol li { margin: 6px 0; }
   p { margin: 6px 0; }
   .meta { color: var(--muted); font-size: 0.9rem; }
   a { color: var(--accent-strong); }
@@ -51,38 +54,46 @@
 <p class="brand" aria-label="afterwrd">afterw<svg class="o" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 1-4.7 14.5L3.8 20l1.2-3.6A8 8 0 0 1 12 4z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>rd</p>
 <h1>A small social network of your own</h1>
 <p class="lede">Post, share photos and talk with friends who have their own afterwrd site, and, if you like, bring your
-Facebook years along. Only you sign in; friends see it from their own sites. It runs in your own free Cloudflare account,
-so no one else holds your data and there's nothing to pay. About 10 minutes on a computer.</p>
+Facebook years along. It runs in your own free Cloudflare account, so no one else holds your data and there's nothing
+to pay. A few minutes on a computer.</p>
 
 <ol class="steps">
   <li>
     <h2>Make a free Cloudflare account</h2>
-    <p>An email address is all it asks for. Don't add a card; afterwrd stays within the free plan. Make a new account just
-    for afterwrd, even if you already have one: then your site can safely update itself in one click.</p>
+    <p>An email address is all it asks for. Don't add a card; afterwrd stays within the free plan. A new account just
+    for afterwrd is best, so your site can safely update itself in one click. Confirm your email from the message
+    Cloudflare sends, and stay signed in.</p>
     <a class="button" href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">Sign up to Cloudflare</a>
+    <p class="meta">Already have an account just for afterwrd? <a href="https://dash.cloudflare.com/login" target="_blank" rel="noopener">Sign in</a>.</p>
   </li>
   <li>
-    <h2>Create a Worker</h2>
-    <p>In Cloudflare, go to <span class="path">Workers &amp; Pages</span> and press <span class="path">Create application</span>,
-    then <span class="path">Start with Hello World</span>. Change the <b>Worker name</b> to <code>afterwrd</code> (it becomes your
-    site's address), leave <b>Protect with Cloudflare Access</b> off and press <b>Deploy</b>.</p>
-    <a class="button" href="https://dash.cloudflare.com/?to=/:account/workers-and-pages" target="_blank" rel="noopener">Open Workers &amp; Pages</a>
-    <p class="meta">If the link lands elsewhere: <span class="path">Compute → Workers &amp; Pages</span> in the left-hand menu.</p>
-  </li>
-  <li>
-    <h2>Paste in the installer</h2>
-    <p>Copy the installer, then in your new Worker press <b>Edit code</b>, select everything in the editor
-    (<kbd>⌘A</kbd> or <kbd>Ctrl+A</kbd>), paste over it and press <b>Deploy</b>.</p>
-    <button class="button primary" id="copy">Copy installer</button>
-    <details>
-      <summary>See what you're pasting (afterwrd __VERSION__)</summary>
-      <textarea id="installer" readonly spellcheck="false">__INSTALLER_HTML__</textarea>
+    <h2>Install on Cloudflare</h2>
+    <p>Once you're signed in, this opens Cloudflare with afterwrd's installer ready to deploy. Leave the name as it is
+    (you'll choose your site's address in a moment) and press <b>Deploy</b>.</p>
+    <a class="button primary" href="__DEPLOY_LINK__" target="_blank" rel="noopener">Install on Cloudflare</a>
+    <p class="meta">If Cloudflare asks you to create an account, you aren't signed in in this browser:
+    <a href="https://dash.cloudflare.com/login" target="_blank" rel="noopener">sign in</a>, then press the button again.</p>
+    <details class="by-hand">
+      <summary>If the button doesn't work, do it by hand</summary>
+      <ol>
+        <li>Go to <a href="https://dash.cloudflare.com/?to=/:account/workers-and-pages" target="_blank" rel="noopener">Workers &amp; Pages</a>
+          (<span class="path">Compute → Workers &amp; Pages</span> in the left-hand menu), press <span class="path">Create application</span>,
+          then <span class="path">Start with Hello World</span>. Change the <b>Worker name</b> to <code>afterwrd</code>, leave
+          <b>Protect with Cloudflare Access</b> off and press <b>Deploy</b>.</li>
+        <li>Copy the installer, then in your new Worker press <b>Edit code</b>, select everything in the editor
+          (<kbd>⌘A</kbd> or <kbd>Ctrl+A</kbd>), paste over it and press <b>Deploy</b>.<br>
+          <button class="button" id="copy">Copy installer</button></li>
+      </ol>
+      <details>
+        <summary>See the installer (afterwrd __VERSION__)</summary>
+        <textarea id="installer" readonly spellcheck="false">__INSTALLER_HTML__</textarea>
+      </details>
     </details>
   </li>
   <li>
     <h2>Open your Worker and follow the installer</h2>
-    <p>Press <b>Visit</b> (or open <code>https://afterwrd.&lt;your-name&gt;.workers.dev</code>). The installer walks you through
-    the rest: a Cloudflare token (leave <b>Remember it</b> ticked, so updates are one click), then a passkey for you
+    <p>Press <b>Visit</b>. The installer walks you through the rest: your site's address (<code>afterwrd</code> unless you
+    choose otherwise), a Cloudflare token (leave <b>Remember it</b> ticked, so updates are one click), then a passkey for you
     (your face, fingerprint or device PIN; no password). Then you're in: write a post, add photos, and invite friends
     from <b>Friends</b>.</p>
   </li>

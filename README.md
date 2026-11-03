@@ -14,10 +14,12 @@ Facebook, with "On this day"), and your tools: *Your devices*, *Import*, *Downlo
 
 ## Install your own
 
-**Easiest: follow the install page, <https://afterwrd.app/>,** which has a button that copies the
-installer for you. The same steps in full:
+**Easiest: use the install page, <https://afterwrd.app/>.** Make your Cloudflare account (step 1 below) and stay
+signed in, then press *Install on Cloudflare*: it opens Cloudflare's Deploy page with the installer filled in. Press
+*Deploy* (the name doesn't matter), press *Visit*, and carry on from step 4: the installer asks for your site's
+address, puts afterwrd there and removes itself. By hand, the steps in full:
 
-You need a free Cloudflare account and about 10 minutes on a computer. Bringing your Facebook years is optional, and
+You need a free Cloudflare account and a few minutes on a computer. Bringing your Facebook years is optional, and
 can be done any time.
 
 1. **Make a Cloudflare account** at <https://dash.cloudflare.com/sign-up>. An email address is all it asks
