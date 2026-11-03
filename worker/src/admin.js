@@ -29,17 +29,19 @@ export async function handleAdmin(request, env, url, owner) {
     return handleConnections(request, env, url);
   }
   if (request.method === "GET" && url.pathname === "/_admin") {
-    const [{ results: list }, { results: passkeys }] = await env.DB.batch([
+    const [{ results: list }, { results: passkeys }, { results: friends }] = await env.DB.batch([
       env.DB.prepare(`
         SELECT u.*,
           (SELECT MAX(last_used_at) FROM credentials c WHERE c.user_id = u.id) AS last_sign_in,
           (SELECT COUNT(*) FROM invites i WHERE i.user_id = u.id AND i.used_at IS NULL AND i.expires_at > ?) AS open_invites,
           (SELECT COUNT(*) FROM sessions s WHERE s.user_id = u.id AND s.expires_at > ?) AS sessions
-        FROM users u ORDER BY u.revoked_at IS NOT NULL, u.is_owner DESC, u.name COLLATE NOCASE`).bind(now(), now()),
+        FROM users u WHERE u.site IS NULL
+        ORDER BY u.revoked_at IS NOT NULL, u.is_owner DESC, u.name COLLATE NOCASE`).bind(now(), now()),
       env.DB.prepare("SELECT id, user_id, created_at, last_used_at FROM credentials ORDER BY created_at"),
+      env.DB.prepare("SELECT name, origin, connected_at FROM connections WHERE connected_at IS NOT NULL ORDER BY name COLLATE NOCASE"),
     ]);
     for (const p of list) p.passkeys = passkeys.filter((c) => c.user_id === p.id);
-    return html(adminPage(list, owner));
+    return html(adminPage(list, owner, friends));
   }
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
 
@@ -47,7 +49,7 @@ export async function handleAdmin(request, env, url, owner) {
   if (url.pathname === "/_admin/invite") {
     const name = String(body.name ?? "").trim().slice(0, 100);
     if (!name) return json({ error: "Give their name." }, 400);
-    const existing = await env.DB.prepare("SELECT 1 FROM users WHERE name = ? COLLATE NOCASE AND revoked_at IS NULL")
+    const existing = await env.DB.prepare("SELECT 1 FROM users WHERE name = ? COLLATE NOCASE AND revoked_at IS NULL AND site IS NULL")
       .bind(name).first();
     if (existing && !body.sameNameOk) {
       return json({ error: `${name} already has access. To add a device, use New link on their row.`, sameName: true }, 409);
@@ -143,7 +145,7 @@ function personRow(p) {
   </tr>`;
 }
 
-function adminPage(list, owner) {
+function adminPage(list, owner, friends) {
   const current = list.filter((p) => !p.revoked_at);
   const revoked = list.filter((p) => p.revoked_at);
   return `<!doctype html>
@@ -216,6 +218,15 @@ shows each person's passkeys and lets you cancel links that haven't been used.</
   <thead><tr><th>Person</th><th class="status">Status</th><th></th></tr></thead>
   <tbody>${current.map(personRow).join("")}</tbody>
 </table>
+
+<h2>Friends with their own site</h2>
+<p class="meta">Friends you're connected with can look round too, coming in through their own afterwrd site. Connect
+or disconnect in <a href="/_admin/connections">Connections</a>.</p>
+${friends.length ? `<table class="numbers">
+  <thead><tr><th>Friend</th><th class="status">Site</th><th>Since</th></tr></thead>
+  <tbody>${friends.map((f) => `<tr><th>${escape(f.name)}</th>
+    <td class="status">${escape(new URL(f.origin).host)}</td><td>${day(f.connected_at)}</td></tr>`).join("")}</tbody>
+</table>` : `<p class="empty">No connected friends yet.</p>`}
 ${revoked.length ? `
 <h2>Revoked</h2>
 <table class="numbers"><tbody>${revoked.map(personRow).join("")}</tbody></table>` : ""}

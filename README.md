@@ -114,8 +114,11 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   replied to which post. The README inside explains the files. Keys and sign-in details are never included.
 - **Feed and connections.** Connect with friends who have their own afterwrd site: make a one-time Connect
   link under *Feed → Connections* and send it to them; they open it, say where their site is, and confirm there.
-  Connections are mutual. *Feed* (only the owner sees it) shows the newest posts written on each connected site,
-  and comments you make there are stored on your friend's site, with a copy kept on yours. Sites exchange posts
+  Connections are mutual, and make you friends: *Feed* (only the owner sees it) shows the newest posts written on
+  each connected site, comments you make there are stored on your friend's site with a copy kept on yours, and
+  either of you can look round the other's whole site (everything published, as an invited person would) by
+  coming in through your own: *Visit* in Feed or Connections, or "Connected friend?" on their sign-in page.
+  No invite or passkey is needed, and disconnecting ends it at once. Invites stay for people without a site. Sites exchange posts
   and comments as ActivityStreams too. Only posts written on
   afterwrd are shared, never an imported archive. Either side can disconnect. Two sites in the same Cloudflare
   account can connect too.

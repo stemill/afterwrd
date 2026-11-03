@@ -77,8 +77,9 @@ export async function handleComments(request, env, url, user) {
     const recent = await db.prepare("SELECT COUNT(*) AS n FROM site_comments WHERE author_id = ? AND created_at > ?")
       .bind(user.id, now() - RATE.seconds).first();
     if (recent.n >= RATE.count) return message("That's a lot of comments in a few minutes. Try again shortly.", back, 429);
-    const row = await db.prepare(`INSERT INTO site_comments (target, author_id, author_name, text, created_at)
-      VALUES (?, ?, ?, ?, ?) RETURNING id`).bind(target, user.id, user.name, text, now()).first();
+    // A connected friend visiting from their own site is marked with it, as when they comment from their Feed.
+    const row = await db.prepare(`INSERT INTO site_comments (target, author_id, author_name, text, created_at, origin)
+      VALUES (?, ?, ?, ?, ?, ?) RETURNING id`).bind(target, user.id, user.name, text, now(), user.site ?? "site").first();
     back.hash = `c${row.id}`;
     return Response.redirect(back, 303);
   }

@@ -28,6 +28,10 @@ const STYLE = `
   button:disabled { opacity: 0.6; cursor: default; }
   :focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
   #error { color: #c0392b; margin: 12px 0 0; min-height: 1.5em; }
+  details.friend { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 16px; }
+  details.friend summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+  details.friend form { margin-top: 12px; display: grid; gap: 10px; }
+  details.friend p { margin: 0; }
   input { width: 100%; font: inherit; min-height: 3rem; padding: 11px 16px; border: 1px solid var(--border); border-radius: 999px;
           background: var(--bg); color: var(--text); }
 `;
@@ -105,8 +109,26 @@ export function loginPage(next) {
 <h1>Sign in</h1>
 <p>This is a private archive. Use the passkey you set up from your invite.</p>
 <button id="go">Sign in with a passkey</button>
-<p id="error" role="alert"></p>`, `
+<p id="error" role="alert"></p>
+<details class="friend">
+  <summary>Connected friend with your own afterwrd site?</summary>
+  <form id="via">
+    <p>Come in through your own site: you'll sign in there if you need to, and it'll bring you back.</p>
+    <input name="site" placeholder="Your site, e.g. jo.example.workers.dev" required autocomplete="url" inputmode="url" aria-label="Your site's address">
+    <button>Continue through my site</button>
+  </form>
+</details>`, `
   const next = ${JSON.stringify(next).replace(/</g, "\\u003c")};
+  document.getElementById("via").addEventListener("submit", (e) => {
+    e.preventDefault();
+    let site = e.target.site.value.trim();
+    if (!/^https?:\\/\\//.test(site)) site = "https://" + site;
+    try {
+      location.assign(new URL(site).origin + "/_feed/visit?to=" + encodeURIComponent(location.origin) + "&next=" + encodeURIComponent(next));
+    } catch {
+      document.getElementById("error").textContent = "That doesn't look like a web address.";
+    }
+  });
   run(document.getElementById("go"), async () => {
     const options = await post("/_auth/login/options");
     const credential = await navigator.credentials.get({ publicKey: {
@@ -166,8 +188,8 @@ export function messagePage(message, link = { href: "/_auth/login", label: "Go t
 export function connectLinkPage(name) {
   return page("Connect", `
 <h1>Connect with ${escape(name)}</h1>
-<p>${escape(name)} would like to connect their afterwrd site with yours, so you each see the other's new posts and can
-comment on them. Where is your afterwrd site?</p>
+<p>${escape(name)} would like to connect their afterwrd site with yours, so you're friends: you each see the other's
+new posts, can comment on them, and can look round each other's site. Where is your afterwrd site?</p>
 <form id="site">
   <input name="site" placeholder="e.g. jo.example.workers.dev" required autocomplete="url" inputmode="url" aria-label="Your site's address">
   <p id="error" role="alert"></p>
@@ -183,6 +205,25 @@ comment on them. Where is your afterwrd site?</p>
       location.assign(origin + "/_admin/connections/new?link=" + encodeURIComponent(location.href));
     } catch {
       document.getElementById("error").textContent = "That doesn't look like a web address.";
+    }
+  });`);
+}
+
+// Where a connected friend's own site sends them (auth.js): one click to come in as themselves.
+export function friendPage(friend, owner) {
+  return page("Welcome", `
+<h1>Welcome, ${escape(friend)}</h1>
+<p>Your site has vouched for you, so you can look round ${escape(owner)}'s archive as a friend, and comment.</p>
+<button id="go">Come in</button>
+<p id="error" role="alert"></p>`, `
+  document.getElementById("go").addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    try {
+      const { next } = await post(location.pathname, { ticket: new URLSearchParams(location.search).get("ticket") });
+      location.replace(next);
+    } catch (err) {
+      document.getElementById("error").textContent = err.message;
+      e.target.disabled = false;
     }
   });`);
 }

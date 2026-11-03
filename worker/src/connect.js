@@ -9,7 +9,7 @@
 // The owner's:         GET /_admin/connections, POST …/link, GET|POST …/new?link=, POST …/<id>/disconnect
 import { asset, ownerHeader } from "./nav.js";
 import { connectLinkPage, messagePage } from "./pages.js";
-import { callSite, host, KEY_RE, ownerName, siteOrigin } from "./peers.js";
+import { callSite, forgetFriend, host, KEY_RE, ownerName, siteOrigin } from "./peers.js";
 import { escape, html, json, now, randomToken, sha256 } from "./util.js";
 
 const LINK_SECONDS = 7 * 24 * 3600;
@@ -105,7 +105,7 @@ export async function handleConnections(request, env, url) {
       // Tell them, if they can be reached; either way this side forgets them.
       await callSite(connection.origin, "/_peer/disconnect", { key: connection.their_key, body: {} }).catch(() => {});
       // The owner's copies of what they said on that site (comments_elsewhere) stay: they're theirs.
-      await db.prepare("DELETE FROM connections WHERE id = ?").bind(connection.id).run();
+      await db.batch([...forgetFriend(db, connection.origin), db.prepare("DELETE FROM connections WHERE id = ?").bind(connection.id)]);
     }
     return json({ ok: true });
   }
@@ -190,9 +190,10 @@ function connectionsPage(connections) {
   return shell("Connections", `
 <p class="crumbs"><a href="/feed">Feed</a> /</p>
 <h1>Connected sites</h1>
-<p class="meta">Connect with friends who have their own afterwrd site. You'll each see the other's new posts in
-<a href="/feed">Feed</a> and can comment on them; your comments are kept on their site, as part of their archive. Only
-posts written on afterwrd are shared, never your imported Facebook archive, and only you, the owner, see Feed.</p>
+<p class="meta">Connect with friends who have their own afterwrd site, and you become friends: you'll each see the
+other's new posts in <a href="/feed">Feed</a>, and can look round each other's whole site (everything you've published,
+as anyone you've invited can) by coming in through your own site, without an invite or passkey. Your comments are kept
+on their site, as part of their archive. Disconnecting ends all of it at once.</p>
 
 <div class="actions-row">
   <button class="chip primary" id="make">Make a Connect link</button>
@@ -217,7 +218,8 @@ ${connections.length ? `<table class="numbers">
     <th>${escape(c.name)}</th>
     <td><a href="${escape(c.origin)}" target="_blank" rel="noopener noreferrer">${escape(host(c.origin))}</a></td>
     <td>${day(c.connected_at)}</td>
-    <td><button class="chip" data-disconnect="${c.id}" data-name="${escape(c.name)}">Disconnect</button></td>
+    <td><a class="chip" href="/_feed/visit?to=${encodeURIComponent(c.origin)}">Visit</a>
+      <button class="chip" data-disconnect="${c.id}" data-name="${escape(c.name)}">Disconnect</button></td>
   </tr>`).join("")}</tbody>
 </table>` : `<p class="empty">You're not connected with anyone yet.</p>`}`, `${POST_SCRIPT}
   const panel = document.getElementById("link");
@@ -253,8 +255,9 @@ function confirmPage(name, origin) {
   return shell("Connect", `
 <p class="crumbs"><a href="/_admin/connections">Connections</a> /</p>
 <h1>Connect with ${escape(name)}?</h1>
-<p>Their site is <strong>${escape(host(origin))}</strong>. Once connected, you'll each see the other's new posts in Feed
-and can comment on them. Only posts written on afterwrd are shared, and either of you can disconnect at any time.</p>
+<p>Their site is <strong>${escape(host(origin))}</strong>. Once connected you're friends: you'll each see the other's
+new posts in Feed, can comment on them, and can look round each other's whole site. Either of you can disconnect at any
+time, which ends all of it.</p>
 <p id="error" role="alert"></p>
 <div class="actions-row">
   <button class="chip primary" id="go">Connect</button>

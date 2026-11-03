@@ -1,12 +1,13 @@
 // The owner's Feed: the newest posts from every connected site (peers.js), fetched when the page opens. The
 // owner's comments go to the friend's site, which keeps them; a copy is kept here in comments_elsewhere.
 //   GET  /_feed/files/<connection>/<sha256>                     a photo from their site, passed through
+//   GET  /_feed/visit?to=<their site>&next=<path>                go and look round their site, as a friend
 //   POST /_feed/comments                                       connection, target, text (a form)
 //   POST /_feed/comments/<connection>/<remote id>/delete       (a form)
 import { actorId, commentId, postId } from "../public/static/activity.js";
 import { MAX_COMMENT } from "./archive/comments.js";
 import { SERVABLE_TYPES } from "../public/static/import/schema.js";
-import { callSite, cleanFeed } from "./peers.js";
+import { callSite, cleanFeed, siteOrigin } from "./peers.js";
 import { messagePage } from "./pages.js";
 import { html, now } from "./util.js";
 
@@ -64,6 +65,21 @@ export async function handleFeed(request, env, url) {
     const bytes = await readCapped(theirs, MAX_PHOTO);
     if (!bytes || (await sha256Hex(bytes)) !== file[2]) return new Response("Not found", { status: 404 });
     return new Response(bytes, { headers: { "Content-Type": type, "Cache-Control": "private, max-age=31536000, immutable" } });
+  }
+  if (request.method === "GET" && url.pathname === "/_feed/visit") {
+    const connection = await db.prepare("SELECT * FROM connections WHERE origin = ? AND connected_at IS NOT NULL")
+      .bind(siteOrigin(url.searchParams.get("to"), env) ?? "").first();
+    if (!connection) return problem("Your site isn't connected with that one. Connect first, from Connections.");
+    try {
+      const pass = await callSite(connection.origin, "/_peer/ticket", { key: connection.their_key, body: { next: url.searchParams.get("next") ?? "/" } });
+      // Only ever on to their own sign-in page.
+      if (typeof pass.url !== "string" || !pass.url.startsWith(`${connection.origin}/_auth/friend?ticket=`)) {
+        throw new Error("Their site sent something unexpected.");
+      }
+      return Response.redirect(pass.url, 302);
+    } catch (error) {
+      return problem(`Couldn't open ${connection.name}'s site: ${error.message}`);
+    }
   }
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
   if (request.headers.get("Origin") !== url.origin) return new Response("Request from another site", { status: 403 });

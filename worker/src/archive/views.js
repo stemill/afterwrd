@@ -37,7 +37,10 @@ function layout(ctx, { title, bodyClass = "", main }) {
 function navItems(ctx) {
   const items = NAV.filter(([, , s]) => ctx.sections.includes(s)).map(([path, label, key]) => ({ key, label, href: `/${path}` }));
   items.push({ key: "activity", label: "Activity", href: "/activity", badge: ctx.newComments });
-  return ctx.user.is_owner ? [{ key: "feed", label: "Feed", href: "/feed" }, ...items, ...OWNER_ITEMS] : items;
+  if (ctx.user.is_owner) return [{ key: "feed", label: "Feed", href: "/feed" }, ...items, ...OWNER_ITEMS];
+  // A connected friend, visiting from their own site.
+  if (ctx.user.site) items.push({ key: "home", label: "Back to my site", href: `${ctx.user.site}/`, tool: true });
+  return items;
 }
 
 const page = (ctx, title, content, bodyClass = "") =>
@@ -575,7 +578,8 @@ function feedCard(ctx, p) {
   return html`<article class="card from-friend">
   <header>
     <span class="who who-${c.id % 6}" aria-hidden="true">${initial(c.name)}</span>
-    <span class="what"><strong>${c.name}</strong> <span class="meta">${host(c.origin)}</span></span>
+    <span class="what"><strong>${c.name}</strong>
+      <a class="meta" href="/_feed/visit?to=${encodeURIComponent(c.origin)}" title="Look round ${c.name}'s site">${host(c.origin)}</a></span>
     <time title="${fmtDatetime(p.created_at)}">${fmtAgo(p.created_at)}</time>
   </header>
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}

@@ -21,7 +21,7 @@ const TABLES = {
   site_comments: { columns: "*" },
   comments_elsewhere: { columns: "*" },
   connections: { columns: "id, origin, name, connected_at", where: "connected_at IS NOT NULL" },
-  users: { columns: "id, name, is_owner, revoked_at" },
+  users: { columns: "id, name, is_owner, revoked_at, site" },
 };
 
 export async function handleExport(request, env, url) {
