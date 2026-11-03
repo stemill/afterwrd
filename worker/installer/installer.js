@@ -2,7 +2,7 @@
 //
 // Paste this whole file into a Cloudflare Worker and deploy it, then open the Worker's address:
 //   - into a new "Hello World" Worker, it installs afterwrd;
-//   - over an existing afterwrd, it updates it to this version, keeping its people, archive and photos.
+//   - over an existing afterwrd, it updates it to this version, keeping its passkeys, connections, archive and photos.
 //
 // What it does, with the API token you give it:
 //   1. finds this Worker in your account
@@ -10,7 +10,8 @@
 //   3. downloads afterwrd from the address below and checks every file against the fingerprint below,
 //      so what's installed is exactly the published release
 //   4. uploads it as a new version of this Worker
-// The token is used only while installing and isn't stored anywhere. Delete it afterwards.
+// If you tick "Remember it", the token is kept as the site's encrypted secret UPDATE_TOKEN, so the Update page can
+// install later releases in one click (the site can forget it there). Otherwise it isn't stored: delete it afterwards.
 import { api, deployVersion, existingDatabase, findOrCreateDatabase, findWorker, loadRelease, uploadAssets } from "../src/deploy.js";
 
 const RELEASE = "__RELEASE_BASE__";
@@ -69,17 +70,25 @@ const STEPS = {
   },
 
   // The database and the code, as a new version of this Worker.
-  async deploy({ token, account, jwt }, script) {
+  // With `remember`, the token is kept as the secret UPDATE_TOKEN for one-click updates.
+  async deploy({ token, account, jwt, remember }, script) {
     const release = await loadRelease(RELEASE, MANIFEST_SHA256);
     const settings = await api(token, `/accounts/${account}/workers/scripts/${script}/settings`);
     const existing = existingDatabase(settings);
     if (existing) {
       await deployVersion(token, account, script, release, { jwt, databaseId: existing, settings });
+      // An update keeps the site's secrets, so a remembered token is set on its own rather than alongside them.
+      if (remember) {
+        await api(token, `/accounts/${account}/workers/scripts/${script}/secrets`, {
+          method: "PUT", body: JSON.stringify({ name: "UPDATE_TOKEN", text: token, type: "secret_text" }),
+        });
+      }
       return { next: "/", upgrade: true };
     }
     const database = await findOrCreateDatabase(token, account, script);
     const setupCode = [...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, "0")).join("");
-    await deployVersion(token, account, script, release, { jwt, databaseId: database.uuid, settings, secrets: { SETUP_CODE: setupCode } });
+    const secrets = { SETUP_CODE: setupCode, ...(remember && { UPDATE_TOKEN: token }) };
+    await deployVersion(token, account, script, release, { jwt, databaseId: database.uuid, settings, secrets });
     return { next: `/_auth/setup?code=${setupCode}`, upgrade: false };
   },
 };
@@ -115,30 +124,40 @@ function page() {
   #log { padding-left: 1.2rem; }
   #error { color: #ff8070; }
   #done { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 12px; }
-  #done[hidden] { display: none; }
+  #done[hidden], #done [hidden] { display: none; }
+  label.remember { display: block; margin-top: 8px; }
+  label.remember input { width: auto; margin: 0 6px 0 0; padding: 0; }
+  label.remember .meta { display: block; margin: 2px 0 0 1.5rem; }
 </style>
 </head>
 <body>
 <main>
 <h1>Install afterwrd</h1>
 <p>This installs afterwrd ${VERSION} into your Cloudflare account, as this Worker. If this Worker is already afterwrd,
-it updates it to ${VERSION}, keeping everyone's access and your archive. It needs a Cloudflare API token so it can
+it updates it to ${VERSION}, keeping your passkeys, connections and archive. It needs a Cloudflare API token so it can
 create a database and upload afterwrd.</p>
 <ol class="how">
   <li><a class="button" href="${TOKEN_URL}" target="_blank" rel="noopener">Create a token</a><br>
     <span class="meta">On the page that opens, the permissions are already filled in. Scroll down, press
     <b>Continue to summary</b>, then <b>Create Token</b>, then copy the token.</span></li>
-  <li>Paste the token here:<input id="token" type="text" autocomplete="off" spellcheck="false" placeholder="Your API token"></li>
+  <li>Paste the token here:<input id="token" type="text" autocomplete="off" spellcheck="false" placeholder="Your API token">
+    <label class="remember"><input type="checkbox" id="remember" checked> Remember it, so updates are one click
+    <span class="meta">It's kept as an encrypted secret of your site, which no one can read back, not even you. It can
+    change the Workers in this Cloudflare account, so untick this if the account is used for anything else. You can
+    forget it from afterwrd's Update page at any time.</span></label></li>
   <li><button id="go">Install afterwrd</button></li>
 </ol>
 <ol id="log"></ol>
 <p id="error" role="alert"></p>
 <section id="done" hidden>
   <p><b id="done-title"></b></p>
-  <p>One last thing: <b>delete the token</b>. afterwrd doesn't keep it, but while it exists it can change your Workers.
-  Find "afterwrd installer" in the list and choose <b>Delete</b>.</p>
-  <p><a class="button secondary" href="${TOKENS_PAGE}" target="_blank" rel="noopener">Open my API tokens</a>
-     <a class="button" id="continue" href="/">Continue to afterwrd</a></p>
+  <p id="kept">Your token is remembered, so later updates are one click from afterwrd's <b>Update</b> page.</p>
+  <div id="not-kept">
+    <p>One last thing: <b>delete the token</b>. afterwrd hasn't kept it, but while it exists it can change your Workers.
+    Find "afterwrd installer" in the list and choose <b>Delete</b>. You'll make a new one when you update.</p>
+    <p><a class="button secondary" href="${TOKENS_PAGE}" target="_blank" rel="noopener">Open my API tokens</a></p>
+  </div>
+  <p><a class="button" id="continue" href="/">Continue to afterwrd</a></p>
 </section>
 <p class="meta">Release files are checked against the fingerprint ${MANIFEST_SHA256.slice(0, 12)}… before anything is installed.</p>
 </main>
@@ -163,7 +182,8 @@ create a database and upload afterwrd.</p>
       log("Uploading afterwrd " + version + "'s site files…");
       const { jwt } = await step("assets", { token, account });
       log(upgrade ? "Updating afterwrd to " + version + "…" : "Creating the database and installing afterwrd…");
-      const { next } = await step("deploy", { token, account, jwt });
+      const remember = document.getElementById("remember").checked;
+      const { next } = await step("deploy", { token, account, jwt, remember });
       box.value = "";
       log("Waiting for afterwrd to start…");
       for (let i = 0; i < 30; i++) {
@@ -175,6 +195,8 @@ create a database and upload afterwrd.</p>
         ? "afterwrd is updated to " + version + "."
         : "afterwrd is installed. Next you'll make yourself its owner.";
       document.getElementById("continue").href = next;
+      document.getElementById("kept").hidden = !remember;
+      document.getElementById("not-kept").hidden = remember;
       document.getElementById("done").hidden = false;
     } catch (err) {
       error.textContent = err.message;

@@ -23,7 +23,10 @@
   ol.steps > li { counter-increment: step; background: var(--surface); border-radius: 22px; padding: 18px 20px 18px 64px; position: relative; }
   ol.steps > li::before { content: counter(step); position: absolute; left: 18px; top: 16px; width: 30px; height: 30px; border-radius: 50%;
     background: var(--accent); color: var(--on-accent); font: 900 0.95rem var(--round); display: grid; place-items: center; }
+  ol.steps > li.optional { background: transparent; border: 2px dashed var(--border); }
+  ol.steps > li.optional::before { content: "+"; background: var(--surface); color: var(--text); }
   h2 { font: 900 1.2rem var(--round); margin: 2px 0 6px; }
+  h2 .meta { font: 600 0.85rem system-ui, sans-serif; }
   p { margin: 6px 0; }
   .meta { color: var(--muted); font-size: 0.9rem; }
   a { color: var(--accent-strong); }
@@ -47,20 +50,15 @@
 <main>
 <p class="brand" aria-label="afterwrd">afterw<svg class="o" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 1-4.7 14.5L3.8 20l1.2-3.6A8 8 0 0 1 12 4z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>rd</p>
 <h1>A small social network of your own</h1>
-<p class="lede">Post, share photos and talk with friends who have their own afterwrd site, and bring your Facebook years
-along. Only you sign in; friends see it from their own sites. It runs in your own free Cloudflare account, so no one else holds your data
-and there's nothing to pay. About 15 minutes on a computer.</p>
+<p class="lede">Post, share photos and talk with friends who have their own afterwrd site, and, if you like, bring your
+Facebook years along. Only you sign in; friends see it from their own sites. It runs in your own free Cloudflare account,
+so no one else holds your data and there's nothing to pay. About 10 minutes on a computer.</p>
 
 <ol class="steps">
   <li>
-    <h2>Ask Facebook for your download</h2>
-    <p>In Facebook's <a href="https://accountscenter.facebook.com/info_and_permissions/dyi/" target="_blank" rel="noopener">Download your information</a>,
-    choose your profile, <b>All available information</b>, format <b>JSON</b> and media quality <b>High</b>. Facebook
-    emails you when it's ready, which can take from minutes to a day. You'll need the zip file(s) at step 5.</p>
-  </li>
-  <li>
     <h2>Make a free Cloudflare account</h2>
-    <p>An email address is all it asks for. Don't add a card; afterwrd stays within the free plan.</p>
+    <p>An email address is all it asks for. Don't add a card; afterwrd stays within the free plan. Make a new account just
+    for afterwrd, even if you already have one: then your site can safely update itself in one click.</p>
     <a class="button" href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">Sign up to Cloudflare</a>
   </li>
   <li>
@@ -84,8 +82,17 @@ and there's nothing to pay. About 15 minutes on a computer.</p>
   <li>
     <h2>Open your Worker and follow the installer</h2>
     <p>Press <b>Visit</b> (or open <code>https://afterwrd.&lt;your-name&gt;.workers.dev</code>). The installer walks you through
-    the rest: a Cloudflare token it needs once, a passkey for you (your face, fingerprint or device PIN; no password),
-    then importing your Facebook zip and inviting people.</p>
+    the rest: a Cloudflare token (leave <b>Remember it</b> ticked, so updates are one click), then a passkey for you
+    (your face, fingerprint or device PIN; no password). Then you're in: write a post, add photos, and invite friends
+    from <b>Friends</b>.</p>
+  </li>
+  <li class="optional">
+    <h2>Bring your Facebook years <span class="meta">(optional, any time)</span></h2>
+    <p>In Facebook's <a href="https://accountscenter.facebook.com/info_and_permissions/dyi/" target="_blank" rel="noopener">Download your information</a>,
+    choose your profile, <b>All available information</b>, format <b>JSON</b> and media quality <b>High</b>. Facebook
+    emails you when it's ready, which can take from minutes to a day. Then choose <b>Import</b> in afterwrd's menu (behind
+    your picture), pick the zip file(s) and tick what to bring. Your posts, photos and comments go under <b>Memories</b>,
+    and your Facebook friends list shows who to invite.</p>
   </li>
 </ol>
 
@@ -93,20 +100,25 @@ and there's nothing to pay. About 15 minutes on a computer.</p>
   <h2>Keeping it safe</h2>
   <ul>
     <li><b>Turn on two-factor authentication</b> for your Cloudflare account (My Profile → Authentication). Anyone who gets
-      into that account can see your whole archive.</li>
-    <li><b>Delete the installer's token</b> when it's finished (it reminds you). afterwrd doesn't keep it, but while it exists
-      it can change your Workers.</li>
-    <li><b>Send invite links somewhere only that person will see them.</b> Whoever opens a link first gets in. Under
-      <b>People → Devices &amp; links</b> you can cancel links that haven't been used, delete a passkey or sign someone out.</li>
-    <li><b>Photo locations are left out</b> unless you choose to include them when importing: they can show where you live.</li>
-    <li><b>Keep it up to date</b> from the <b>Update</b> page, so security fixes reach your site.</li>
+      into that account can see your whole site.</li>
+    <li><b>Only let your site remember the token if the Cloudflare account is just for afterwrd.</b> The token can change
+      any Worker in the account. If the account has other things in it, untick <b>Remember it</b>, delete the token after
+      installing (My Profile → API Tokens), and make a new one each time you update.</li>
+    <li><b>Open device links only on your own phone or computer.</b> They let a new device in as you, so they work once,
+      for an hour. <b>Your devices</b> can cancel them, remove a passkey (signing that device out) or sign out everywhere.</li>
+    <li><b>Approve only friends you know.</b> Connect and invite links can be passed on, so each one only asks: nothing is
+      shared until you approve, and you can check the site address first.</li>
+    <li><b>Photo locations are removed</b> from photos you post, and left out of a Facebook import unless you choose to
+      include them: they can show where you live.</li>
+    <li><b>Keep it up to date</b> from the <b>Update</b> page (marked when there's a new version), so security fixes
+      reach your site.</li>
   </ul>
 </section>
 
 <footer>
   <p>The installer downloads afterwrd __VERSION__ from its <a href="__RELEASE_PAGE__">published release</a> and checks every file
-  against the fingerprint <code>__MANIFEST_SHORT__…</code> before installing anything. The token is only used while installing;
-  you can delete it afterwards in Cloudflare under My Profile → API Tokens. <a href="__REPO_PAGE__">Source code</a>.</p>
+  against the fingerprint <code>__MANIFEST_SHORT__…</code> before installing anything. The token is used to install and, if
+  your site remembers it, to update; you can delete it any time in Cloudflare under My Profile → API Tokens. <a href="__REPO_PAGE__">Source code</a>.</p>
   <p>afterwrd isn't affiliated with or endorsed by Meta. It only reads the "Download your information" file Facebook gives you.</p>
 </footer>
 </main>

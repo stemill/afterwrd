@@ -17,46 +17,49 @@ Facebook, with "On this day"), and your tools: *Your devices*, *Import*, *Downlo
 **Easiest: follow the install page, <https://afterwrd.app/>,** which has a button that copies the
 installer for you. The same steps in full:
 
-You need your Facebook download and a free Cloudflare account. It takes about 15 minutes, most of it waiting
-for Facebook.
+You need a free Cloudflare account and about 10 minutes on a computer. Bringing your Facebook years is optional, and
+can be done any time.
 
-1. **Get your Facebook download.** On Facebook: Settings → *Download your information* → choose your
-   profile, *All available information*, format **JSON**, media quality *High*. Facebook emails you when it's
-   ready (from minutes to a day); download the zip file(s).
-2. **Make a Cloudflare account** at <https://dash.cloudflare.com/sign-up>. An email address is all it asks
-   for; don't add a card.
-3. **Create a Worker.** In the Cloudflare dashboard's left-hand menu: *Compute* → *Workers & Pages* →
+1. **Make a Cloudflare account** at <https://dash.cloudflare.com/sign-up>. An email address is all it asks
+   for; don't add a card. Make a new account just for afterwrd, even if you have one, so your site can safely
+   remember its update token.
+2. **Create a Worker.** In the Cloudflare dashboard's left-hand menu: *Compute* → *Workers & Pages* →
    *Create application* (top right) → *Start with Hello World*. Replace the made-up *Worker name* (something
    like `blue-mud-43e4`) with `afterwrd`, or whatever you like: it becomes your address,
    `afterwrd.<your-name>.workers.dev`. Leave *Protect with Cloudflare Access* off (afterwrd has its own
    sign-in) and press *Deploy*. The first time, Cloudflare asks you to choose `<your-name>`.
-4. **Paste in the installer.** Press *Copy installer* on the [install page](https://afterwrd.app/)
+3. **Paste in the installer.** Press *Copy installer* on the [install page](https://afterwrd.app/)
    (or download `installer.js` from the [latest release](https://github.com/stemill/afterwrd/releases/latest) and
    copy all of it), then in the Worker press *Edit code*, select everything there, paste over it and press *Deploy*.
-5. **Run it.** Open your Worker's address. Press **Create a token**: Cloudflare's token page opens with the
+4. **Run it.** Open your Worker's address. Press **Create a token**: Cloudflare's token page opens with the
    permissions filled in; scroll down, press *Continue to summary*, *Create Token*, and copy the token. Paste it
-   into the installer and press **Install afterwrd**.
-6. **Make yourself the owner.** The installer hands over to afterwrd: give your name and create a passkey
-   (your face, fingerprint or device PIN; there's no password).
-7. **Import.** Choose *Import* in the menu, pick your Facebook zip file(s), tick what to publish and press
-   *Import and publish*. Your browser reads the download; only what you tick is uploaded.
-8. **Invite friends** from *Friends*: press *Invite* beside someone from your Facebook download for a message to
-   send them. Once they've set up their own site and used the link, approve them and you're connected.
+   into the installer, leave *Remember it* ticked (so updates are one click) and press **Install afterwrd**.
+5. **Make yourself the owner.** The installer hands over to afterwrd: give your name and create a passkey
+   (your face, fingerprint or device PIN; there's no password). Then write a post, add photos, and connect
+   with friends from *Friends*.
+6. **Optional: bring your Facebook years.** On Facebook: Settings → *Download your information* → choose your
+   profile, *All available information*, format **JSON**, media quality *High*. Facebook emails you when it's
+   ready (from minutes to a day). Then choose *Import* in afterwrd's menu, pick the zip file(s), tick what to
+   bring and press *Import and publish*. Your browser reads the download; only what you tick is uploaded. Your
+   Facebook friends then appear on *Friends*, each with an *Invite* button that makes a message to send them.
 
-Afterwards you can delete the token (Cloudflare: *My Profile* → *API Tokens*); it's only used while
-installing. The installer checks every file it downloads against the fingerprint built into it, so what's
-installed is exactly the published release. Cloudflare's free plan allows 5 GB of photos and videos.
+The token is used to install and, if your site remembers it, to update; you can delete it any time (Cloudflare:
+*My Profile* → *API Tokens*). The installer checks every file it downloads against the fingerprint built into it,
+so what's installed is exactly the published release. Cloudflare's free plan allows 5 GB of photos and videos.
 
 ### Keeping it safe
 
 - **Turn on two-factor authentication for your Cloudflare account** (My Profile → Authentication). Anyone who gets
-  into that account can see your whole archive.
-- **Delete the installer's token afterwards.** afterwrd doesn't keep it, but while it exists it can change your Workers.
+  into that account can see your whole site.
+- **Only let your site remember the token if the Cloudflare account is just for afterwrd.** The token can change any
+  Worker in the account. Otherwise untick *Remember it*, delete the token after installing, and make a new one each
+  time you update.
 - **Only open a device link on your own phone or computer**: whoever opens it first gets owner access, so it works
   once and lasts an hour. *Your devices* can cancel unused links, remove a passkey or sign out everywhere.
 - **Approve only friends you know.** A Connect or invite link can be passed on, so each one only asks: nothing is
   shared until you approve the request on *Friends*.
-- **Photo locations are left out** unless you tick *Photo locations* when importing; they can show where you live.
+- **Photo locations are removed** from photos you post, and left out of a Facebook import unless you tick *Photo
+  locations*; they can show where you live.
 - **Keep it up to date.** The owner's *Update* page installs a newer release, keeping your passkeys, connections
   and archive. (Pasting a newer `installer.js` over your afterwrd Worker does the same.)
 
