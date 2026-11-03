@@ -46,14 +46,19 @@ export async function handleUpdate(request, env, url, owner) {
   return new Response("Not found", { status: 404 });
 }
 
+// The latest release's manifest names its version. It's fetched from GitHub's download links rather than its API:
+// the API allows 60 anonymous requests an hour per address, and Workers share their addresses with many others.
+// (Only the version is read here; updating downloads the release by tag and checks every file.)
 async function latestRelease() {
   try {
-    const response = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-      headers: { "User-Agent": "heybert", Accept: "application/vnd.github+json" },
+    const response = await fetch(`https://github.com/${REPO}/releases/latest/download/manifest.json`, {
+      headers: { "User-Agent": "heybert" },
     });
     if (!response.ok) return { error: `GitHub said ${response.status}.` };
-    const { tag_name: tag, html_url: page } = await response.json();
-    return TAG_RE.test(tag) ? { tag, version: tag.slice(1), page } : { error: "The latest release has an unexpected name." };
+    const { version } = await response.json();
+    const tag = `v${version}`;
+    if (!TAG_RE.test(tag)) return { error: "The latest release has an unexpected version." };
+    return { tag, version, page: `https://github.com/${REPO}/releases/tag/${tag}` };
   } catch (error) {
     return { error: error.message };
   }
