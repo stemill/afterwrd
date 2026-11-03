@@ -35,7 +35,7 @@ ${FAVICON}
   fieldset label { display: grid; grid-template-columns: auto 1fr; gap: 0 0.6rem; padding: 0.35rem 0; cursor: pointer; }
   fieldset label input { grid-row: span 2; margin-top: 0.25rem; }
   fieldset label span { color: var(--muted); font-size: 0.85rem; }
-  #go { font: inherit; font-weight: 600; padding: 0.6rem 1.2rem; border: 0; border-radius: 999px; background: var(--accent); color: var(--on-accent); cursor: pointer; }
+  #go { font: inherit; font-weight: 600; padding: 0.6rem 1.2rem; border: 0; border-radius: 999px; background: var(--button); color: var(--on-button); cursor: pointer; }
   #go:disabled { opacity: 0.6; cursor: default; }
   #progress[hidden] { display: none; }
   #progress progress { width: 100%; height: 0.7rem; margin: 0.5rem 0; }

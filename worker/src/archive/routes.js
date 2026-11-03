@@ -1,7 +1,7 @@
 // The archive's pages, ported from the routes in afterwrd/app.py and reading the D1 copy that
 // `npm run publish` uploads. Only the sections chosen at publish time are served.
 import { findTarget, latestComments, loadThreads, newCount, photoKey, postKey } from "./comments.js";
-import { connectionById, loadFeed, markMine } from "../feed.js";
+import { connectionById, loadFeed, markMine, rememberPicture } from "../feed.js";
 import * as friend from "../friends.js";
 import { ownerName } from "../peers.js";
 import { SITE_ID } from "../posts.js";
@@ -81,6 +81,7 @@ export async function renderArchive(request, env, url, user, work) {
     me: me.results[0] ?? { id: -1, name: await ownerName(db), is_me: 1 },
     ownerName: await ownerName(db), // their name here, which can differ from the Facebook one (me.name)
     profile: await profilePictures(db),
+    friendFaces: await friendFaces(db),
   };
   // A profile picture or cover chosen here takes over from Facebook's.
   if (ctx.profile.profile) Object.assign(ctx.me, { profile_hash: ctx.profile.profile.hash, profile_media_id: ctx.profile.profile.id });
@@ -522,6 +523,7 @@ async function friendPosts(ctx, params, id) {
   return fromFriend(ctx, id, async (c) => {
     const { posts, paging, avatar, cover } = await friend.friendPosts(c, pageNumber(params));
     Object.assign(c, { avatar, cover });
+    if (avatar) await rememberPicture(ctx.db, c, avatar)?.run();
     for (const p of posts) p.comments = await markMine(ctx.db, c.id, p.key, p.comments, ctx.url.origin);
     return views.friendPostsPage(ctx, c, { posts, paging });
   });
@@ -541,4 +543,10 @@ async function friendPhoto(ctx, params, id, hash) {
     m.comments = await markMine(ctx.db, c.id, `photo-${m.hash}`, m.comments, ctx.url.origin);
     return views.friendPhotoPage(ctx, c, m);
   });
+}
+
+/** Friends' profile pictures by site, where the link their site gave is still good. */
+async function friendFaces(db) {
+  const rows = await all(db, "SELECT origin, avatar_url FROM connections WHERE connected_at IS NOT NULL AND avatar_exp > ?", [now()]);
+  return Object.fromEntries(rows.map((r) => [r.origin, r.avatar_url]));
 }

@@ -137,7 +137,9 @@ function thread(ctx, key, comments) {
   const canDelete = (c) => c.author_id === ctx.user.id || Boolean(ctx.user.is_owner);
   return html`<section class="thread" id="t-${key}" aria-label="Comments">
   ${comments.map((c) => html`<div class="comment" id="c${c.id}">
-    <span class="who who-${(c.author_id ?? 0) % 6}" aria-hidden="true">${initial(c.name)}</span>
+    ${c.author_is_owner ? ownerFace(ctx)
+      : c.origin && c.origin !== "site" && ctx.friendFaces?.[c.origin] ? html`<img class="who" src="${ctx.friendFaces[c.origin]}" alt="" aria-hidden="true">`
+        : html`<span class="who who-${(c.author_id ?? 0) % 6}" aria-hidden="true">${initial(c.name)}</span>`}
     <div class="bubble"><strong>${c.name}</strong>${c.origin && c.origin !== "site" && html`<span class="from">${host(c.origin)}</span>`}<span class="said">${linkify(c.text)}</span></div>
     <div class="under">
       <time title="${fmtDatetime(c.created_at)}">${fmtAgo(c.created_at)}</time>
@@ -687,7 +689,7 @@ function remoteThread(ctx, c, target, comments) {
   const back = ctx.url.pathname + ctx.url.search;
   return html`<section class="thread" id="t-${target}" aria-label="Comments">
   ${comments.map((r) => html`<div class="comment" id="r${c.id}-${r.id}">
-    <span class="who who-${r.mine ? ctx.user.id % 6 : r.id % 6}" aria-hidden="true">${initial(r.mine ? ctx.user.name : r.name)}</span>
+    ${r.mine ? ownerFace(ctx) : r.from ? faceFor(ctx, r.from, r.name, r.id) : friendFace(ctx, c)}
     <div class="bubble"><strong>${r.mine ? ctx.user.name : r.name}</strong>${!r.mine && r.from && html`<span class="from">${host(r.from)}</span>`}<span class="said">${linkify(r.text)}</span></div>
     <div class="under">
       <time title="${fmtDatetime(r.created_at)}">${fmtAgo(r.created_at)}</time>
@@ -708,16 +710,21 @@ function remoteThread(ctx, c, target, comments) {
 
 /** A post from a friend's site, in Feed or on their posts page. */
 /** A friend's profile picture, or the first letter of their name. */
-const friendFace = (c) => (c.avatar
-  ? html`<img class="who" src="${c.avatar.thumbSrc}" alt="" aria-hidden="true">`
-  : html`<span class="who who-${c.id % 6}" aria-hidden="true">${initial(c.name)}</span>`);
+const friendFace = (ctx, c) => faceFor(ctx, c.origin, c.name, c.id, c.avatar?.thumbSrc);
+
+/** Someone from another site: the picture their site gave (just now, or remembered), or their initial. */
+function faceFor(ctx, origin, name, n, fresh = null) {
+  const picture = fresh ?? ctx.friendFaces?.[origin];
+  return picture ? html`<img class="who" src="${picture}" alt="" aria-hidden="true">`
+    : html`<span class="who who-${n % 6}" aria-hidden="true">${initial(name)}</span>`;
+}
 
 function remoteCard(ctx, c, p, { thread = true } = {}) {
   const n = p.photos.length;
   const what = p.title && p.title !== "Posted on afterwrd." ? summary(p.title, c.name) : "";
   return html`<article class="card social from-friend">
   <header>
-    ${friendFace(c)}
+    ${friendFace(ctx, c)}
     <span class="what"><a href="${friendBase(c)}/posts"><strong>${c.name}</strong></a>
       <span class="meta">${what || host(c.origin)}</span></span>
     <time title="${fmtDatetime(p.created_at)}">${fmtAgo(p.created_at)}</time>
@@ -754,7 +761,7 @@ export function friendsIndexPage(ctx, { friends, facebook }) {
 ${friends.length ? html`<ul class="friend-list">
   ${friends.map((c) => html`<li class="card">
     <a class="friend-link" href="${friendBase(c)}/posts">
-      <span class="who who-${c.id % 6}" aria-hidden="true">${initial(c.name)}</span>
+      ${friendFace(ctx, c)}
       <span><strong>${c.name}</strong><span class="meta">${host(c.origin)} · friends since ${fmtDate(c.connected_at)}</span></span>
     </a>
     <nav class="friend-tabs"><a href="${friendBase(c)}/posts">Posts</a><a href="${friendBase(c)}/photos">Photos</a></nav>
@@ -927,7 +934,7 @@ export function homePage(ctx, { own, feed, onThisDay, friends }) {
     <section class="card">
       <h2>Friends</h2>
       ${friends.length ? html`<ul class="mini-friends">
-        ${friends.map((c) => html`<li><a href="/friend/${c.id}/posts"><span class="who who-${c.id % 6}" aria-hidden="true">${initial(c.name)}</span>${c.name}</a></li>`)}
+        ${friends.map((c) => html`<li><a href="/friend/${c.id}/posts">${friendFace(ctx, c)}${c.name}</a></li>`)}
       </ul>` : html`<p class="meta">Connect with friends who have their own afterwrd site to see their posts here.</p>`}
       <p><a class="chip" href="/_admin/connections">${raw(icon("connections"))}<span>Connect with a friend</span></a></p>
     </section>

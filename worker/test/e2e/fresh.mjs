@@ -2,6 +2,7 @@
 // Posts, ticked: Posts and Photos stay for afterwrd posts, while imported material follows what was ticked.
 // Needs a fresh local database with SETUP_CODE=local-test-setup-code.
 //   node fresh.mjs <zip> <fixtures dir>
+import { execFileSync } from "node:child_process";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
@@ -70,6 +71,15 @@ await page.goto(`${BASE}/photos`);
 check("Photos shows only the afterwrd album", (await albums()).join() === "Posted on afterwrd", (await albums()).join());
 check("imported photo sets stay hidden", (await page.goto(`${BASE}/photos/album/other`)).status() === 404
   && (await page.goto(`${BASE}/photos/tagged`)).status() === 404);
+
+// With no picture chosen here, Facebook's profile picture and cover (from the download) are used.
+const sql = (q) => execFileSync("./node_modules/.bin/wrangler", ["d1", "execute", "afterwrd", "--local", "--command", q],
+  { cwd: WORKER, stdio: "ignore" });
+sql("UPDATE people SET profile_media_id = (SELECT MIN(id) FROM media WHERE hash IS NOT NULL), cover_media_id = (SELECT MIN(id) FROM media WHERE hash IS NOT NULL) WHERE is_me = 1");
+await page.goto(`${BASE}/posts`);
+check("Facebook's picture and cover head the profile", Boolean(await page.$("section.profile .avatar img")) && Boolean(await page.$("section.profile .cover img"))
+  && !(await page.$(".profile-prompt")));
+check("…and the picture is in the header", Boolean(await page.$("header.site .face img")));
 
 check("no script errors", errors.length === 0, errors.join(" | "));
 await browser.close();

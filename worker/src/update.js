@@ -171,7 +171,7 @@ ${FAVICON}
 <style>
   .how { padding-left: 1.2rem; }
   .how li { margin: 0.6rem 0; }
-  .button, #go { display: inline-block; padding: 0.5rem 1rem; border: 0; border-radius: 999px; background: var(--accent); color: var(--on-accent);
+  .button, #go { display: inline-block; padding: 0.5rem 1rem; border: 0; border-radius: 999px; background: var(--button); color: var(--on-button);
     font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
   .button.secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
   #go:disabled { opacity: 0.6; cursor: default; }

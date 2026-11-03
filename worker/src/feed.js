@@ -17,6 +17,15 @@ const TARGET_RE = /^(post-\d+-[0-9a-f]{8}|photo-[0-9a-f]{64})$/;
 export const connectionById = (db, id) => db.prepare("SELECT * FROM connections WHERE id = ? AND connected_at IS NOT NULL")
   .bind(Number(id) || 0).first();
 
+/** Remembers a friend's profile picture link (and when it stops working), from what their site just sent. */
+export function rememberPicture(db, connection, avatar) {
+  const exp = Number(/[?&]exp=(\d+)/.exec(avatar?.thumbSrc ?? "")?.[1]) || null;
+  if (!exp || connection.avatar_url === avatar.thumbSrc) return null;
+  connection.avatar_url = avatar.thumbSrc;
+  connection.avatar_exp = exp;
+  return db.prepare("UPDATE connections SET avatar_url = ?, avatar_exp = ? WHERE id = ?").bind(avatar.thumbSrc, exp, connection.id);
+}
+
 /**
  * Marks the owner's own comments on a friend's post or photo (`target`): the ones this site sent there
  * (comments_elsewhere), shown with the words this site kept, whatever the friend's site says. Anything else claiming
@@ -48,6 +57,8 @@ export async function loadFeed(db, ownOrigin) {
     for (const r of renamed) r.connection.name = r.feed.name;
   }
   for (const r of replies) if (r.feed) r.connection.avatar = r.feed.avatar;
+  const pictures = replies.map((r) => r.feed?.avatar && rememberPicture(db, r.connection, r.feed.avatar)).filter(Boolean);
+  if (pictures.length) await db.batch(pictures);
   const posts = [];
   for (const r of replies) {
     for (const p of r.feed?.posts ?? []) {

@@ -16,11 +16,20 @@ const MAX_BATCH = 50;
 const ROLES = { profile: "Profile pictures", cover: "Cover photos" };
 const clean = (v, max) => (typeof v === "string" ? v.replace(/\r\n?/g, "\n").trim().slice(0, max) : "");
 
-/** The owner's chosen profile picture and cover (settings), if those photos are still here. */
+/**
+ * The owner's profile picture and cover: the ones chosen here (settings), if those photos are still here, or else
+ * Facebook's, from the download.
+ */
 export async function profilePictures(db) {
-  const { results } = await db.prepare(`SELECT s.key, m.id, m.hash, m.thumb_hash FROM settings s
-    JOIN media m ON m.hash = s.value WHERE s.key IN ('profile_hash', 'cover_hash') GROUP BY s.key`).all();
-  const pick = (key) => results.find((r) => r.key === key) ?? null;
+  const [chosen, facebook] = await db.batch([
+    db.prepare(`SELECT s.key, m.id, m.hash, m.thumb_hash FROM settings s
+      JOIN media m ON m.hash = s.value WHERE s.key IN ('profile_hash', 'cover_hash') GROUP BY s.key`),
+    db.prepare(`SELECT 'profile_hash' AS key, m.id, m.hash, m.thumb_hash FROM people p JOIN media m ON m.id = p.profile_media_id
+        WHERE p.is_me = 1 AND m.hash IS NOT NULL
+      UNION ALL SELECT 'cover_hash', m.id, m.hash, m.thumb_hash FROM people p JOIN media m ON m.id = p.cover_media_id
+        WHERE p.is_me = 1 AND m.hash IS NOT NULL`),
+  ]);
+  const pick = (key) => chosen.results.find((r) => r.key === key) ?? facebook.results.find((r) => r.key === key) ?? null;
   return { profile: pick("profile_hash"), cover: pick("cover_hash") };
 }
 

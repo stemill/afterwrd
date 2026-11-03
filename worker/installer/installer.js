@@ -106,7 +106,7 @@ function page() {
   ol.how { padding-left: 1.2rem; }
   ol.how li { margin: 0.5rem 0; }
   .meta { color: var(--muted); font-size: 0.85rem; }
-  a.button, button { display: inline-block; padding: 10px 16px; border: 0; border-radius: 999px; background: var(--accent); color: var(--on-accent);
+  a.button, button { display: inline-block; padding: 10px 16px; border: 0; border-radius: 999px; background: var(--text); color: var(--on-accent);
     font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
   a.button.secondary { background: #263329; color: var(--text); }
   button:disabled { opacity: 0.6; cursor: default; }

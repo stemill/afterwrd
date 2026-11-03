@@ -7,7 +7,7 @@ const STYLE = `
   @font-face { font-family: "Nunito"; src: url("/static/fonts/nunito.woff2") format("woff2"); font-weight: 200 1000; font-display: swap; }
   @font-face { font-family: "Nunito Sans"; src: url("/static/fonts/nunito-sans.woff2") format("woff2"); font-weight: 200 1000; font-display: swap; }
   :root { --bg: #16201b; --surface: #1f2b25; --sunken: #121a16; --text: #ede6da; --muted: #a9a092; --border: #2e3d35;
-          --accent: #ff8a3d; --accent-strong: #ffab73; --on-accent: #16201b; color-scheme: dark;
+          --accent: #ff8a3d; --accent-strong: #ffab73; --on-accent: #16201b; --button: #ede6da; --on-button: #16201b; color-scheme: dark;
           --round: "Nunito", ui-rounded, system-ui, sans-serif; }
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: var(--bg);
@@ -19,9 +19,9 @@ const STYLE = `
   h1 { font: 900 1.75rem/1.2 var(--round); margin: 0 0 10px; letter-spacing: -0.015em; }
   p { margin: 0 0 20px; color: var(--muted); }
   a { color: var(--accent-strong); }
-  button, .button { display: block; width: 100%; min-height: 3rem; padding: 12px; border: 0; border-radius: 999px; background: var(--accent);
-           color: var(--on-accent); font: 900 1rem var(--round); text-align: center; text-decoration: none; cursor: pointer; }
-  button:hover, .button:hover { background: var(--accent-strong); }
+  button, .button { display: block; width: 100%; min-height: 3rem; padding: 12px; border: 0; border-radius: 999px; background: var(--button);
+           color: var(--on-button); font: 900 1rem var(--round); text-align: center; text-decoration: none; cursor: pointer; }
+  button:hover, .button:hover { background: #ffffff; }
   button:disabled { opacity: 0.6; cursor: default; }
   :focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 2px; }
   #error { color: #ff8070; margin: 12px 0 0; min-height: 1.5em; }

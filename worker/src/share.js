@@ -11,6 +11,7 @@ import {
 } from "../public/static/activity.js";
 import { loadThreads } from "./archive/comments.js";
 import { mediaSet } from "./archive/routes.js";
+import { profilePictures } from "./photos.js";
 import { SITE_ID } from "./posts.js";
 import { fromBase64Url, now, randomToken, toBase64Url } from "./util.js";
 
@@ -32,9 +33,12 @@ async function key(env) {
 const signature = async (env, hash, exp) =>
   toBase64Url(new Uint8Array(await crypto.subtle.sign("HMAC", await key(env), new TextEncoder().encode(`${hash}.${exp}`))));
 
-/** A link to one stored file that works without signing in until it expires (one to two hours, on the hour). */
-export async function signedFile(env, site, hash) {
-  const exp = (Math.floor(now() / 3600) + 2) * 3600;
+/**
+ * A link to one stored file that works without signing in until it expires: one to two hours, on the hour, or for
+ * a profile picture or cover (`long`), six to seven days, so friends' sites can keep showing it.
+ */
+export async function signedFile(env, site, hash, { long = false } = {}) {
+  const exp = long ? (Math.floor(now() / 86400) + 7) * 86400 : (Math.floor(now() / 3600) + 2) * 3600;
   return `${site}/files/${hash}?exp=${exp}&sig=${await signature(env, hash, exp)}`;
 }
 
@@ -49,15 +53,15 @@ export async function signedFor(env, hash, params) {
 
 // --- what's shared --------------------------------------------------------------------------------------------------
 
-/** The owner as a Person, with their profile picture (icon) and cover (image) if they've chosen them. */
+/** The owner as a Person, with their profile picture (icon) and cover (image): see profilePictures. */
 export async function ownerActor(env, site, name) {
   const db = env.DB;
-  const pick = async (key) => {
-    const m = await db.prepare(`SELECT m.* FROM settings s JOIN media m ON m.hash = s.value WHERE s.key = ? ORDER BY m.id LIMIT 1`)
-      .bind(key).first();
-    return m ? media(env, site, m) : undefined;
+  const pictures = await profilePictures(db);
+  const pick = async (p) => {
+    const m = p && await db.prepare("SELECT * FROM media WHERE id = ?").bind(p.id).first();
+    return m ? media(env, site, m, { long: true }) : undefined;
   };
-  return { type: "Person", id: actorId(site), name, icon: await pick("profile_hash"), image: await pick("cover_hash") };
+  return { type: "Person", id: actorId(site), name, icon: await pick(pictures.profile), image: await pick(pictures.cover) };
 }
 
 async function chosen(db) {
@@ -65,9 +69,9 @@ async function chosen(db) {
   return row ? JSON.parse(row.value) : [];
 }
 
-async function media(env, site, m) {
-  const object = mediaObject(site, m, { "afterwrd:fetch": await signedFile(env, site, m.hash) });
-  if (object.preview && m.thumb_hash) object.preview["afterwrd:fetch"] = await signedFile(env, site, m.thumb_hash);
+async function media(env, site, m, { long = false } = {}) {
+  const object = mediaObject(site, m, { "afterwrd:fetch": await signedFile(env, site, m.hash, { long }) });
+  if (object.preview && m.thumb_hash) object.preview["afterwrd:fetch"] = await signedFile(env, site, m.thumb_hash, { long });
   delete object.location; // where photos were taken stays here
   return object;
 }

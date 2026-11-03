@@ -16,6 +16,10 @@
   --accent-strong: #ffab73; /* links and accents on dark */
   --accent-soft: #3a2a1d;
   --on-accent: #16201b;
+  /* Buttons are warm cream: ember is kept for the logo, the page you're on and what's new. */
+  --button: #ede6da;
+  --button-hover: #ffffff;
+  --on-button: #16201b;
   --moss: #8fbf7f;
   --danger: #ff8070;
   --tint-1: #2b3a32; --tint-2: #3a2a1d; --tint-3: #2e2a40; --tint-4: #3a3420; --tint-5: #1f3140; --tint-6: #3a2430;
@@ -113,8 +117,8 @@ main { max-width: 900px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
   border: 0; background: var(--raised); font: 800 0.92rem var(--round); color: var(--text); cursor: pointer; white-space: nowrap;
 }
 .chip:hover, .button:hover { text-decoration: none; background: color-mix(in srgb, var(--raised) 70%, var(--accent)); color: #fff; }
-.chip.primary, .button.primary { background: var(--accent); color: var(--on-accent); }
-.chip.primary:hover, .button.primary:hover { background: var(--accent-strong); color: var(--on-accent); }
+.chip.primary, .button.primary { background: var(--button); color: var(--on-button); }
+.chip.primary:hover, .button.primary:hover { background: var(--button-hover); color: var(--on-button); }
 .chip.danger { color: var(--danger); }
 .chip.danger:hover { background: color-mix(in srgb, var(--raised) 70%, var(--danger)); color: #fff; }
 button.link { padding: 0; border: 0; background: none; color: var(--accent-strong); font: inherit; font-size: 0.85rem; text-decoration: underline; cursor: pointer; }
@@ -129,8 +133,8 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent-stron
   flex: 1 1 16rem; padding-left: 2.6rem;
   background: var(--sunken) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a9a092' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") 0.95rem 50% / 1.1rem no-repeat;
 }
-.filters button { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-family: var(--round); font-weight: 900; cursor: pointer; }
-.filters button:hover { background: var(--accent-strong); }
+.filters button { background: var(--button); border-color: var(--button); color: var(--on-button); font-family: var(--round); font-weight: 900; cursor: pointer; }
+.filters button:hover { background: var(--button-hover); }
 
 .tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 1.25rem; }
 .tabs a { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.45rem 1rem; border-radius: 999px; background: var(--raised); color: #c9c0b2; font: 800 0.9rem var(--round); }
@@ -183,9 +187,9 @@ a.badge:hover { text-decoration: none; }
 .composer label.chip:focus-within { outline: 3px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 2px; }
 .composer .post {
   min-height: 2.6rem; padding: 0 1.5rem; border: 0; border-radius: 999px; cursor: pointer;
-  background: var(--accent); color: var(--on-accent); font: 900 0.98rem var(--round);
+  background: var(--button); color: var(--on-button); font: 900 0.98rem var(--round);
 }
-.composer .post:hover { background: var(--accent-strong); }
+.composer .post:hover { background: var(--button-hover); }
 .composer .post:disabled { opacity: 0.6; cursor: progress; }
 .composer .error { margin: 0; color: var(--danger); font-weight: 700; }
 .composer .error:empty { display: none; }
@@ -220,9 +224,9 @@ img.who { object-fit: cover; padding: 0; }
 .say textarea:focus { outline: none; border-color: var(--accent); }
 .say button {
   min-height: 2.6rem; padding: 0 1.15rem; border: 0; border-radius: 999px; cursor: pointer;
-  background: var(--accent); color: var(--on-accent); font: 900 0.9rem var(--round);
+  background: var(--button); color: var(--on-button); font: 900 0.9rem var(--round);
 }
-.say button:hover { background: var(--accent-strong); }
+.say button:hover { background: var(--button-hover); }
 
 /* Home: the stream beside a side column (On this day, friends) */
 .home { max-width: 1180px; display: flex; flex-wrap: wrap; gap: 1.75rem; align-items: flex-start; }
@@ -327,7 +331,7 @@ body.wide main { max-width: 1240px; }
 .play { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
 .play::before {
   content: ""; width: 3rem; height: 3rem; border-radius: 50%;
-  background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 12'%3E%3Cpath d='M1 0l9 6-9 6z' fill='%2316201b'/%3E%3C/svg%3E") 56% 50% / 0.95rem no-repeat;
+  background: var(--button) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 12'%3E%3Cpath d='M1 0l9 6-9 6z' fill='%2316201b'/%3E%3C/svg%3E") 56% 50% / 0.95rem no-repeat;
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.35);
 }
 
@@ -405,7 +409,7 @@ main.theatre { flex: 1; min-height: 0; width: 100%; max-width: none; margin: 0; 
 .info h2 { margin: 1.75rem 0 0.6rem; font: 900 0.8rem var(--round); color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .info .card { padding: 0.9rem 1rem; }
 .info .original a { display: inline-flex; padding: 0.5rem 1.05rem; border-radius: 999px; background: var(--raised); color: var(--text); font: 800 0.9rem var(--round); }
-.info .original a:hover { text-decoration: none; background: var(--accent); color: var(--on-accent); }
+.info .original a:hover { text-decoration: none; background: var(--button); color: var(--on-button); }
 .info .original { margin-top: 1.5rem; }
 @media (max-width: 820px) {
   body.viewer { display: block; height: auto; overflow: visible; }

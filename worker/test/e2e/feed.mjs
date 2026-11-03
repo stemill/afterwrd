@@ -98,6 +98,17 @@ check("Home shows Ann's own posts and Bob's together", Boolean(await ann.$("arti
 let annFeed = await feedCards(ann);
 check("Ann's Feed has Bob's post with its photo", annFeed.length === 1 && annFeed[0].who === "Bob Example" && annFeed[0].photos === 1, JSON.stringify(annFeed));
 await ann.waitForFunction(() => document.querySelector("article.from-friend .collage img")?.complete, { timeout: 15_000 });
+// Bob makes his holiday photo his profile picture; Ann's site shows it, and remembers it for her Friends page.
+await bob.goto(`${B}/posts`);
+const bobsPhoto = await bob.$eval("main article.own .collage a.tile", (a) => a.getAttribute("href"));
+await bob.goto(B + bobsPhoto);
+await Promise.all([bob.waitForNavigation(), bob.click('.photo-tools form:nth-of-type(1) button')]);
+check("Bob's own header shows his new picture", Boolean(await bob.$("header.site .face img")));
+await ann.goto(`${A}/`);
+check("Ann's Home shows Bob's picture on his post", await ann.$eval("article.from-friend header img.who", (i) => i.getAttribute("src").startsWith("http://localhost:8788/files/")).catch(() => false));
+await ann.goto(`${A}/friend`);
+check("…and her Friends page remembers it", Boolean(await ann.$(".friend-link img.who")));
+await ann.goto(`${A}/feed`);
 check("the photo loads straight from Bob's site, by a signed link", await ann.$eval("article.from-friend .collage img", (i, b) => i.naturalWidth > 0
   && i.getAttribute("src").startsWith(`${b}/files/`) && i.getAttribute("src").includes("&sig="), B));
 await ann.goto(`${A}/_admin/connections`);

@@ -178,7 +178,7 @@ ${FAVICON}
   #link input { width: 100%; font: inherit; font-size: 0.9rem; padding: 0.4rem 0.6rem; margin: 0.5rem 0;
     border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--text); }
   #link button { margin: 0 0.4rem 0 0; }
-  #link button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  #link button.primary { background: var(--button); border-color: var(--button); color: var(--on-button); }
   #link .warning { color: #b3261e; margin: 0.4rem 0 0; }
   #link .warning[hidden] { display: none; }
   #error { color: #d93025; margin: 0 0 1rem; }
