@@ -94,13 +94,13 @@ default (posts and photos):
 Files over 95 MB (the most Cloudflare accepts in one upload) are left out with a note. The free plan allows
 5 GB of photos and videos in all.
 
-**Releasing.** In `worker/`, bump `version` in `package.json`, then:
+**Releasing.** Bump `version` in `worker/package.json`, commit, then tag and push:
 ```sh
-npm run release -- --base https://github.com/stemill/heybert/releases/download/v<version>
+git tag -a v<version> -m "heybert <version>" && git push origin v<version>
 ```
-Create a GitHub release with the tag `v<version>` and attach every file in `worker/release/<version>/`
-(the manifest, the files named by hash, and `installer.js`). The installer only accepts files matching the
-fingerprints it was built with, so the assets must be uploaded unchanged.
+A GitHub Action (`.github/workflows/release.yml`) builds the release from the tagged code and publishes it with
+every file attached, including `installer.js`. To build one locally instead:
+`npm run release -- --base https://github.com/stemill/heybert/releases/download/v<version>` in `worker/`.
 
 **Testing.** `npm run test:ingest -- <export folder>` checks the browser importer against
 `uv run heybert-ingest` row by row. To try the site locally: `npx wrangler d1 migrations apply heybert --local`,
