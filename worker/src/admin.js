@@ -142,7 +142,7 @@ function adminPage(list, owner) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>People · heybert</title>
+<title>People · afterwrd</title>
 <link rel="stylesheet" href="/static/style.css">
 <link rel="icon" href="data:,">
 <style>
@@ -180,7 +180,7 @@ function adminPage(list, owner) {
 </head>
 <body>
 <header class="site">
-  <a class="brand" href="/">heybert</a>
+  <a class="brand" href="/">afterwrd</a>
   <nav><a href="/">← Back to the archive</a><a href="/_admin" aria-current="page">People</a><a href="/_admin/import">Import</a><a href="/_admin/update">Update</a><form method="post" action="/_auth/logout"><button class="link">Sign out</button></form></nav>
 </header>
 <main>
@@ -276,7 +276,7 @@ ${revoked.length ? `
   const share = document.getElementById("share");
   if (navigator.share) {
     share.hidden = false;
-    share.addEventListener("click", () => navigator.share({ title: "heybert invite", url: linkUrl.value }).catch(() => {}));
+    share.addEventListener("click", () => navigator.share({ title: "afterwrd invite", url: linkUrl.value }).catch(() => {}));
   }
   document.getElementById("done").addEventListener("click", () => location.reload());
 </script>

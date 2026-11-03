@@ -1,7 +1,7 @@
-# Builds and publishes a heybert release when a version tag is pushed:
+# Builds and publishes a afterwrd release when a version tag is pushed:
 #
 #   (bump "version" in worker/package.json and commit)
-#   git tag -a v0.2.0 -m "heybert 0.2.0" && git push origin v0.2.0
+#   git tag -a v0.2.0 -m "afterwrd 0.2.0" && git push origin v0.2.0
 #
 # The release's files (manifest, files named by hash, installer.js) are built here from the tagged source and
 # attached to a GitHub release, which is where installers download them from.
@@ -51,11 +51,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" release/"$VERSION"/* \
-            --title "heybert $VERSION" \
-            --notes "To install, follow the [install page](https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/), which copies installer.js for you."
+            --title "afterwrd $VERSION" \
+            --notes "To install, follow the [install page](https://$(node -p "require('./package.json').afterwrd.site")/), which copies installer.js for you."
 
       # The install page, with this release's installer in it, goes to the gh-pages branch, which GitHub Pages
-      # serves (Settings → Pages → Deploy from a branch → gh-pages). Only the latest page is kept.
+      # serves (Settings → Pages → Deploy from a branch → gh-pages) at the domain in package.json (afterwrd.site).
+      # Only the latest page is kept.
       - name: Publish the install page
         env:
           GH_TOKEN: ${{ github.token }}
@@ -66,5 +67,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -qm "Install page for heybert $VERSION"
+          git commit -qm "Install page for afterwrd $VERSION"
           git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages

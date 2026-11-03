@@ -1,5 +1,5 @@
 [project]
-name = "heybert"
+name = "afterwrd"
 version = "0.1.0"
 description = "Browse a Facebook data export: friends, posts, photos, comments and likes."
 readme = "README.md"
@@ -12,8 +12,8 @@ dependencies = [
 ]
 
 [project.scripts]
-heybert = "heybert.app:main"
-heybert-ingest = "heybert.ingest:main"
+afterwrd = "afterwrd.app:main"
+afterwrd-ingest = "afterwrd.ingest:main"
 
 [build-system]
 requires = ["hatchling"]

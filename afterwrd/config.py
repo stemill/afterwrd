@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
 
-DATA_DIR = Path(os.environ.get("HEYBERT_DATA", Path(__file__).resolve().parent.parent / "data"))
-DB_PATH = DATA_DIR / "heybert.db"
+DATA_DIR = Path(os.environ.get("AFTERWRD_DATA", Path(__file__).resolve().parent.parent / "data"))
+DB_PATH = DATA_DIR / "afterwrd.db"
 MEDIA_DIR = DATA_DIR / "media"
 THUMB_DIR = DATA_DIR / "thumbs"
 

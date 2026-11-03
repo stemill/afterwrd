@@ -1,12 +1,15 @@
-# heybert
+# afterwrd
 
 Your Facebook archive as a private website that only people you invite can see: your posts, photos and
 videos (and, if you choose, comments, likes and friends), with search. It runs in your own free Cloudflare
 account, so no one else holds your data, and setting it up needs no terminal, no GitHub account and no card.
 
+afterwrd isn't affiliated with or endorsed by Meta. It only reads the "Download your information" file Facebook
+gives you; it never signs in to Facebook or fetches anything from it.
+
 ## Install your own
 
-**Easiest: follow the install page, <https://stemill.github.io/heybert/>,** which has a button that copies the
+**Easiest: follow the install page, <https://afterwrd.app/>,** which has a button that copies the
 installer for you. The same steps in full:
 
 You need your Facebook download and a free Cloudflare account. It takes about 15 minutes, most of it waiting
@@ -19,16 +22,16 @@ for Facebook.
    for; don't add a card.
 3. **Create a Worker.** In the Cloudflare dashboard's left-hand menu: *Compute* → *Workers & Pages* →
    *Create application* (top right) → *Start with Hello World*. Replace the made-up *Worker name* (something
-   like `blue-mud-43e4`) with `heybert`, or whatever you like: it becomes your address,
-   `heybert.<your-name>.workers.dev`. Leave *Protect with Cloudflare Access* off (heybert has its own
+   like `blue-mud-43e4`) with `afterwrd`, or whatever you like: it becomes your address,
+   `afterwrd.<your-name>.workers.dev`. Leave *Protect with Cloudflare Access* off (afterwrd has its own
    sign-in) and press *Deploy*. The first time, Cloudflare asks you to choose `<your-name>`.
-4. **Paste in the installer.** Press *Copy installer* on the [install page](https://stemill.github.io/heybert/)
-   (or download `installer.js` from the [latest release](https://github.com/stemill/heybert/releases/latest) and
+4. **Paste in the installer.** Press *Copy installer* on the [install page](https://afterwrd.app/)
+   (or download `installer.js` from the [latest release](https://github.com/stemill/afterwrd/releases/latest) and
    copy all of it), then in the Worker press *Edit code*, select everything there, paste over it and press *Deploy*.
 5. **Run it.** Open your Worker's address. Press **Create a token**: Cloudflare's token page opens with the
    permissions filled in; scroll down, press *Continue to summary*, *Create Token*, and copy the token. Paste it
-   into the installer and press **Install heybert**.
-6. **Make yourself the owner.** The installer hands over to heybert: give your name and create a passkey
+   into the installer and press **Install afterwrd**.
+6. **Make yourself the owner.** The installer hands over to afterwrd: give your name and create a passkey
    (your face, fingerprint or device PIN; there's no password).
 7. **Import.** Choose *Import* in the menu, pick your Facebook zip file(s), tick what to publish and press
    *Import and publish*. Your browser reads the download; only what you tick is uploaded.
@@ -42,27 +45,27 @@ installed is exactly the published release. Cloudflare's free plan allows 5 GB o
 
 - **Turn on two-factor authentication for your Cloudflare account** (My Profile → Authentication). Anyone who gets
   into that account can see your whole archive.
-- **Delete the installer's token afterwards.** heybert doesn't keep it, but while it exists it can change your Workers.
+- **Delete the installer's token afterwards.** afterwrd doesn't keep it, but while it exists it can change your Workers.
 - **Send invite links somewhere only that person will see them**: whoever opens a link first gets in. Under
   *People → Devices & links* you can cancel unused links, delete a passkey or sign someone out everywhere. Links for
   your own account (to add a device) give owner access, so they last only an hour.
 - **Photo locations are left out** unless you tick *Photo locations* when importing; they can show where you live.
 - **Keep it up to date.** The owner's *Update* page installs a newer release, keeping everyone's access and your
-  archive. (Pasting a newer `installer.js` over your heybert Worker does the same.)
+  archive. (Pasting a newer `installer.js` over your afterwrd Worker does the same.)
 
 ## Browsing an export locally
 
 Request the export from Facebook in **JSON** format, unzip it, then:
 
 ```sh
-uv run heybert-ingest ~/Downloads/facebook-<you>-<date>-<id>   # one-off import
-uv run heybert                                                  # http://127.0.0.1:8000
+uv run afterwrd-ingest ~/Downloads/facebook-<you>-<date>-<id>   # one-off import
+uv run afterwrd                                                  # http://127.0.0.1:8000
 ```
 
-The import writes `data/heybert.db` (SQLite) and copies the referenced photos
+The import writes `data/afterwrd.db` (SQLite) and copies the referenced photos
 and videos to `data/media/`, so the original export can be archived. Re-running
 it rebuilds the database from scratch. `data/` is git-ignored: it's personal.
-Set `HEYBERT_DATA` to keep it somewhere else.
+Set `AFTERWRD_DATA` to keep it somewhere else.
 
 ## Running and developing the Worker
 
@@ -85,7 +88,7 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
    ```
 3. Invite yourself as the owner. Use the address the deploy printed:
    ```sh
-   npm run invite -- add "Your Name" --owner --url https://heybert.<subdomain>.workers.dev
+   npm run invite -- add "Your Name" --owner --url https://afterwrd.<subdomain>.workers.dev
    ```
    Open the link and create a passkey.
 4. Go to **Import** in the menu, choose the zip file(s) from Facebook (or the unzipped folder), tick what to
@@ -99,7 +102,7 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
 - **People** invites someone (copy or share their one-time link), sends a fresh link for a new phone or lost
   passkey, and revokes access, which signs the person out at once and deletes their passkeys.
 
-`npm run deploy` is only for new versions of heybert's code; it never touches your archive.
+`npm run deploy` is only for new versions of afterwrd's code; it never touches your archive.
 `npm run invite` still has `list`, `again` and `revoke` for use from the terminal.
 
 **What's published.** Only what the chosen sections show; the rest never leaves your computer. With the
@@ -113,14 +116,14 @@ Files over 95 MB (the most Cloudflare accepts in one upload) are left out with a
 
 **Releasing.** Bump `version` in `worker/package.json`, commit, then tag and push:
 ```sh
-git tag -a v<version> -m "heybert <version>" && git push origin v<version>
+git tag -a v<version> -m "afterwrd <version>" && git push origin v<version>
 ```
 A GitHub Action (`.github/workflows/release.yml`) builds the release from the tagged code and publishes it with
 every file attached, including `installer.js`. To build one locally instead:
-`npm run release -- --base https://github.com/stemill/heybert/releases/download/v<version>` in `worker/`.
+`npm run release -- --base https://github.com/stemill/afterwrd/releases/download/v<version>` in `worker/`.
 
 **Testing.** `npm run test:ingest -- <export folder>` checks the browser importer against
-`uv run heybert-ingest` row by row. To try the site locally: `npx wrangler d1 migrations apply heybert --local`,
+`uv run afterwrd-ingest` row by row. To try the site locally: `npx wrangler d1 migrations apply afterwrd --local`,
 `npm run dev`, then `npm run invite -- add "Test" --owner --local` and import at
 `http://localhost:8787/_admin/import`. Passkeys work on `localhost` but not on `127.0.0.1`.
 

@@ -1,4 +1,4 @@
-// Installing or updating heybert in someone's own Cloudflare account, through Cloudflare's API with a token they
+// Installing or updating afterwrd in someone's own Cloudflare account, through Cloudflare's API with a token they
 // give us. Used by the site's Update page (src/update.js) and by the installer (installer/installer.js, which
 // the release script bundles this file into). Nothing here stores the token.
 //
@@ -74,7 +74,7 @@ export async function findOrCreateDatabase(token, account, name) {
   return found ?? api(token, `/accounts/${account}/d1/database`, { method: "POST", body: JSON.stringify({ name }) });
 }
 
-/** The D1 database an existing heybert uses, or null for a Worker that isn't heybert yet. */
+/** The D1 database an existing afterwrd uses, or null for a Worker that isn't afterwrd yet. */
 export function existingDatabase(settings) {
   const binding = settings.bindings?.find((b) => b.type === "d1" && b.name === "DB");
   return binding ? binding.id ?? binding.database_id : null;
@@ -113,7 +113,7 @@ export async function deployVersion(token, account, script, release, { jwt, data
 }
 
 async function download(url) {
-  const response = await fetch(url, { headers: { "User-Agent": "heybert" } });
+  const response = await fetch(url, { headers: { "User-Agent": "afterwrd" } });
   if (!response.ok) throw new Error(`Couldn't download the release (${response.status}).`);
   return new Uint8Array(await response.arrayBuffer());
 }

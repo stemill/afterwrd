@@ -1,5 +1,5 @@
 // The published archive's tables: what the browser importer produces and the Worker stores in D1.
-// Same shape as the tables in heybert/ingest.py, plus where each photo or video is stored (media.hash etc.).
+// Same shape as the tables in afterwrd/ingest.py, plus where each photo or video is stored (media.hash etc.).
 // Shared by the browser (import page) and the Worker (import endpoints), so they can't drift apart.
 // No foreign keys: an import replaces every table at once, and they refer to each other in a circle.
 

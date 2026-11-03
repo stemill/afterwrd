@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const worker = fileURLToPath(new URL("..", import.meta.url));
-const migrateArgs = ["npx", ["wrangler", "d1", "migrations", "apply", "heybert", "--remote"]];
+const migrateArgs = ["npx", ["wrangler", "d1", "migrations", "apply", "afterwrd", "--remote"]];
 const deployArgs = ["npx", ["wrangler", "deploy"]];
 
 console.log("▶ Updating the database tables");

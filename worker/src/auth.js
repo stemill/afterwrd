@@ -59,7 +59,7 @@ export async function handleAuth(request, env, url) {
 
 // --- first-run setup (from the installer) ------------------------------------
 
-// The installer deploys heybert with a one-time SETUP_CODE and sends its owner to /_auth/setup?code=…. Until
+// The installer deploys afterwrd with a one-time SETUP_CODE and sends its owner to /_auth/setup?code=…. Until
 // someone has a passkey, that link makes (or remakes) the owner's invite, so an abandoned setup can be finished
 // later. Once any passkey exists it does nothing.
 async function setup(request, env, url, body) {
@@ -94,7 +94,7 @@ async function registerOptions(env, url, { token }) {
   const { results: existing } = await env.DB.prepare("SELECT id, transports FROM credentials WHERE user_id = ?")
     .bind(invite.user_id).all();
   const options = await generateRegistrationOptions({
-    rpName: "heybert",
+    rpName: "afterwrd",
     rpID: url.hostname,
     userName: invite.name,
     userID: new TextEncoder().encode(String(invite.user_id)),

@@ -8,7 +8,7 @@
 //   npm run invite -- revoke 3               signs them out and deletes their passkeys
 //
 // Add --local to work against `npm run dev` instead of the deployed site. Links use the site address from
-// --url, or HEYBERT_URL, or http://localhost:8787 with --local.
+// --url, or AFTERWRD_URL, or http://localhost:8787 with --local.
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 
@@ -19,7 +19,7 @@ const args = process.argv.slice(2);
 const local = take("--local");
 const owner = take("--owner");
 const sameNameOk = take("--same-name-ok");
-const siteUrl = (option("--url") ?? process.env.HEYBERT_URL ?? (local ? "http://localhost:8787" : "")).replace(/\/$/, "");
+const siteUrl = (option("--url") ?? process.env.AFTERWRD_URL ?? (local ? "http://localhost:8787" : "")).replace(/\/$/, "");
 const [command, value] = args;
 const now = Math.floor(Date.now() / 1000);
 
@@ -73,7 +73,7 @@ switch (command) {
 
 function printInvite(userId, name, isOwner) {
   const seconds = isOwner ? OWNER_INVITE_SECONDS : INVITE_SECONDS;
-  if (!siteUrl) fail("Where is the site? Pass --url https://heybert.<you>.workers.dev or set HEYBERT_URL.");
+  if (!siteUrl) fail("Where is the site? Pass --url https://afterwrd.<you>.workers.dev or set AFTERWRD_URL.");
   const token = randomBytes(32).toString("base64url");
   const hash = createHash("sha256").update(token).digest("hex");
   sql(`INSERT INTO invites (token_hash, user_id, expires_at) VALUES ('${hash}', ${userId}, ${now + seconds})`);
@@ -90,7 +90,7 @@ function findUser(id) {
 }
 
 function sql(command) {
-  const result = spawnSync("npx", ["wrangler", "d1", "execute", "heybert", local ? "--local" : "--remote", "--json",
+  const result = spawnSync("npx", ["wrangler", "d1", "execute", "afterwrd", local ? "--local" : "--remote", "--json",
     "--command", command], { encoding: "utf8" });
   if (result.status !== 0) fail(`wrangler failed:\n${result.stderr || result.stdout}`);
   return JSON.parse(result.stdout).flatMap((r) => r.results ?? []);

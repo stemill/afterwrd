@@ -1,6 +1,6 @@
-"""Read-only web app over the database built by heybert.ingest.
+"""Read-only web app over the database built by afterwrd.ingest.
 
-    uv run heybert            # http://127.0.0.1:8000
+    uv run afterwrd            # http://127.0.0.1:8000
 """
 
 import re
@@ -17,14 +17,14 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from markupsafe import Markup, escape
 
-from heybert.config import DB_PATH, MEDIA_DIR, THUMB_DIR, thumb_name
+from afterwrd.config import DB_PATH, MEDIA_DIR, THUMB_DIR, thumb_name
 
 HERE = Path(__file__).parent
 TZ = ZoneInfo("Europe/London")
 PAGE_SIZE = 50
 PHOTO_PAGE_SIZE = 150
 
-app = FastAPI(title="heybert")
+app = FastAPI(title="afterwrd")
 # Only answer to this computer's own names, so a web page can't reach the archive by pointing its domain here
 # (DNS rebinding).
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
@@ -121,7 +121,7 @@ templates.env.globals.update(emoji=EMOJI, page_url=page_url)
 
 def get_db():
     if not DB_PATH.exists():
-        raise HTTPException(503, "No data yet: run `uv run heybert-ingest <export folder>` first.")
+        raise HTTPException(503, "No data yet: run `uv run afterwrd-ingest <export folder>` first.")
     db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, check_same_thread=False)
     db.row_factory = sqlite3.Row
     try:
@@ -483,7 +483,7 @@ def person(request: Request, person_id: int, tab: str = "", page: int = 1, db=De
 def main():
     import uvicorn
 
-    uvicorn.run("heybert.app:app", host="127.0.0.1", port=8000)
+    uvicorn.run("afterwrd.app:app", host="127.0.0.1", port=8000)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-// Page templates, ported from heybert/templates. `ctx` carries me, the published sections, the signed-in user
+// Page templates, ported from afterwrd/templates. `ctx` carries me, the published sections, the signed-in user
 // and the request URL.
 import {
   aspect, dateRange, EMOJI, fmtDate, fmtDatetime, linkify, mediaUrl, number, safeUrl, summary, thumbUrl,
@@ -19,13 +19,13 @@ function layout(ctx, { title, bodyClass = "", main }) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${title} · heybert</title>
+  <title>${title} · afterwrd</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="icon" href="data:,">
 </head>
 <body class="${bodyClass}">
   <header class="site">
-    <a class="brand" href="/">heybert</a>
+    <a class="brand" href="/">afterwrd</a>
     <nav>
       ${NAV.filter(([, , s]) => ctx.sections.includes(s)).map(([path, label]) =>
         html`<a href="/${path}" ${current(path) && raw('aria-current="page"')}>${label}</a>`)}
@@ -467,6 +467,6 @@ ${pager(ctx, paging)}`);
 }
 
 export function emptyPage(ctx, message) {
-  return page(ctx, "heybert", html`<p class="empty">${message}</p>`);
+  return page(ctx, "afterwrd", html`<p class="empty">${message}</p>`);
 }
 

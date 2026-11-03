@@ -1,4 +1,4 @@
-// The archive's pages, ported from the routes in heybert/app.py and reading the D1 copy that
+// The archive's pages, ported from the routes in afterwrd/app.py and reading the D1 copy that
 // `npm run publish` uploads. Only the sections chosen at publish time are served.
 import { fmtDate, fmtMonth } from "./format.js";
 import * as views from "./views.js";

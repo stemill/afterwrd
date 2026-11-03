@@ -3,23 +3,27 @@
 import { escape } from "./util.js";
 
 const STYLE = `
-  :root { --bg: #f4f5f7; --surface: #fff; --text: #1c1e21; --muted: #65676b; --border: #dddfe2; --accent: #1b62d6; }
+  :root { --bg: #f6f2eb; --surface: #fcfaf6; --text: #24201b; --muted: #6f675b; --border: #e3dacb; --accent: #a3482a;
+          --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #18191a; --surface: #242526; --text: #e4e6eb; --muted: #a8abaf; --border: #3a3b3c; --accent: #6ea8ff; }
+    :root { --bg: #191714; --surface: #221f1b; --text: #ece5d9; --muted: #a69d8f; --border: #38322b; --accent: #e08a62; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: var(--bg);
-         color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  main { width: 100%; max-width: 380px; background: var(--surface); border: 1px solid var(--border);
-         border-radius: 12px; padding: 28px; }
-  .brand { font-weight: 700; color: var(--accent); margin: 0 0 16px; }
-  h1 { font-size: 1.3rem; margin: 0 0 8px; }
-  p { margin: 0 0 16px; color: var(--muted); }
-  button, .button { display: block; width: 100%; padding: 11px; border: 0; border-radius: 8px; background: var(--accent);
-           color: #fff; font: inherit; font-weight: 600; text-align: center; text-decoration: none; cursor: pointer; }
+         color: var(--text); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { width: 100%; max-width: 400px; background: var(--surface); border: 1px solid var(--border);
+         border-radius: 6px; padding: 32px; }
+  .brand { font: italic 1.4rem var(--serif); color: var(--text); margin: 0 0 22px; }
+  .brand::after { content: "."; color: var(--accent); font-style: normal; }
+  h1 { font: 600 1.6rem/1.2 var(--serif); margin: 0 0 10px; letter-spacing: -0.01em; }
+  p { margin: 0 0 18px; color: var(--muted); }
+  button, .button { display: block; width: 100%; padding: 12px; border: 0; border-radius: 4px; background: var(--text);
+           color: var(--bg); font: inherit; font-weight: 600; text-align: center; text-decoration: none; cursor: pointer; }
+  button:hover, .button:hover { background: var(--accent); color: #fff; }
   button:disabled { opacity: 0.6; cursor: default; }
-  #error { color: #d93025; margin: 12px 0 0; min-height: 1.5em; }
-  input { width: 100%; font: inherit; padding: 10px; border: 1px solid var(--border); border-radius: 8px;
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #error { color: #b3261e; margin: 12px 0 0; min-height: 1.5em; }
+  input { width: 100%; font: inherit; padding: 11px; border: 1px solid var(--border); border-radius: 4px;
           background: var(--bg); color: var(--text); }
 `;
 
@@ -78,12 +82,12 @@ function page(title, body, script = "") {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <link rel="icon" href="data:,">
-<title>${title} · heybert</title>
+<title>${title} · afterwrd</title>
 <style>${STYLE}</style>
 </head>
 <body>
 <main>
-<p class="brand">heybert</p>
+<p class="brand">afterwrd</p>
 ${body}
 </main>
 ${script && `<script>${CLIENT}\n${script}</script>`}
@@ -126,9 +130,9 @@ will ask for your face, fingerprint or PIN. There's no password, and this link o
 }
 
 export function setupPage() {
-  return page("Set up heybert", `
+  return page("Set up afterwrd", `
 <h1>Your archive is ready</h1>
-<p>heybert is installed in your Cloudflare account. Next, make yourself its owner: you'll create a passkey on
+<p>afterwrd is installed in your Cloudflare account. Next, make yourself its owner: you'll create a passkey on
 this device, then you can import your Facebook download and invite people.</p>
 <p><input id="name" placeholder="Your name" autocomplete="name" maxlength="100"></p>
 <button id="go">Continue</button>
@@ -150,5 +154,5 @@ export function signOutPage() {
 }
 
 export function messagePage(message, link = { href: "/_auth/login", label: "Go to sign in" }) {
-  return page("heybert", `<p>${escape(message)}</p><a class="button" href="${link.href}">${escape(link.label)}</a>`);
+  return page("afterwrd", `<p>${escape(message)}</p><a class="button" href="${link.href}">${escape(link.label)}</a>`);
 }

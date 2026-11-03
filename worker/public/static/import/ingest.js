@@ -1,5 +1,5 @@
 // Reads a Facebook "Download your information" export (JSON format) into the archive's tables.
-// A port of heybert/ingest.py that runs in the browser, and in Node for tests: same rules, same order, so the
+// A port of afterwrd/ingest.py that runs in the browser, and in Node for tests: same rules, same order, so the
 // rows match. `source` reads the export's files (see sources.js). Photos aren't opened here; their sizes and
 // thumbnails are worked out while uploading.
 import { ARCHIVE, emptyRow } from "./schema.js";
@@ -172,7 +172,7 @@ export async function ingest(source, { log = () => {} } = {}) {
     return [g.actor, g.verb, (g.own ? g.actor : g.owner) ?? null, g.kind, g.group ?? null];
   }
 
-  // --- the import, in heybert/ingest.py's order ------------------------------
+  // --- the import, in afterwrd/ingest.py's order ------------------------------
 
   const profile = await load("personal_information/profile_information/profile_information.json");
   if (!profile) throw new Error("This doesn't look like a Facebook export: it has no profile information.");

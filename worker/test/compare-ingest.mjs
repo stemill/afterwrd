@@ -1,5 +1,5 @@
 // Checks the browser importer against the Python one: runs public/static/import/ingest.js over an export folder
-// in Node and compares every row with data/heybert.db, built from the same export by `uv run heybert-ingest`.
+// in Node and compares every row with data/afterwrd.db, built from the same export by `uv run afterwrd-ingest`.
 //
 //   node --disable-warning=ExperimentalWarning test/compare-ingest.mjs ~/Downloads/facebook-<you>-<date>-<id>
 //
@@ -12,7 +12,7 @@ import { ingest } from "../public/static/import/ingest.js";
 
 const root = process.argv[2];
 if (!root) throw new Error("Give the export folder.");
-const dbPath = fileURLToPath(new URL("../../data/heybert.db", import.meta.url));
+const dbPath = fileURLToPath(new URL("../../data/afterwrd.db", import.meta.url));
 
 function walk(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>

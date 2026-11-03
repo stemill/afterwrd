@@ -1,5 +1,5 @@
 -- The published copy of the archive, which the Worker reads to build pages. Same shape as the tables in
--- heybert/ingest.py, minus foreign keys: the copy is replaced wholesale on each publish and its tables refer to
+-- afterwrd/ingest.py, minus foreign keys: the copy is replaced wholesale on each publish and its tables refer to
 -- each other in a circle (people -> media -> posts -> people), which D1's enforced foreign keys would refuse.
 CREATE TABLE people (
     id               INTEGER PRIMARY KEY,

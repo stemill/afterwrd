@@ -1,22 +1,22 @@
-// The owner's Update page: installs a newer heybert release over this one, keeping the database, photos and
+// The owner's Update page: installs a newer afterwrd release over this one, keeping the database, photos and
 // secrets, with a Cloudflare API token the owner makes for the purpose (and deletes afterwards).
 //   GET  /_admin/update            the page: this version, and the latest release if it's newer
 //   GET  /_admin/update/version    this version, for the page to see when the update has taken over
 //   POST /_admin/update/check      {token, tag} -> which account this Worker is in
 //   POST /_admin/update/assets     {token, account, tag} -> upload the release's site files
 //   POST /_admin/update/deploy     {token, account, tag, jwt} -> the new version
-// Releases come from the GitHub repository in package.json (heybert.releases). Every file is checked against
+// Releases come from the GitHub repository in package.json (afterwrd.releases). Every file is checked against
 // the release's manifest; as with installing, trust rests on that repository.
 import pkg from "../package.json";
 import { api, deployVersion, existingDatabase, findWorker, loadRelease, uploadAssets } from "./deploy.js";
 import { escape, html, json } from "./util.js";
 
 const VERSION = pkg.version;
-const REPO = pkg.heybert.releases;
+const REPO = pkg.afterwrd.releases;
 const TAG_RE = /^v\d+\.\d+\.\d+$/;
 const PERMISSIONS = [{ key: "workers_scripts", type: "edit" }, { key: "account_settings", type: "read" }];
 const TOKEN_URL = "https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys="
-  + encodeURIComponent(JSON.stringify(PERMISSIONS)) + "&accountId=*&zoneId=all&name=heybert%20update";
+  + encodeURIComponent(JSON.stringify(PERMISSIONS)) + "&accountId=*&zoneId=all&name=afterwrd%20update";
 const TOKENS_PAGE = "https://dash.cloudflare.com/profile/api-tokens";
 
 export async function handleUpdate(request, env, url, owner) {
@@ -36,7 +36,7 @@ export async function handleUpdate(request, env, url, owner) {
     if (path === "/deploy") {
       const settings = await api(body.token, `/accounts/${body.account}/workers/scripts/${script}/settings`);
       const databaseId = existingDatabase(settings);
-      if (!databaseId) throw new Error("This Worker doesn't look like heybert, so it wasn't updated.");
+      if (!databaseId) throw new Error("This Worker doesn't look like afterwrd, so it wasn't updated.");
       await deployVersion(body.token, body.account, script, await release(), { jwt: body.jwt, databaseId, settings });
       return json({ ok: true });
     }
@@ -52,7 +52,7 @@ export async function handleUpdate(request, env, url, owner) {
 async function latestRelease() {
   try {
     const response = await fetch(`https://github.com/${REPO}/releases/latest/download/manifest.json`, {
-      headers: { "User-Agent": "heybert" },
+      headers: { "User-Agent": "afterwrd" },
     });
     if (!response.ok) return { error: `GitHub said ${response.status}.` };
     const { version } = await response.json();
@@ -79,7 +79,7 @@ function updatePage(owner, latest) {
     body = `<p>You have the latest version.</p>`;
   } else {
     body = `
-<p><b>heybert ${escape(latest.version)} is available.</b> <a href="${escape(latest.page)}" target="_blank" rel="noopener">What's new</a></p>
+<p><b>afterwrd ${escape(latest.version)} is available.</b> <a href="${escape(latest.page)}" target="_blank" rel="noopener">What's new</a></p>
 <p class="meta">Updating keeps everyone's access, your archive and your photos. It needs a Cloudflare API token, used only while
 updating and not kept.</p>
 <ol class="how">
@@ -91,7 +91,7 @@ updating and not kept.</p>
 <ol id="log"></ol>
 <p id="error" role="alert"></p>
 <section id="done" class="card" hidden>
-  <p><b>Updated to ${escape(latest.version)}.</b> Now delete the token: heybert doesn't keep it, but while it exists it can
+  <p><b>Updated to ${escape(latest.version)}.</b> Now delete the token: afterwrd doesn't keep it, but while it exists it can
   change your Workers.</p>
   <p><a class="button secondary" href="${TOKENS_PAGE}" target="_blank" rel="noopener">Open my API tokens</a>
      <a class="button" href="/_admin/update">Done</a></p>
@@ -102,7 +102,7 @@ updating and not kept.</p>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Update · heybert</title>
+<title>Update · afterwrd</title>
 <link rel="stylesheet" href="/static/style.css">
 <link rel="icon" href="data:,">
 <style>
@@ -120,12 +120,12 @@ updating and not kept.</p>
 </head>
 <body>
 <header class="site">
-  <a class="brand" href="/">heybert</a>
+  <a class="brand" href="/">afterwrd</a>
   <nav><a href="/">← Back to the archive</a><a href="/_admin">People</a><a href="/_admin/import">Import</a><a href="/_admin/update" aria-current="page">Update</a><form method="post" action="/_auth/logout"><button class="link">Sign out</button></form></nav>
 </header>
 <main>
-<h1>Update heybert</h1>
-<p class="meta">Signed in as ${escape(owner.name)}. This site is heybert ${escape(VERSION)}.</p>
+<h1>Update afterwrd</h1>
+<p class="meta">Signed in as ${escape(owner.name)}. This site is afterwrd ${escape(VERSION)}.</p>
 ${body}
 </main>
 <script>

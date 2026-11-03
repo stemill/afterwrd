@@ -1,4 +1,4 @@
-// Formatting helpers, ported from the template filters in heybert/app.py so pages read the same.
+// Formatting helpers, ported from the template filters in afterwrd/app.py so pages read the same.
 import { escape } from "../util.js";
 import { raw } from "./html.js";
 

@@ -4,7 +4,7 @@ Keeps friends, posts, photos/videos, comments and reactions; ignores ads,
 messages, logins and everything else. Writes a SQLite database and copies the
 referenced media into the data directory, so the export can be archived.
 
-    uv run heybert-ingest ~/Downloads/facebook-<you>-<date>-<id>
+    uv run afterwrd-ingest ~/Downloads/facebook-<you>-<date>-<id>
 """
 
 import argparse
@@ -18,7 +18,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from heybert.config import DATA_DIR, DB_PATH, MEDIA_DIR, THUMB_DIR, thumb_name
+from afterwrd.config import DATA_DIR, DB_PATH, MEDIA_DIR, THUMB_DIR, thumb_name
 
 SCHEMA = """
 CREATE TABLE people (
@@ -579,7 +579,7 @@ class Importer:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Import a Facebook JSON export into heybert.")
+    parser = argparse.ArgumentParser(description="Import a Facebook JSON export into afterwrd.")
     parser.add_argument("export_dir", type=Path, help="the unzipped facebook-<you>-<date>-<id> folder")
     args = parser.parse_args()
 

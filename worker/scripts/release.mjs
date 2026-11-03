@@ -1,6 +1,6 @@
-// Packages a heybert release for the installer:
+// Packages a afterwrd release for the installer:
 //
-//   npm run release -- --base https://github.com/<owner>/heybert/releases/download/v<version>
+//   npm run release -- --base https://github.com/<owner>/afterwrd/releases/download/v<version>
 //
 // writes release/<version>/, a flat folder so every file can be a GitHub release asset:
 //   manifest.json    the code modules and site files, each with its SHA-256, plus the Worker settings
@@ -22,7 +22,7 @@ if (!args.includes("--base") || !/^https:\/\/\S+[^/]$/.test(base ?? "")) {
   process.exit(1);
 }
 
-const { version } = JSON.parse(readFileSync(join(worker, "package.json"), "utf8"));
+const { version, afterwrd: project } = JSON.parse(readFileSync(join(worker, "package.json"), "utf8"));
 // wrangler.jsonc with its comments removed; no value in it contains "//".
 const config = JSON.parse(readFileSync(join(worker, "wrangler.jsonc"), "utf8").replace(/^\s*\/\/.*$/gm, ""));
 const out = join(worker, "release", version);
@@ -72,7 +72,7 @@ const assets = walk(publicDir).map((file) => {
 });
 
 const manifest = {
-  name: "heybert",
+  name: "afterwrd",
   version,
   main_module: config.main.split("/").pop(),
   compatibility_date: config.compatibility_date,
@@ -116,9 +116,12 @@ writeFileSync(join(site, "index.html"), readFileSync(join(worker, "installer", "
   .replaceAll("__MANIFEST_SHORT__", sha256(manifestBytes).slice(0, 12))
   .replaceAll("__RELEASE_PAGE__", repo ? `https://github.com/${repo}/releases/tag/v${version}` : base)
   .replaceAll("__REPO_PAGE__", repo ? `https://github.com/${repo}` : base));
+// GitHub Pages keeps a custom domain in a CNAME file beside the page; the release replaces the whole branch, so
+// it's written here every time or the domain would be dropped.
+if (project?.site) writeFileSync(join(site, "CNAME"), `${project.site}\n`);
 rmSync(dist, { recursive: true, force: true });
 
 const total = [...modules, ...assets].reduce((n, f) => n + f.size, 0);
-console.log(`heybert ${version}: ${modules.length} code modules and ${assets.length} site files (${(total / 1e3).toFixed(0)} KB)`);
+console.log(`afterwrd ${version}: ${modules.length} code modules and ${assets.length} site files (${(total / 1e3).toFixed(0)} KB)`);
 console.log(`  ${relative(worker, out)}/  → publish at ${base}/`);
 console.log(`  installer: ${relative(worker, join(out, "installer.js"))} (manifest ${sha256(manifestBytes).slice(0, 12)}…)`);
