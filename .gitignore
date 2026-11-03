@@ -19,3 +19,6 @@ worker/release/
 
 # Local secrets for wrangler dev
 worker/.dev.vars
+
+# End-to-end test output (local sites, screenshots, downloads)
+worker/test/e2e/out/

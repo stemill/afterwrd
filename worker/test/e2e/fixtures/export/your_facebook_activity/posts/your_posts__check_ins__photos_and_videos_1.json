@@ -1,0 +1,5 @@
+[
+  {"timestamp": 1700000000, "title": "Test Person updated his status.", "data": [{"post": "Hello from the installer test"}]},
+  {"timestamp": 1700000100, "title": "Test Person added a new photo.", "data": [{"post": "A test photo"}],
+   "attachments": [{"data": [{"media": {"uri": "your_facebook_activity/posts/media/test/photo1.jpg", "creation_timestamp": 1700000100}}]}]}
+]
