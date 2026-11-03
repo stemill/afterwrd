@@ -4,10 +4,13 @@
 //   POST /_feed/comments                                       connection, target, text (a form)
 //   POST /_feed/comments/<connection>/<remote id>/delete       (a form)
 import { MAX_COMMENT } from "./archive/comments.js";
-import { SERVABLE_TYPES, MAX_FILE } from "../public/static/import/schema.js";
+import { SERVABLE_TYPES } from "../public/static/import/schema.js";
 import { callSite, cleanFeed } from "./peers.js";
 import { messagePage } from "./pages.js";
 import { html, now } from "./util.js";
+
+// Only photos are shared (posts.js), and afterwrd stores them at most 2560px a side.
+const MAX_PHOTO = 25 * 1024 * 1024;
 
 const MAX_SITES = 40; // each one is a request; the free plan allows 50 per page
 
@@ -27,8 +30,12 @@ export async function loadFeed(db) {
     await db.batch(renamed.map((r) => db.prepare("UPDATE connections SET name = ? WHERE id = ?").bind(r.feed.name, r.connection.id)));
     for (const r of renamed) r.connection.name = r.feed.name;
   }
-  const posts = replies.flatMap((r) => (r.feed?.posts ?? []).map((p) => ({ ...p, connection: r.connection })))
-    .sort((a, b) => b.created_at - a.created_at);
+  // The owner's own comments are the ones this site sent (comments_elsewhere), whatever the friend's site says.
+  const { results: sent } = await db.prepare("SELECT connection_id, remote_id FROM comments_elsewhere").all();
+  const mine = new Set(sent.map((s) => `${s.connection_id}-${s.remote_id}`));
+  const posts = replies.flatMap((r) => (r.feed?.posts ?? []).map((p) => ({
+    ...p, connection: r.connection, comments: p.comments.map((c) => ({ ...c, mine: mine.has(`${r.connection.id}-${c.id}`) })),
+  }))).sort((a, b) => b.created_at - a.created_at);
   return { posts, connections, unreachable: replies.filter((r) => r.error) };
 }
 
@@ -47,12 +54,14 @@ export async function handleFeed(request, env, url) {
       return new Response("Couldn't reach their site", { status: 502 });
     }
     const type = theirs.headers.get("Content-Type");
-    if (!theirs.ok || !SERVABLE_TYPES.has(type) || Number(theirs.headers.get("Content-Length")) > MAX_FILE) {
+    if (!theirs.ok || !SERVABLE_TYPES.has(type) || Number(theirs.headers.get("Content-Length")) > MAX_PHOTO) {
       await theirs.body?.cancel();
       return new Response("Not found", { status: 404 });
     }
-    // Addressed by its contents' hash, so it never changes.
-    return new Response(theirs.body, { headers: { "Content-Type": type, "Cache-Control": "private, max-age=31536000, immutable" } });
+    // The address is the file's hash, so check it is: then it can be cached for good.
+    const bytes = await readCapped(theirs, MAX_PHOTO);
+    if (!bytes || (await sha256Hex(bytes)) !== file[2]) return new Response("Not found", { status: 404 });
+    return new Response(bytes, { headers: { "Content-Type": type, "Cache-Control": "private, max-age=31536000, immutable" } });
   }
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
   if (request.headers.get("Origin") !== url.origin) return new Response("Request from another site", { status: 403 });
@@ -88,6 +97,28 @@ export async function handleFeed(request, env, url) {
     }
   }
   return new Response("Not found", { status: 404 });
+}
+
+async function readCapped(response, limit) {
+  const reader = response.body.getReader();
+  const parts = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel();
+      return null;
+    }
+    parts.push(value);
+  }
+  return new Uint8Array(await new Blob(parts).arrayBuffer());
+}
+
+async function sha256Hex(bytes) {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 const connectionById = (db, id) => db.prepare("SELECT * FROM connections WHERE id = ? AND connected_at IS NOT NULL")

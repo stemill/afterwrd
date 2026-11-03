@@ -1,8 +1,8 @@
 // Connecting with a friend's afterwrd site. The owner makes a one-time Connect link on /_admin/connections and
 // sends it to a friend, who opens it, says where their own site is, and confirms there. Their site then:
 //   1. keeps a new key for this site to call it with, and sends it to POST /_connect/<token>/accept here;
-//   2. this site proves the key is theirs by calling their /_peer/hello with it, keeps it, and answers with a key
-//      for them to call this site with.
+//   2. this site proves the key is theirs, and meant for this site, by calling their /_peer/hello?from=<this site>
+//      with it; then keeps it and answers with a key for them to call this site with.
 // Connections are mutual: both owners see each other's new posts in Feed and can comment on them (peers.js).
 //
 // Without a session:   GET /_connect/<token>  (the page the link opens), GET …/info, POST …/accept
@@ -13,6 +13,7 @@ import { callSite, host, KEY_RE, ownerName, siteOrigin } from "./peers.js";
 import { escape, html, json, now, randomToken, sha256 } from "./util.js";
 
 const LINK_SECONDS = 7 * 24 * 3600;
+const PENDING_SECONDS = 600; // a connection half made is given up after this
 const LINK_RE = /^\/_connect\/([\w-]{40,100})$/;
 
 const cleanName = (name) => (typeof name === "string" && name.trim() ? name.trim().slice(0, 100) : "A friend");
@@ -42,18 +43,18 @@ export async function handleConnectLink(request, env, url) {
 async function accept(request, env, url, token) {
   const db = env.DB;
   const body = await request.json().catch(() => ({}));
-  const origin = siteOrigin(body.origin);
+  const origin = siteOrigin(body.origin, env);
   if (!origin || origin === url.origin || !KEY_RE.test(body.key ?? "")) return json({ error: "That doesn't look like an afterwrd site." }, 400);
-  const existing = await db.prepare("SELECT * FROM connections WHERE origin = ?").bind(origin).first();
-  if (existing?.connected_at) return json({ error: `You're already connected with ${existing.name}.` }, 409);
 
-  // Prove the key belongs to the site it claims to be from.
+  // Prove the key belongs to the site it claims to be from, and was made for connecting with this one.
   let them;
   try {
-    them = await callSite(origin, "/_peer/hello", { key: body.key });
+    them = await callSite(origin, `/_peer/hello?from=${encodeURIComponent(url.origin)}`, { key: body.key });
   } catch (error) {
     return json({ error: `Couldn't confirm your site: ${error.message}` }, 400);
   }
+  const existing = await db.prepare("SELECT 1 FROM connections WHERE origin = ? AND connected_at IS NOT NULL").bind(origin).first();
+  if (existing) return json({ error: "Your sites are already connected." }, 409);
   const spent = await db.prepare("UPDATE connect_links SET used_at = ? WHERE token_hash = ? AND used_at IS NULL")
     .bind(now(), await sha256(token)).run();
   if (!spent.meta.changes) return json({ error: "This Connect link has already been used." }, 404);
@@ -77,7 +78,7 @@ export async function handleConnections(request, env, url) {
     return html(connectionsPage(results));
   }
   if (path === "/new") {
-    const target = parseLink(url.searchParams.get("link") ?? "", url);
+    const target = parseLink(url.searchParams.get("link") ?? "", url, env);
     if (request.method === "GET") {
       if (target.error) return html(connectionsMessage(target.error), 400);
       try {
@@ -113,14 +114,14 @@ export async function handleConnections(request, env, url) {
   return new Response("Not found", { status: 404 });
 }
 
-function parseLink(link, url) {
+function parseLink(link, url, env) {
   let parsed;
   try {
     parsed = new URL(link.trim());
   } catch {
     return { error: "That isn't a Connect link. It should look like https://…/_connect/…" };
   }
-  const origin = siteOrigin(parsed.origin);
+  const origin = siteOrigin(parsed.origin, env);
   const match = LINK_RE.exec(parsed.pathname);
   if (!origin || !match) return { error: "That isn't a Connect link. It should look like https://…/_connect/…" };
   if (origin === url.origin) return { error: "That's a link to your own site. Send it to a friend instead." };
@@ -135,12 +136,14 @@ async function connect(env, url, target) {
   if (existing?.connected_at) return json({ error: `You're already connected with ${existing.name}.` }, 409);
   const key = randomToken();
   await db.batch([
-    db.prepare("DELETE FROM connections WHERE origin = ?").bind(target.origin),
+    db.prepare("DELETE FROM connections WHERE origin = ? OR (connected_at IS NULL AND created_at < ?)")
+      .bind(target.origin, now() - PENDING_SECONDS),
     db.prepare("INSERT INTO connections (origin, name, key_hash, created_at) VALUES (?, ?, ?, ?)")
       .bind(target.origin, "A friend", await sha256(key), now()),
   ]);
   try {
-    const reply = await callSite(target.origin, `/_connect/${target.token}/accept`, { body: { origin: url.origin, key } });
+    // Long enough for their site to call this one back (see accept) before answering.
+    const reply = await callSite(target.origin, `/_connect/${target.token}/accept`, { body: { origin: url.origin, key }, timeout: 25_000 });
     if (!KEY_RE.test(reply.key ?? "")) throw new Error("Their site sent something unexpected.");
     const name = cleanName(reply.name);
     await db.prepare("UPDATE connections SET name = ?, their_key = ?, connected_at = ? WHERE origin = ?")

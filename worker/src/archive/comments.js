@@ -24,7 +24,7 @@ export const postKey = (p) =>
 export const photoKey = (m) => (m.hash ? `photo-${m.hash}` : null);
 
 const COMMENT_SQL = `
-  SELECT c.*, COALESCE(u.name, c.author_name) AS name FROM site_comments c
+  SELECT c.*, COALESCE(u.name, c.author_name) AS name, COALESCE(u.is_owner, 0) AS author_is_owner FROM site_comments c
   LEFT JOIN users u ON u.id = c.author_id`;
 
 /** Map of target -> its comments, oldest first. */

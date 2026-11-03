@@ -589,7 +589,7 @@ function feedCard(ctx, p) {
   <section class="thread" aria-label="Comments">
     ${p.comments.map((r) => html`<div class="comment" id="r${c.id}-${r.id}">
       <span class="who who-${r.mine ? ctx.user.id % 6 : r.id % 6}" aria-hidden="true">${initial(r.mine ? ctx.user.name : r.name)}</span>
-      <div class="bubble"><strong>${r.mine ? ctx.user.name : r.name}</strong>${!r.mine && r.from && html`<span class="from">${r.from}</span>`}<span class="said">${linkify(r.text)}</span></div>
+      <div class="bubble"><strong>${r.mine ? ctx.user.name : r.name}</strong><span class="said">${linkify(r.text)}</span></div>
       <div class="under">
         <time title="${fmtDatetime(r.created_at)}">${fmtAgo(r.created_at)}</time>
         ${r.mine && html`<form method="post" action="/_feed/comments/${c.id}/${r.id}/delete" onsubmit="return confirm('Delete this comment?')">
