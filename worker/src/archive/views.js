@@ -17,7 +17,9 @@ const NAV = [["", "Overview", "overview"], ["timeline", "Timeline", "timeline"],
 
 function layout(ctx, { title, bodyClass = "", main }) {
   const top = ctx.url.pathname.split("/")[1];
-  const currentSection = { "": "overview", people: "friends", friend: "feed" }[top] ?? top;
+  const currentSection = ctx.user.is_owner
+    ? { "": "overview", people: "connected", friends: "connected", friend: "connected" }[top] ?? top
+    : { "": "overview", people: "friends" }[top] ?? top;
   return html`<!doctype html>
 <html lang="en-GB">
 <head>
@@ -38,8 +40,11 @@ function navItems(ctx) {
   const items = NAV.filter(([, , s]) => ctx.sections.includes(s)).map(([path, label, key]) => ({ key, label, href: `/${path}` }));
   items.push({ key: "activity", label: "Activity", href: "/activity", badge: ctx.newComments });
   if (ctx.user.is_owner) {
+    // One Friends for the owner: friends on afterwrd and from Facebook together (/friend). Visitors keep the
+    // published Facebook list.
     const tools = OWNER_ITEMS.map((i) => (i.key === "update" && ctx.updateWaiting ? { ...i, label: "Update available", badge: true } : i));
-    return [{ key: "feed", label: "Feed", href: "/feed" }, ...items, ...tools];
+    return [{ key: "feed", label: "Feed", href: "/feed" }, { key: "connected", label: "Friends", href: "/friend" },
+      ...items.filter((i) => i.key !== "friends"), ...tools];
   }
   return items;
 }
@@ -692,11 +697,71 @@ function remoteCard(ctx, c, p, { thread = true } = {}) {
 </article>`;
 }
 
+/** The owner's Friends: friends on afterwrd first, then everyone from the Facebook download, in one list. */
+export function friendsIndexPage(ctx, { friends, facebook }) {
+  const people = has(ctx, "friends"); // Facebook people have pages only if the friends list is published
+  const fbLink = (p) => (people && p.id ? html`<a href="/people/${p.id}">${p.name}</a>` : p.name);
+  const linkForm = (c, body) => html`<form method="post" action="/_admin/connections/${c.id}/facebook" class="fb-link">${body}</form>`;
+  return page(ctx, "Friends", html`
+<div class="feed-head">
+  <h1>Friends</h1>
+  <a class="chip primary" href="/_admin/connections">${raw(icon("connections"))}<span>Connect with a friend</span></a>
+</div>
+<p class="meta">Only you see this page.</p>
+
+<h2>On afterwrd</h2>
+${friends.length ? html`<ul class="friend-list">
+  ${friends.map((c) => html`<li class="card">
+    <a class="friend-link" href="${friendBase(c)}/posts">
+      <span class="who who-${c.id % 6}" aria-hidden="true">${initial(c.name)}</span>
+      <span><strong>${c.name}</strong><span class="meta">${host(c.origin)} · friends since ${fmtDate(c.connected_at)}</span></span>
+    </a>
+    <nav class="friend-tabs"><a href="${friendBase(c)}/posts">Posts</a><a href="${friendBase(c)}/photos">Photos</a></nav>
+    ${c.person ? linkForm(c, html`<span class="meta">On Facebook as ${fbLink(c.person)}</span>
+        <input type="hidden" name="unlink" value="1"><button class="link">Unlink</button>`)
+      : c.suggestion ? linkForm(c, html`<span>Is this <strong>${c.suggestion.name}</strong> from your Facebook download?</span>
+        <input type="hidden" name="name" value="${c.suggestion.name}"><button class="chip">Yes</button>
+        <button class="chip" name="none" value="1">No</button>`)
+      : facebook.length > 0 && html`<details class="fb-pick"><summary class="meta">Link to someone from your Facebook download</summary>
+        ${linkForm(c, html`<input name="name" list="fb-names" required placeholder="Their name on Facebook" aria-label="Their name on Facebook">
+          <button class="chip">Link</button>`)}</details>`}
+  </li>`)}
+</ul>` : html`<div class="empty">
+  <p>No friends on afterwrd yet. When a friend has their own afterwrd site, connect with them to see each other's posts and photos.</p>
+  <a class="chip primary" href="/_admin/connections">${raw(icon("connections"))}<span>Connect with a friend</span></a>
+</div>`}
+
+${facebook.length > 0 && html`
+<h2>From your Facebook download</h2>
+<form class="filters" onsubmit="return false">
+  <input type="search" id="fb-filter" placeholder="Search names" aria-label="Search names">
+</form>
+<table class="numbers people" id="fb-people">
+  <thead><tr><th>Name</th><th>Friends since</th><th>On afterwrd</th></tr></thead>
+  <tbody>
+    ${facebook.map((p) => html`<tr>
+      <th>${fbLink(p)}</th>
+      <td>${fmtDate(p.friend_since)}</td>
+      <td>${p.friend ? html`<a class="badge" href="${friendBase(p.friend)}/posts">On afterwrd</a>` : raw('<span class="meta">Not on afterwrd</span>')}</td>
+    </tr>`)}
+  </tbody>
+</table>
+<datalist id="fb-names">${facebook.map((p) => html`<option value="${p.name}">`)}</datalist>
+<script>
+  document.getElementById("fb-filter").addEventListener("input", (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    for (const row of document.querySelectorAll("#fb-people tbody tr")) row.hidden = q && !row.cells[0].textContent.toLowerCase().includes(q);
+  });
+</script>`}`);
+}
+
 function friendHead(ctx, c, tab) {
   return html`
+<p class="crumbs"><a href="/friend">Friends</a> /</p>
 ${c.cover && html`<section class="profile"><div class="cover"><img src="${c.cover.src}" alt=""></div></section>`}
 <div class="feed-head">
   <h1 class="friend-name">${c.avatar && html`<img class="avatar-small" src="${c.avatar.thumbSrc}" alt="">`}${c.name}</h1>
+  ${c.facebook && has(ctx, "friends") && html`<a class="chip" href="/people/${c.facebook.id}">${raw(icon("friends"))}<span>Your Facebook history together</span></a>`}
 </div>
 <p class="meta">${host(c.origin)} · a friend you're connected with. Only you see this here.</p>
 <nav class="tabs">

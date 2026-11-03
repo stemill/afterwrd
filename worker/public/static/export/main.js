@@ -12,7 +12,7 @@ const EXTENSIONS = {
   "video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm",
 };
 const TABLES = ["settings", "people", "albums", "posts", "post_tags", "comments", "reactions", "media", "tagged_photos",
-  "site_comments", "comments_elsewhere", "connections", "users"];
+  "site_comments", "comments_elsewhere", "connections", "friend_links", "users"];
 
 const form = document.getElementById("export");
 const status = document.getElementById("status");
@@ -171,6 +171,8 @@ function documents(t) {
     })), { name: "People from your Facebook download" }),
     "connections.json": collection(t.connections.map((c) => ({
       type: "Person", id: actorId(c.origin), url: actorId(c.origin), name: c.name, "afterwrd:connectedAt": iso(c.connected_at),
+      // Who they are in the Facebook download, if linked on Friends.
+      "afterwrd:facebookName": t.friend_links.find((l) => l.connection_id === c.id)?.person_name || undefined,
     })), { name: "Friends' afterwrd sites you're connected with" }),
     "comments-elsewhere.json": collection([...t.comments_elsewhere].filter((c) => c.site).sort((a, b) => b.created_at - a.created_at)
       .map((c) => ({

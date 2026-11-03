@@ -13,6 +13,7 @@ import m0009 from "../migrations/0009_comments_elsewhere_site.sql";
 import m0010 from "../migrations/0010_friends_visit.sql";
 import m0011 from "../migrations/0011_albums.sql";
 import m0012 from "../migrations/0012_no_friend_visits.sql";
+import m0013 from "../migrations/0013_friend_links.sql";
 
 // Every file in migrations/, in order. A new migration needs adding here too.
 const MIGRATIONS = [
@@ -28,6 +29,7 @@ const MIGRATIONS = [
   ["0010_friends_visit.sql", m0010],
   ["0011_albums.sql", m0011],
   ["0012_no_friend_visits.sql", m0012],
+  ["0013_friend_links.sql", m0013],
 ];
 
 let ready = null;

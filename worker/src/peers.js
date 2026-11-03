@@ -115,7 +115,10 @@ export async function handlePeer(request, env, url) {
   }
   if (route === "POST /_peer/disconnect") {
     // The owner's copies of what they said on that site (comments_elsewhere) stay: they're theirs.
-    await db.prepare("DELETE FROM connections WHERE id = ?").bind(peer.id).run();
+    await db.batch([
+      db.prepare("DELETE FROM connections WHERE id = ?").bind(peer.id),
+      db.prepare("DELETE FROM friend_links WHERE connection_id = ?").bind(peer.id),
+    ]);
     return json({ ok: true });
   }
   if (route === "POST /_peer/comments") {

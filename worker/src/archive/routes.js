@@ -52,6 +52,7 @@ const ROUTES = [
   [/^\/people\/(\d+)$/, "friends", person],
   [/^\/activity$/, null, activity],
   [/^\/feed$/, null, feed],
+  [/^\/friend$/, null, friendsIndex],
   [/^\/friend\/(\d+)$/, null, friendHome],
   [/^\/friend\/(\d+)\/posts$/, null, friendPosts],
   [/^\/friend\/(\d+)\/photos$/, null, friendPhotos],
@@ -447,11 +448,44 @@ async function fromFriend(ctx, id, load) {
   if (!ctx.user.is_owner) return null;
   const connection = await connectionById(ctx.db, id);
   if (!connection) return null;
+  connection.facebook = await facebookSelf(ctx.db, connection);
   try {
     return await load(connection);
   } catch (error) {
     return views.friendProblem(ctx, connection, error.message);
   }
+}
+
+/**
+ * The owner's Friends: friends on afterwrd (connected sites), each linked, if the owner says so, to who they are in
+ * the Facebook download; then everyone else from that download. Matching names are suggested, never assumed.
+ */
+async function friendsIndex(ctx) {
+  if (!ctx.user.is_owner) return null;
+  const { db } = ctx;
+  const [connections, links, people] = await db.batch([
+    db.prepare("SELECT * FROM connections WHERE connected_at IS NOT NULL ORDER BY name COLLATE NOCASE"),
+    db.prepare("SELECT * FROM friend_links"),
+    db.prepare("SELECT id, name, friend_since FROM people WHERE is_me = 0 AND friend_since IS NOT NULL ORDER BY name COLLATE NOCASE"),
+  ]);
+  const same = (a, b) => a.localeCompare(b, "en", { sensitivity: "accent" }) === 0;
+  const linked = new Map(links.results.map((l) => [l.connection_id, l]));
+  const taken = links.results.filter((l) => l.person_name);
+  const friends = connections.results.map((c) => {
+    const link = linked.get(c.id);
+    if (link?.person_name) return { ...c, person: people.results.find((p) => same(p.name, link.person_name)) ?? { name: link.person_name } };
+    if (link) return c; // they said the suggestion wasn't them
+    const matches = people.results.filter((p) => same(p.name, c.name) && !taken.some((t) => same(t.person_name, p.name)));
+    return matches.length === 1 ? { ...c, suggestion: matches[0] } : c;
+  });
+  const facebook = people.results.map((p) => ({ ...p, friend: friends.find((f) => f.person && same(f.person.name, p.name)) }));
+  return views.friendsIndexPage(ctx, { friends, facebook });
+}
+
+/** Who a friend on afterwrd is in the owner's Facebook download, if the owner has linked them. */
+async function facebookSelf(db, connection) {
+  return first(db, `SELECT p.id, p.name FROM friend_links l JOIN people p ON p.name = l.person_name COLLATE NOCASE AND p.is_me = 0
+    WHERE l.connection_id = ? LIMIT 1`, [connection.id]);
 }
 
 async function friendHome(ctx, params, id) {

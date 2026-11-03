@@ -120,6 +120,10 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   every photo and video. Everything has a permanent address (`https://<site>/posts/<key>`,
   `…/photos/sha256/<fingerprint>`, `…#c<n>` for a comment), so two friends' downloads agree on which comment
   replied to which post. The README inside explains the files. Keys and sign-in details are never included.
+- **Friends** (the owner's alone) is one list: friends on afterwrd first, each with their posts and photos, then
+  everyone from the Facebook download, marked *on afterwrd* or not. Say which Facebook friend an afterwrd friend is
+  (matching names are suggested; nothing is linked without you), and their page links to your Facebook history
+  together. Invited people still see the published Facebook friends list.
 - **Feed and connections.** Connect with friends who have their own afterwrd site: make a one-time Connect
   link under *Feed → Connections* and send it to them; they open it, say where their site is, and confirm there.
   Connections are mutual, and make you friends: *Feed* (only the owner sees it) shows the newest posts written on

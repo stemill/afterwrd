@@ -7,7 +7,8 @@
 // pages, and can comment on them (peers.js, friends.js).
 //
 // Without a session:   GET /_connect/<token>  (the page the link opens), GET …/info, POST …/accept
-// The owner's:         GET /_admin/connections, POST …/link, GET|POST …/new?link=, POST …/<id>/disconnect
+// The owner's:         GET /_admin/connections, POST …/link, GET|POST …/new?link=, POST …/<id>/disconnect,
+//                      POST …/<id>/facebook (name, or none=1): which person in the Facebook download they are
 import { asset, ownerHeader } from "./nav.js";
 import { connectLinkPage, messagePage } from "./pages.js";
 import { callSite, host, KEY_RE, ownerName, siteOrigin } from "./peers.js";
@@ -99,6 +100,26 @@ export async function handleConnections(request, env, url) {
     ]);
     return json({ link: `${url.origin}/_connect/${token}` });
   }
+  // Which person in the owner's Facebook download a friend is (a form from Friends); kept by name.
+  const facebook = /^\/(\d+)\/facebook$/.exec(path);
+  if (request.method === "POST" && facebook) {
+    const id = Number(facebook[1]);
+    const form = await request.formData().catch(() => new FormData());
+    if (await db.prepare("SELECT 1 FROM connections WHERE id = ? AND connected_at IS NOT NULL").bind(id).first()) {
+      if (form.get("unlink")) {
+        await db.prepare("DELETE FROM friend_links WHERE connection_id = ?").bind(id).run();
+      } else {
+        // "none" means the suggestion wasn't them; otherwise the name must be someone in the download.
+        const person = form.get("none") ? { name: null }
+          : await db.prepare("SELECT name FROM people WHERE is_me = 0 AND name = ? COLLATE NOCASE LIMIT 1").bind(String(form.get("name") ?? "").trim()).first();
+        if (person) {
+          await db.prepare("INSERT OR REPLACE INTO friend_links (connection_id, person_name, created_at) VALUES (?, ?, ?)")
+            .bind(id, person.name, now()).run();
+        }
+      }
+    }
+    return Response.redirect(`${url.origin}/friend`, 303);
+  }
   const disconnect = /^\/(\d+)\/disconnect$/.exec(path);
   if (request.method === "POST" && disconnect) {
     const connection = await db.prepare("SELECT * FROM connections WHERE id = ?").bind(Number(disconnect[1])).first();
@@ -106,7 +127,10 @@ export async function handleConnections(request, env, url) {
       // Tell them, if they can be reached; either way this side forgets them.
       await callSite(connection.origin, "/_peer/disconnect", { key: connection.their_key, body: {} }).catch(() => {});
       // The owner's copies of what they said on that site (comments_elsewhere) stay: they're theirs.
-      await db.prepare("DELETE FROM connections WHERE id = ?").bind(connection.id).run();
+      await db.batch([
+        db.prepare("DELETE FROM connections WHERE id = ?").bind(connection.id),
+        db.prepare("DELETE FROM friend_links WHERE connection_id = ?").bind(connection.id),
+      ]);
     }
     return json({ ok: true });
   }
@@ -189,7 +213,7 @@ const POST_SCRIPT = `
 
 function connectionsPage(connections) {
   return shell("Connections", `
-<p class="crumbs"><a href="/feed">Feed</a> /</p>
+<p class="crumbs"><a href="/friend">Friends</a> /</p>
 <h1>Connected sites</h1>
 <p class="meta">Connect with friends who have their own afterwrd site, and you become friends: you'll each see the
 other's new posts in <a href="/feed">Feed</a>, and can read each other's posts and photos (everything you've published)
