@@ -2,6 +2,7 @@
 // and untouched by code deploys). Files are split across 16 objects by the first character of their hash, and
 // each file into rows under SQLite's 2 MB limit.
 import { DurableObject } from "cloudflare:workers";
+import { MAX_FILE } from "../public/static/import/schema.js";
 
 const CHUNK = 1_900_000;
 export const HASH_RE = /^[0-9a-f]{64}$/;
@@ -95,6 +96,11 @@ export class MediaStore extends DurableObject {
       if (done) break;
       await hasher.write(value);
       size += value.length;
+      if (size > MAX_FILE) {
+        await reader.cancel();
+        this.sql.exec("DELETE FROM chunks WHERE hash = ?", hash);
+        return Response.json({ error: "File too big." }, { status: 413 });
+      }
       for (let offset = 0; offset < value.length;) {
         const take = Math.min(CHUNK - filled, value.length - offset);
         buffer.set(value.subarray(offset, offset + take), filled);

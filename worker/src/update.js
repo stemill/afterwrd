@@ -34,6 +34,11 @@ export async function handleUpdate(request, env, url, owner) {
 
   const body = await request.json().catch(() => ({}));
   try {
+    if (!["/remember", "/forget"].includes(path)) {
+      if (!TAG_RE.test(body.tag ?? "")) throw new Error("Unknown release.");
+      // Only ever forward: an older release could bring back problems since fixed.
+      if (!newer(body.tag.slice(1), VERSION)) throw new Error("That isn't newer than this site's version.");
+    }
     if (!url.hostname.endsWith(".workers.dev")) throw new Error("Updating works from the site's workers.dev address.");
     const script = url.hostname.split(".")[0];
     const given = typeof body.token === "string" ? body.token.trim() : "";
@@ -53,7 +58,7 @@ export async function handleUpdate(request, env, url, owner) {
       await api(env.UPDATE_TOKEN, `/accounts/${account}/workers/scripts/${script}/secrets/UPDATE_TOKEN`, { method: "DELETE" });
       return json({ ok: true });
     }
-    if (!TAG_RE.test(body.tag ?? "")) throw new Error("Unknown release.");
+    if (path !== "/check" && !/^[0-9a-f]{32}$/.test(body.account ?? "")) throw new Error("Unknown Cloudflare account.");
     const release = () => loadRelease(`https://github.com/${REPO}/releases/download/${body.tag}`);
     if (path === "/check") return json({ account: (await findWorker(token, script)).account });
     if (path === "/assets") return json({ jwt: await uploadAssets(token, body.account, script, await release()) });

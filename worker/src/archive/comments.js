@@ -11,6 +11,7 @@ import { html, now } from "../util.js";
 export const MAX_COMMENT = 2000;
 // Plenty for a conversation, too few for a runaway script.
 const RATE = { count: 30, seconds: 600 };
+const DAILY = 200; // from one person in a day, whatever the pace
 const TARGET_RE = /^(?:post-(\d+)-[0-9a-f]{8}|photo-([0-9a-f]{64}))$/;
 
 export { postKey };
@@ -74,12 +75,14 @@ export async function handleComments(request, env, url, user) {
     if (!text) return Response.redirect(back, 303);
     if (text.length > MAX_COMMENT) return message(`Comments can be up to ${MAX_COMMENT} characters.`, back, 400);
     if (!(await findTarget(db, target))) return message("That's no longer in the archive.", back, 404);
-    const recent = await db.prepare("SELECT COUNT(*) AS n FROM site_comments WHERE author_id = ? AND created_at > ?")
-      .bind(user.id, now() - RATE.seconds).first();
-    if (recent.n >= RATE.count) return message("That's a lot of comments in a few minutes. Try again shortly.", back, 429);
+    // The limits are checked in the same statement as the insert, so comments sent all at once can't slip past.
     // A connected friend visiting from their own site is marked with it, as when they comment from their Feed.
     const row = await db.prepare(`INSERT INTO site_comments (target, author_id, author_name, text, created_at, origin)
-      VALUES (?, ?, ?, ?, ?, ?) RETURNING id`).bind(target, user.id, user.name, text, now(), user.site ?? "site").first();
+      SELECT ?1, ?2, ?3, ?4, ?5, ?6
+      WHERE (SELECT COUNT(*) FROM site_comments WHERE author_id = ?2 AND created_at > ?5 - ?7) < ?8
+        AND (SELECT COUNT(*) FROM site_comments WHERE author_id = ?2 AND created_at > ?5 - 86400) < ?9
+      RETURNING id`).bind(target, user.id, user.name, text, now(), user.site ?? "site", RATE.seconds, RATE.count, DAILY).first();
+    if (!row) return message("That's a lot of comments for now. Try again later.", back, 429);
     back.hash = `c${row.id}`;
     return Response.redirect(back, 303);
   }

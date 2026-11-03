@@ -1,7 +1,7 @@
 // What a connected friend's site may ask of this one, using the key this site gave it (see connect.js):
 //   GET  /_peer/hello?from=<origin>     who's here; only mid-connect, to prove to <origin> the key is ours for it
-//   GET  /_peer/feed                    the owner's newest posts written on afterwrd, with the owner's comments
-//                                       and the caller's own (not those of other visitors or other friends)
+//   GET  /_peer/feed                    the owner's newest posts written on afterwrd, with all their comments (a
+//                                       connected friend sees what they'd see visiting)
 //   GET  /_peer/posts?page=n            everything a visiting friend could read, through share.js:
 //   GET  /_peer/albums                    posts, albums, an album's photos, one photo; files come as signed links
 //   GET  /_peer/albums/<key>?page=n
@@ -24,6 +24,7 @@ const MAX_REPLY = 2_000_000;
 const RATE = { count: 30, seconds: 600 };
 const DAILY = 300; // comments from one site a day, whatever the pace
 const TICKET_SECONDS = 120;
+const LIVE_TICKETS = 10; // unused passes one site can hold at once
 export const KEY_RE = /^[\w-]{40,100}$/;
 
 /** An https site address as an origin, or null. http on this computer only when testing (ALLOW_LOCAL_SITES). */
@@ -117,7 +118,7 @@ export async function handlePeer(request, env, url) {
   if (!peer?.connected_at) return json({ error: "Not connected." }, 401);
 
   if (route === "GET /_peer/feed") return json(await feed(env, url.origin));
-  const page = Math.max(1, Number.parseInt(url.searchParams.get("page"), 10) || 1);
+  const page = Math.min(10_000, Math.max(1, Number.parseInt(url.searchParams.get("page"), 10) || 1));
   if (route === "GET /_peer/posts") return json(await sharePosts(env, url.origin, page, await ownerName(db)));
   if (route === "GET /_peer/albums") return json(await shareAlbums(env, url.origin));
   const shared = /^GET \/_peer\/(albums\/(\d+|other|videos)|photos\/([0-9a-f]{64}))$/.exec(route);
@@ -132,6 +133,8 @@ export async function handlePeer(request, env, url) {
   }
   if (route === "POST /_peer/ticket") {
     const body = await request.json().catch(() => ({}));
+    const live = await db.prepare("SELECT COUNT(*) AS n FROM friend_tickets WHERE connection_id = ? AND expires_at > ?").bind(peer.id, now()).first();
+    if (live.n >= LIVE_TICKETS) return json({ error: "Too many visits started at once. Try again in a couple of minutes." }, 429);
     const token = randomToken();
     await db.batch([
       db.prepare("DELETE FROM friend_tickets WHERE expires_at < ?").bind(now()),
@@ -151,15 +154,13 @@ export async function handlePeer(request, env, url) {
       : reply.startsWith(`${url.origin}/photos/sha256/`) ? `photo-${reply.slice(`${url.origin}/photos/sha256/`.length)}` : "";
     const found = (POST_KEY_RE.test(target) || /^photo-[0-9a-f]{64}$/.test(target)) && (await findTarget(db, target));
     if (!found) return json({ error: "That isn't there any more." }, 404);
-    const [recent, today] = await db.batch([
-      db.prepare("SELECT COUNT(*) AS n FROM site_comments WHERE origin = ? AND created_at > ?").bind(peer.origin, now() - RATE.seconds),
-      db.prepare("SELECT COUNT(*) AS n FROM site_comments WHERE origin = ? AND created_at > ?").bind(peer.origin, now() - 86400),
-    ]);
-    if (recent.results[0].n >= RATE.count || today.results[0].n >= DAILY) {
-      return json({ error: "That's a lot of comments for now. Try again later." }, 429);
-    }
+    // Limits checked in the same statement as the insert, so comments sent all at once can't slip past.
     const row = await db.prepare(`INSERT INTO site_comments (target, author_id, author_name, text, created_at, origin)
-      VALUES (?, NULL, ?, ?, ?, ?) RETURNING id`).bind(target, peer.name, text, now(), peer.origin).first();
+      SELECT ?1, NULL, ?2, ?3, ?4, ?5
+      WHERE (SELECT COUNT(*) FROM site_comments WHERE origin = ?5 AND created_at > ?4 - ?6) < ?7
+        AND (SELECT COUNT(*) FROM site_comments WHERE origin = ?5 AND created_at > ?4 - 86400) < ?8
+      RETURNING id`).bind(target, peer.name, text, now(), peer.origin, RATE.seconds, RATE.count, DAILY).first();
+    if (!row) return json({ error: "That's a lot of comments for now. Try again later." }, 429);
     return json({ id: commentId(url.origin, target, row.id) });
   }
 

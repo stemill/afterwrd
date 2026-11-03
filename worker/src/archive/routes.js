@@ -107,7 +107,7 @@ function page(body) {
 const all = (db, sql, params = []) => db.prepare(sql).bind(...params).all().then((r) => r.results);
 const first = (db, sql, params = []) => db.prepare(sql).bind(...params).first();
 const marks = (list) => list.map(() => "?").join(",");
-const pageNumber = (params) => Math.max(1, Number.parseInt(params.get("page"), 10) || 1);
+const pageNumber = (params) => Math.min(10_000, Math.max(1, Number.parseInt(params.get("page"), 10) || 1));
 
 /** Accumulates WHERE clauses and their parameters. */
 class Filters {
@@ -431,7 +431,7 @@ async function activity(ctx, params) {
 /** The owner's Feed: new posts from connected friends' sites. */
 async function feed(ctx) {
   if (!ctx.user.is_owner) return null;
-  return views.feedPage(ctx, await loadFeed(ctx.db));
+  return views.feedPage(ctx, await loadFeed(ctx.db, ctx.url.origin));
 }
 
 /** A photo's permanent address (public/static/activity.js), which survives re-imports, leads to its page. */
@@ -462,7 +462,7 @@ async function friendPosts(ctx, params, id) {
   return fromFriend(ctx, id, async (c) => {
     const { posts, paging, avatar, cover } = await friend.friendPosts(c, pageNumber(params));
     Object.assign(c, { avatar, cover });
-    for (const p of posts) p.comments = await markMine(ctx.db, c.id, p.comments);
+    for (const p of posts) p.comments = await markMine(ctx.db, c.id, p.key, p.comments, ctx.url.origin);
     return views.friendPostsPage(ctx, c, { posts, paging });
   });
 }
@@ -478,7 +478,7 @@ async function friendAlbum(ctx, params, id, key) {
 async function friendPhoto(ctx, params, id, hash) {
   return fromFriend(ctx, id, async (c) => {
     const m = await friend.friendPhoto(c, hash);
-    m.comments = await markMine(ctx.db, c.id, m.comments);
+    m.comments = await markMine(ctx.db, c.id, `photo-${m.hash}`, m.comments, ctx.url.origin);
     return views.friendPhotoPage(ctx, c, m);
   });
 }

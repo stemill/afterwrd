@@ -6,7 +6,7 @@
 import { actorId, POST_KEY_RE, seconds } from "../public/static/activity.js";
 import { MAX_COMMENT } from "./archive/comments.js";
 import { HASH_RE } from "./media.js";
-import { callSite } from "./peers.js";
+import { callSite, siteOrigin } from "./peers.js";
 
 const text = (v, max) => (typeof v === "string" && v.length <= max ? v : null);
 const count = (n) => (Number.isSafeInteger(n) && n > 0 ? n : null);
@@ -14,8 +14,9 @@ const count = (n) => (Number.isSafeInteger(n) && n > 0 ? n : null);
 /** A path on their site after `prefix`, or null. */
 const own = (site, url, prefix) => (typeof url === "string" && url.startsWith(site + prefix) ? url.slice(site.length + prefix.length) : null);
 
-/** Their signed link for a file, if it really is for that file on their site. */
-const fetchable = (site, link, hash) => (typeof link === "string" && link.startsWith(`${site}/files/${hash}?exp=`) ? link : null);
+/** Their signed link for a file, if it's exactly that and nothing more (it ends up in pages, even in style="…"). */
+const fetchable = (site, link, hash) => (typeof link === "string" && link.startsWith(`${site}/files/${hash}?`)
+  && /^\?exp=\d{1,12}&sig=[\w-]{43}$/.test(link.slice(`${site}/files/${hash}`.length)) ? link : null);
 
 export function parseMedia(m, site) {
   const hash = own(site, m?.url, "/files/");
@@ -37,10 +38,10 @@ function parseThread(collection, base, site, friendName) {
     const n = /^#c(\d{1,15})$/.exec((typeof c?.id === "string" && c.id.startsWith(base) && c.id.slice(base.length)) || "");
     const author = c?.attributedTo;
     const name = author === actorId(site) ? friendName : text(author?.name, 100);
-    const from = typeof author?.id === "string" && author.id !== actorId(site) ? author.id.replace(/\/$/, "") : null;
+    const from = typeof author?.id === "string" && author.id !== actorId(site) ? siteOrigin(author.id.replace(/\/$/, "")) : null;
     const at = seconds(c?.published);
     return c?.type === "Note" && n && name && text(c.content, MAX_COMMENT) && at !== null
-      ? [{ id: Number(n[1]), name, text: c.content, created_at: at, from: from && /^https?:\/\/[^/]+$/.test(from) ? from : null }] : [];
+      ? [{ id: Number(n[1]), name, text: c.content, created_at: at, from }] : [];
   });
 }
 
@@ -68,7 +69,7 @@ export function parseNote(note, site, friendName) {
 /** Who their site says its owner is: name, profile picture (`avatar`) and cover. */
 function parseActor(actor, site) {
   return {
-    name: text(actor?.name, 100),
+    name: text(actor?.name, 100)?.trim() || null,
     avatar: actor?.icon ? parseMedia(actor.icon, site) : null,
     cover: actor?.image ? parseMedia(actor.image, site) : null,
   };

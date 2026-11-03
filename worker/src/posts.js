@@ -69,8 +69,12 @@ export async function removeUnusedFiles(env, files) {
   files = [...new Set(files.filter(Boolean))];
   if (!files.length) return;
   const marks = files.map(() => "?").join(",");
-  const { results: used } = await env.DB.prepare(`SELECT hash FROM media WHERE hash IN (${marks})
-    UNION SELECT thumb_hash FROM media WHERE thumb_hash IN (${marks})`).bind(...files, ...files).all();
+  // …including by an import under way, whose photos are waiting in media_next.
+  const importing = await env.DB.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'media_next'").first();
+  const tables = importing ? ["media", "media_next"] : ["media"];
+  const { results: used } = await env.DB.prepare(tables.map((t) => `SELECT hash FROM ${t} WHERE hash IN (${marks})
+    UNION SELECT thumb_hash FROM ${t} WHERE thumb_hash IN (${marks})`).join(" UNION "))
+    .bind(...tables.flatMap(() => [...files, ...files])).all();
   const unused = files.filter((h) => !used.some((u) => u.hash === h));
   await Promise.all([...new Set(unused.map((h) => h[0]))].map((shard) =>
     mediaStore(env, shard).remove(unused.filter((h) => h[0] === shard))));
@@ -109,13 +113,15 @@ async function remove(env, url, id) {
   if (post && id > 0) {
     const { results: photos } = await db.prepare("SELECT * FROM site_photos WHERE post_id = ?").bind(id).all();
     const going = photos.filter((f) => f.album_id === null);
-    const targets = [postKey(post), ...going.map(photoKey)];
+    // Photo comments are kept by picture, so they go only once no photo here shows it (an imported one can).
     await db.batch([
-      db.prepare(`DELETE FROM site_comments WHERE target IN (${targets.map(() => "?").join(",")})`).bind(...targets),
+      db.prepare("DELETE FROM site_comments WHERE target = ?").bind(postKey(post)),
       db.prepare("DELETE FROM site_photos WHERE post_id = ? AND album_id IS NULL").bind(id),
       db.prepare("UPDATE site_photos SET post_id = NULL WHERE post_id = ?").bind(id),
       db.prepare("DELETE FROM site_posts WHERE id = ?").bind(id),
       ...mirror(db),
+      ...going.map((f) => db.prepare("DELETE FROM site_comments WHERE target = ? AND NOT EXISTS (SELECT 1 FROM media WHERE hash = ?)")
+        .bind(photoKey(f), f.hash)),
     ]);
     await removeUnusedFiles(env, going.flatMap((f) => [f.hash, f.thumb_hash]));
   }

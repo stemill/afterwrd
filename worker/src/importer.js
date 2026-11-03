@@ -9,7 +9,7 @@
 import { ARCHIVE, MAX_FILE, SERVABLE_TYPES } from "../public/static/import/schema.js";
 import { SECTIONS } from "../public/static/import/select.js";
 import { importPage } from "./importpage.js";
-import { mirror } from "./posts.js";
+import { mirror, SITE_ID } from "./posts.js";
 import { HASH_RE, mediaStore } from "./media.js";
 import { html, json } from "./util.js";
 
@@ -90,6 +90,8 @@ function checked(table, column, type, value) {
   } else if (typeof value !== "string" || value.length > 1_000_000) throw bad();
   if (table === "media" && (column === "hash" || column === "thumb_hash") && !HASH_RE.test(value)) throw bad();
   if (table === "media" && column === "type" && !SERVABLE_TYPES.has(value)) throw bad();
+  // Ids from SITE_ID up belong to posts, photos and albums made on the site (posts.js).
+  if (column === "id" && ["posts", "media", "albums"].includes(table) && value >= SITE_ID) throw bad();
   return value;
 }
 

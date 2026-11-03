@@ -18,14 +18,20 @@ const TARGET_RE = /^(post-\d+-[0-9a-f]{8}|photo-[0-9a-f]{64})$/;
 export const connectionById = (db, id) => db.prepare("SELECT * FROM connections WHERE id = ? AND connected_at IS NOT NULL")
   .bind(Number(id) || 0).first();
 
-/** Marks the owner's own comments: the ones this site sent (comments_elsewhere), whatever the friend's site says. */
-export async function markMine(db, connectionId, comments) {
-  const { results } = await db.prepare("SELECT remote_id FROM comments_elsewhere WHERE connection_id = ?").bind(connectionId).all();
-  const mine = new Set(results.map((r) => r.remote_id));
-  return comments.map((c) => ({ ...c, mine: mine.has(c.id) }));
+/**
+ * Marks the owner's own comments on a friend's post or photo (`target`): the ones this site sent there
+ * (comments_elsewhere), shown with the words this site kept, whatever the friend's site says. Anything else claiming
+ * to come from this site is left out: a friend's site can't put words in the owner's mouth.
+ */
+export async function markMine(db, connectionId, target, comments, ownOrigin) {
+  const { results } = await db.prepare("SELECT remote_id, text FROM comments_elsewhere WHERE connection_id = ? AND target = ?")
+    .bind(connectionId, target).all();
+  const sent = new Map(results.map((r) => [r.remote_id, r.text]));
+  return comments.flatMap((c) => (sent.has(c.id) ? [{ ...c, mine: true, text: sent.get(c.id), from: null }]
+    : c.from === ownOrigin ? [] : [{ ...c, mine: false }]));
 }
 
-export async function loadFeed(db) {
+export async function loadFeed(db, ownOrigin) {
   const { results: connections } = await db.prepare(`SELECT * FROM connections WHERE connected_at IS NOT NULL
     ORDER BY name COLLATE NOCASE LIMIT ?`).bind(MAX_SITES).all();
   const replies = await Promise.all(connections.map(async (connection) => {
@@ -45,7 +51,9 @@ export async function loadFeed(db) {
   for (const r of replies) if (r.feed) r.connection.avatar = r.feed.avatar;
   const posts = [];
   for (const r of replies) {
-    for (const p of r.feed?.posts ?? []) posts.push({ ...p, connection: r.connection, comments: await markMine(db, r.connection.id, p.comments) });
+    for (const p of r.feed?.posts ?? []) {
+      posts.push({ ...p, connection: r.connection, comments: await markMine(db, r.connection.id, p.key, p.comments, ownOrigin) });
+    }
   }
   posts.sort((a, b) => b.created_at - a.created_at);
   return { posts, connections, unreachable: replies.filter((r) => r.error) };

@@ -64,11 +64,11 @@ export async function handlePhotos(request, env, url) {
     const { results: photos } = await db.prepare("SELECT * FROM site_photos WHERE album_id = ?").bind(id).all();
     const going = photos.filter((f) => f.post_id === null);
     await db.batch([
-      ...comments(db, going),
       db.prepare("DELETE FROM site_photos WHERE album_id = ? AND post_id IS NULL").bind(id),
       db.prepare("UPDATE site_photos SET album_id = NULL WHERE album_id = ?").bind(id),
       db.prepare("DELETE FROM site_albums WHERE id = ?").bind(id),
       ...mirror(db),
+      ...comments(db, going),
     ]);
     await removeUnusedFiles(env, going.flatMap((f) => [f.hash, f.thumb_hash]));
     return Response.redirect(`${url.origin}/photos`, 303);
@@ -79,12 +79,12 @@ export async function handlePhotos(request, env, url) {
     const f = await db.prepare("SELECT * FROM site_photos WHERE id = ?").bind(Number(photo[1]) - SITE_ID).first();
     if (!f) return Response.redirect(back, 303);
     await db.batch([
-      ...comments(db, [f]),
       db.prepare("DELETE FROM site_photos WHERE id = ?").bind(f.id),
       // A post left with nothing to show goes too.
       db.prepare(`DELETE FROM site_posts WHERE id = ? AND text IS NULL
         AND NOT EXISTS (SELECT 1 FROM site_photos WHERE post_id = site_posts.id)`).bind(f.post_id),
       ...mirror(db),
+      ...comments(db, [f]),
     ]);
     await removeUnusedFiles(env, [f.hash, f.thumb_hash]);
     const to = f.album_id !== null ? `/photos/album/${SITE_ID + f.album_id}` : f.post_id !== null ? "/posts" : "/photos";
@@ -93,8 +93,10 @@ export async function handlePhotos(request, env, url) {
   return new Response("Not found", { status: 404 });
 }
 
-const comments = (db, photos) => (photos.length
-  ? [db.prepare(`DELETE FROM site_comments WHERE target IN (${photos.map(() => "?").join(",")})`).bind(...photos.map(photoKey))] : []);
+// Comments on photos are kept by picture (photo-<hash>), so they go only once no photo here shows that picture: an
+// imported photo can have the same one. Run after mirror().
+const comments = (db, photos) => photos.map((f) => db.prepare(`DELETE FROM site_comments WHERE target = ?
+  AND NOT EXISTS (SELECT 1 FROM media WHERE hash = ?)`).bind(photoKey(f), f.hash));
 
 async function add(env, body) {
   const db = env.DB;

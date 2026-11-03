@@ -15,6 +15,8 @@ import { fromBase64Url, html, json, now, randomToken, sha256, toBase64Url } from
 const SESSION_COOKIE = "__Host-hb_session";
 const CHALLENGE_COOKIE = "__Host-hb_challenge";
 const SESSION_SECONDS = 30 * 24 * 3600;
+// A connected friend comes in through their own site, and can do so again whenever they like, so a week is plenty.
+const FRIEND_SESSION_SECONDS = 7 * 24 * 3600;
 const CHALLENGE_SECONDS = 5 * 60;
 
 export async function currentUser(request, env) {
@@ -279,25 +281,26 @@ async function friendSignIn(request, env, url, body) {
     user = await db.prepare("INSERT INTO users (name, created_at, site) VALUES (?, ?, ?) RETURNING id")
       .bind(connection.name, now(), connection.origin).first();
   }
-  return startSession(env, user.id, json({ ok: true, next: safeNext(ticket.next, url) }));
+  return startSession(env, user.id, json({ ok: true, next: safeNext(ticket.next, url) }), FRIEND_SESSION_SECONDS);
 }
 
-async function startSession(env, userId, response) {
+async function startSession(env, userId, response, seconds = SESSION_SECONDS) {
   const token = randomToken();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(now()),
     env.DB.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)")
-      .bind(await sha256(token), userId, now() + SESSION_SECONDS),
+      .bind(await sha256(token), userId, now() + seconds),
   ]);
   response.headers.append("Set-Cookie",
-    `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${SESSION_SECONDS}; HttpOnly; Secure; SameSite=Lax`);
+    `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${seconds}; HttpOnly; Secure; SameSite=Lax`);
   return response;
 }
 
 // --- helpers ---------------------------------------------------------------
 
 // Only a path on this site, resolved the way the browser will resolve it: "/\evil.example" and "/\t/evil.example"
-// both look like paths but take browsers to another site.
+// both look like paths but take browsers to another site. So does a path that resolves to "//…" ("/.//evil.example"):
+// browsers read that as another site's address.
 export function safeNext(next, url) {
   if (!next) return "/";
   let target;
@@ -306,7 +309,7 @@ export function safeNext(next, url) {
   } catch {
     return "/";
   }
-  if (target.origin !== url.origin || target.pathname.startsWith("/_auth/")) return "/";
+  if (target.origin !== url.origin || target.pathname.startsWith("/_auth/") || /^\/[/\\]/.test(target.pathname)) return "/";
   return target.pathname + target.search + target.hash;
 }
 

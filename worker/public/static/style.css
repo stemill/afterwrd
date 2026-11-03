@@ -431,6 +431,8 @@ table.numbers tbody tr:hover { background: color-mix(in srgb, var(--accent-soft)
 .counts a:hover { text-decoration: none; color: var(--text); }
 .counts strong { display: block; font: 800 1.75rem/1.15 var(--round); color: var(--text); }
 .profile .cover-wrap { position: relative; }
+/* The picture overlaps the cover's bottom edge, so it sits above it (the cover is positioned for its button). */
+.profile .identity { position: relative; z-index: 1; }
 .profile .change-cover { position: absolute; right: 0.75rem; bottom: 0.75rem; }
 .profile .name { margin: 0 0 0.3rem; font: 800 2rem/1.15 var(--round); letter-spacing: -0.015em; }
 .profile .avatar.empty { display: grid; place-items: center; font: 800 2.5rem var(--round); color: var(--muted); text-decoration: none; }
