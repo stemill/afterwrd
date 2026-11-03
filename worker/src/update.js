@@ -7,7 +7,7 @@
 //   POST /_admin/update/deploy     {token, account, tag, jwt} -> the new version
 // Releases come from the GitHub repository in package.json (afterwrd.releases). Every file is checked against
 // the release's manifest; as with installing, trust rests on that repository.
-import { ownerHeader } from "./nav.js";
+import { asset, ownerHeader } from "./nav.js";
 import pkg from "../package.json";
 import { api, deployVersion, existingDatabase, findWorker, loadRelease, uploadAssets } from "./deploy.js";
 import { escape, html, json } from "./util.js";
@@ -104,7 +104,7 @@ updating and not kept.</p>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Update · afterwrd</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="${asset("/static/style.css")}">
 <link rel="icon" href="data:,">
 <style>
   .how { padding-left: 1.2rem; }

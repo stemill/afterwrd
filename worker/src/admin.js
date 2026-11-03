@@ -1,7 +1,7 @@
 // The owner's page for managing who can see the archive: invite someone, send a fresh link, see and delete each
 // person's passkeys, cancel links that haven't been used, sign someone out everywhere, revoke access.
 // scripts/invite.mjs does the same from the terminal.
-import { ownerHeader } from "./nav.js";
+import { asset, ownerHeader } from "./nav.js";
 import { handleImport } from "./importer.js";
 import { handleUpdate } from "./update.js";
 import { escape, html, json, now, randomToken, sha256 } from "./util.js";
@@ -144,7 +144,7 @@ function adminPage(list, owner) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>People · afterwrd</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="${asset("/static/style.css")}">
 <link rel="icon" href="data:,">
 <style>
   .actions { white-space: nowrap; }

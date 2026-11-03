@@ -1,6 +1,6 @@
 // The owner's import page. The work happens in the browser (public/static/import/main.js): the export is read
 // on this computer and only the ticked sections are uploaded.
-import { ownerHeader } from "./nav.js";
+import { asset, ownerHeader } from "./nav.js";
 import { escape } from "./util.js";
 
 const SECTION_CHOICES = [
@@ -21,7 +21,7 @@ export function importPage(owner) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Import · afterwrd</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="${asset("/static/style.css")}">
 <link rel="icon" href="data:,">
 <style>
   .pickers { display: grid; gap: 0.75rem; margin: 1rem 0; }
@@ -91,7 +91,7 @@ what's published now; visitors see the old version until the new one is complete
 </section>
 </main>
 <script src="/static/vendor/zip-2.24.0.min.js"></script>
-<script type="module" src="/static/import/main.js"></script>
+<script type="module" src="${asset("/static/import/main.js")}"></script>
 </body>
 </html>`;
 }

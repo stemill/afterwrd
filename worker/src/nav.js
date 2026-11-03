@@ -1,6 +1,11 @@
 // The site header shared by every signed-in page: the logo and a row of chips, each an icon and a label.
 // Icons are inline SVG so nothing is fetched.
+import pkg from "../package.json";
 import { escape } from "./util.js";
+
+// Site files are fetched by a versioned address, so a browser holding an old copy fetches each release's afresh.
+// (heybert 0.1 let browsers keep the stylesheet for a week without checking.)
+export const asset = (path) => `${path}?v=${pkg.version}`;
 
 const ICONS = {
   overview: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',

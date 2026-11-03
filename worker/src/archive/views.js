@@ -3,7 +3,7 @@
 import {
   aspect, dateRange, EMOJI, fmtDate, fmtDatetime, linkify, mediaUrl, number, safeUrl, summary, thumbUrl,
 } from "./format.js";
-import { OWNER_ITEMS, siteHeader } from "../nav.js";
+import { asset, OWNER_ITEMS, siteHeader } from "../nav.js";
 import { html, raw } from "./html.js";
 
 const NAV = [["", "Overview", "overview"], ["timeline", "Timeline", "timeline"], ["posts", "Posts", "posts"],
@@ -21,7 +21,7 @@ function layout(ctx, { title, bodyClass = "", main }) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${title} · afterwrd</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="${asset("/static/style.css")}">
   <link rel="icon" href="data:,">
 </head>
 <body class="${bodyClass}">
