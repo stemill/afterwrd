@@ -1,7 +1,7 @@
 // Page templates, ported from heybert/templates. `ctx` carries me, the published sections, the signed-in user
 // and the request URL.
 import {
-  aspect, dateRange, EMOJI, fmtDate, fmtDatetime, linkify, number, safeUrl, summary, thumbUrl,
+  aspect, dateRange, EMOJI, fmtDate, fmtDatetime, linkify, mediaUrl, number, safeUrl, summary, thumbUrl,
 } from "./format.js";
 import { html, raw } from "./html.js";
 
@@ -21,6 +21,7 @@ function layout(ctx, { title, bodyClass = "", main }) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${title} · heybert</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:,">
 </head>
 <body class="${bodyClass}">
   <header class="site">
@@ -28,7 +29,7 @@ function layout(ctx, { title, bodyClass = "", main }) {
     <nav>
       ${NAV.filter(([, , s]) => ctx.sections.includes(s)).map(([path, label]) =>
         html`<a href="/${path}" ${current(path) && raw('aria-current="page"')}>${label}</a>`)}
-      ${ctx.user.is_owner ? html`<a href="/_admin">People</a>` : ""}
+      ${ctx.user.is_owner ? html`<a href="/_admin">People</a><a href="/_admin/import">Import</a>` : ""}
       <a href="/_auth/logout">Sign out</a>
     </nav>
   </header>
@@ -59,7 +60,7 @@ function ownerPhrase(ctx, ownerId, ownerName, authorId = null) {
 
 function mediaImg(m) {
   if (m.kind === "video") {
-    return html`<video src="/media/${m.path}#t=0.5" preload="metadata" muted playsinline></video><span class="play" aria-hidden="true"></span>`;
+    return html`<video src="${mediaUrl(m)}#t=0.5" preload="metadata" muted playsinline></video><span class="play" aria-hidden="true"></span>`;
   }
   return html`<img src="${thumbUrl(m)}" loading="lazy" alt="${m.description || ""}" ${m.width && raw(`width="${m.width}" height="${m.height}"`)}>`;
 }
@@ -171,10 +172,10 @@ export function overviewPage(ctx, { counts, byYear, topPeople }) {
   const me = ctx.me;
   return page(ctx, "Overview", html`
 <section class="profile">
-  ${me.cover_path ? html`<a class="cover" href="/photos/${me.cover_media_id}"><img src="/media/${me.cover_path}" alt="Cover photo"></a>`
+  ${me.cover_hash ? html`<a class="cover" href="/photos/${me.cover_media_id}"><img src="/files/${me.cover_hash}" alt="Cover photo"></a>`
     : raw('<div class="cover"></div>')}
   <div class="identity">
-    ${me.profile_path && html`<a class="avatar" href="/photos/${me.profile_media_id}"><img src="/media/${me.profile_path}" alt="Profile picture"></a>`}
+    ${me.profile_hash && html`<a class="avatar" href="/photos/${me.profile_media_id}"><img src="/files/${me.profile_hash}" alt="Profile picture"></a>`}
     <h1>${me.name}</h1>
   </div>
 </section>
@@ -287,7 +288,7 @@ ${pager(ctx, paging)}`);
 
 export function photosPage(ctx, { byYear, collections, tagged }) {
   const cover = (m) => m.kind === "video"
-    ? html`<video src="/media/${m.path}#t=0.5" preload="metadata" muted playsinline></video>`
+    ? html`<video src="${mediaUrl(m)}#t=0.5" preload="metadata" muted playsinline></video>`
     : html`<img src="${thumbUrl(m)}" loading="lazy" alt="">`;
   return page(ctx, "Photos", html`
 <h1>Photos &amp; videos</h1>
@@ -316,7 +317,7 @@ ${byYear.map(([year, albums]) => html`
 <div class="albums">
   ${albums.map((a) => html`
   <a class="album" href="/photos/album/${a.id}">
-    <div class="cover">${a.path && html`<img src="${thumbUrl(a)}" loading="lazy" alt="">`}</div>
+    <div class="cover">${a.hash && html`<img src="${thumbUrl(a)}" loading="lazy" alt="">`}</div>
     <div class="label">
       <strong>${a.name}</strong>
       <span>${a.count} · ${dateRange(a.first_ts, a.last_ts)}</span>
@@ -358,8 +359,8 @@ export function photoPage(ctx, { m, setKey, setTitle, prev, next, index, total, 
   const main = html`
 <main class="theatre">
   <section class="stage">
-    ${m.kind === "video" ? html`<video src="/media/${m.path}" controls autoplay playsinline preload="metadata"></video>`
-      : html`<img src="/media/${m.path}" alt="${m.description || ""}" ${m.width && raw(`width="${m.width}" height="${m.height}"`)}
+    ${m.kind === "video" ? html`<video src="${mediaUrl(m)}" controls autoplay playsinline preload="metadata"></video>`
+      : html`<img src="${mediaUrl(m)}" alt="${m.description || ""}" ${m.width && raw(`width="${m.width}" height="${m.height}"`)}
            style="background-image: url('${thumbUrl(m)}')">`}
 
     <a class="close" id="close" href="${back}" title="Back to ${setTitle} (Esc)" aria-label="Back to album">✕</a>
@@ -386,11 +387,11 @@ export function photoPage(ctx, { m, setKey, setTitle, prev, next, index, total, 
     ${post && html`<h2>Posted with</h2>${postCard(ctx, post)}`}
     ${comment && html`<h2>Attached to your comment</h2>${commentCard(ctx, comment)}`}
 
-    <p class="original"><a href="/media/${m.path}" target="_blank">Open original ↗</a></p>
+    <p class="original"><a href="${mediaUrl(m)}" target="_blank">Open original ↗</a></p>
   </aside>
 </main>
 
-${[next, prev].filter((n) => n && n.kind === "photo").map((n) => html`<link rel="prefetch" href="/media/${n.path}">`)}
+${[next, prev].filter((n) => n && n.kind === "photo").map((n) => html`<link rel="prefetch" href="${mediaUrl(n)}">`)}
 <script>
   document.addEventListener('keydown', e => {
     if (e.target.matches('input, textarea, select') || e.metaKey || e.ctrlKey) return;

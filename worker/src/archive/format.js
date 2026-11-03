@@ -74,10 +74,12 @@ export function summary(title, myName) {
   return title.slice(0, 1).toUpperCase() + title.slice(1);
 }
 
+/** A photo or video, from the media store. */
+export const mediaUrl = (m) => `/files/${m.hash}`;
+
 /** Small version of a photo for grids; videos and unreadable photos fall back to the original. */
 export function thumbUrl(m) {
-  if (m.kind === "photo" && m.width) return `/thumbs/${m.path.replace(/(\.[^./]*)?$/, ".jpg")}`;
-  return `/media/${m.path}`;
+  return m.thumb_hash ? `/files/${m.thumb_hash}` : mediaUrl(m);
 }
 
 /** Width / height, clamped so panoramas and very tall shots don't wreck a grid row. */

@@ -45,7 +45,7 @@ export async function renderArchive(request, env, url, user) {
   const db = env.DB;
   const [settings, me] = await db.batch([
     db.prepare("SELECT value FROM settings WHERE key = 'sections'"),
-    db.prepare(`SELECT p.*, pm.path AS profile_path, cm.path AS cover_path FROM people p
+    db.prepare(`SELECT p.*, pm.hash AS profile_hash, cm.hash AS cover_hash FROM people p
       LEFT JOIN media pm ON pm.id = p.profile_media_id
       LEFT JOIN media cm ON cm.id = p.cover_media_id
       WHERE p.is_me = 1`),
@@ -252,7 +252,7 @@ const setStats = (db, where, params) => first(db,
 async function photos(ctx) {
   const { db } = ctx;
   const albums = await all(db, `
-    SELECT a.id, a.name, m.path, m.kind, m.width, m.height,
+    SELECT a.id, a.name, m.hash, m.thumb_hash, m.kind, m.width, m.height,
       COUNT(x.id) AS count, MIN(x.timestamp) AS first_ts, MAX(x.timestamp) AS last_ts
     FROM albums a
     JOIN media x ON x.album_id = a.id

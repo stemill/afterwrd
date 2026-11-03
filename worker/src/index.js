@@ -1,11 +1,13 @@
-// Serves the archive to people who have signed in with a passkey: pages are built from the D1 copy that
-// `npm run publish` loads, and photos, videos and the stylesheet come from the static files beside it (data/site).
-// Every request comes through here first (run_worker_first), so nothing is reachable without a session.
+// Serves the archive to people who have signed in with a passkey: pages are built from D1, photos and videos
+// come from the media store (/files/<sha256>), and the stylesheet and import scripts from public/static.
+// Everything the owner imports arrives through /_admin/import. Every request comes through here first
+// (run_worker_first), so nothing is reachable without a session.
 import { handleAdmin } from "./admin.js";
 import { renderArchive } from "./archive/routes.js";
 import { currentUser, handleAuth } from "./auth.js";
+import { HASH_RE, mediaStore } from "./media.js";
 
-const FILE_DIRS = new Set(["static", "media", "thumbs"]);
+export { MediaStore } from "./media.js";
 const HEADERS = {
   "Content-Security-Policy": "frame-ancestors 'none'",
   "Referrer-Policy": "no-referrer",
@@ -37,30 +39,25 @@ async function route(request, env) {
   }
   if (!reading) return new Response("Method not allowed", { status: 405 });
 
-  if (!FILE_DIRS.has(url.pathname.split("/")[1])) return renderArchive(request, env, url, user);
-
-  const asset = await env.ASSETS.fetch(new Request(url, request));
-  if (asset.status === 404) return new Response("Not found", { status: 404 });
-  const response = await withRange(request, asset);
-  response.headers.set("Cache-Control", "private, max-age=604800");
-  response.headers.set("Accept-Ranges", "bytes");
-  return response;
+  const [, top, rest] = url.pathname.split("/");
+  if (top === "files" && HASH_RE.test(rest ?? "")) return serveFile(request, env, rest);
+  if (top === "static") {
+    const asset = await env.ASSETS.fetch(request);
+    if (asset.status === 404) return new Response("Not found", { status: 404 });
+    const response = new Response(asset.body, asset);
+    response.headers.set("Cache-Control", "private, no-cache");
+    return response;
+  }
+  return renderArchive(request, env, url, user);
 }
 
-// Safari won't play a video unless it can fetch byte ranges, so answer them here if the asset store didn't.
-async function withRange(request, asset) {
-  const match = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get("Range") ?? "");
-  if (!match || (!match[1] && !match[2]) || asset.status !== 200 || request.method !== "GET") {
-    return new Response(asset.body, asset);
-  }
-  const body = await asset.arrayBuffer();
-  const size = body.byteLength;
-  const start = match[1] ? Number(match[1]) : Math.max(size - Number(match[2]), 0);
-  const end = match[1] && match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
-  if (start > end) return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${size}` } });
-
-  const headers = new Headers(asset.headers);
-  headers.set("Content-Range", `bytes ${start}-${end}/${size}`);
-  headers.set("Content-Length", String(end - start + 1));
-  return new Response(new Uint8Array(body, start, end - start + 1), { status: 206, headers });
+// A file's address is its contents' hash, so it can be cached for good.
+async function serveFile(request, env, hash) {
+  const stored = await mediaStore(env, hash).fetch(new Request(`https://media/${hash}`, {
+    method: request.method,
+    headers: ["Range", "If-None-Match"].filter((h) => request.headers.has(h)).map((h) => [h, request.headers.get(h)]),
+  }));
+  const response = new Response(stored.body, stored);
+  if (stored.ok || stored.status === 304) response.headers.set("Cache-Control", "private, max-age=31536000, immutable");
+  return response;
 }

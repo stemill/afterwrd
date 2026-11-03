@@ -24,7 +24,8 @@ PAGE_SIZE = 50
 PHOTO_PAGE_SIZE = 150
 
 app = FastAPI(title="heybert")
-app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
+# The stylesheet is shared with the published site, which serves it from worker/public.
+app.mount("/static", StaticFiles(directory=HERE.parent / "worker" / "public" / "static"), name="static")
 app.mount("/media", StaticFiles(directory=MEDIA_DIR, check_dir=False), name="media")
 app.mount("/thumbs", StaticFiles(directory=THUMB_DIR, check_dir=False), name="thumbs")
 templates = Jinja2Templates(directory=HERE / "templates")

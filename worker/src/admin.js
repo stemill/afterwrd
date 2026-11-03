@@ -1,12 +1,16 @@
 // The owner's page for managing who can see the archive: invite someone, send a fresh link, revoke access.
 // Same rules as scripts/invite.mjs, which is still needed to invite the owner on a brand-new site.
+import { handleImport } from "./importer.js";
 import { escape, html, json, now, randomToken, sha256 } from "./util.js";
 
 const INVITE_SECONDS = 7 * 24 * 3600;
 
 export async function handleAdmin(request, env, url, owner) {
-  if (request.method === "POST" && request.headers.get("Origin") !== url.origin) {
+  if (request.method !== "GET" && request.method !== "HEAD" && request.headers.get("Origin") !== url.origin) {
     return json({ error: "Request from another site" }, 403);
+  }
+  if (url.pathname === "/_admin/import" || url.pathname.startsWith("/_admin/import/")) {
+    return handleImport(request, env, url, owner);
   }
   if (request.method === "GET" && url.pathname === "/_admin") return html(adminPage(await people(env), owner));
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
@@ -94,6 +98,7 @@ function adminPage(list, owner) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>People · heybert</title>
 <link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:,">
 <style>
   .actions { white-space: nowrap; }
   .actions button, #link button { font: inherit; font-size: 0.85rem; padding: 0.25rem 0.6rem; margin-left: 0.25rem;
@@ -121,7 +126,7 @@ function adminPage(list, owner) {
 <body>
 <header class="site">
   <a class="brand" href="/">heybert</a>
-  <nav><a href="/">← Back to the archive</a><a href="/_admin" aria-current="page">People</a><a href="/_auth/logout">Sign out</a></nav>
+  <nav><a href="/">← Back to the archive</a><a href="/_admin" aria-current="page">People</a><a href="/_admin/import">Import</a><a href="/_auth/logout">Sign out</a></nav>
 </header>
 <main>
 <h1>Who can see your archive</h1>

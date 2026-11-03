@@ -4,12 +4,13 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "node scripts/deploy.mjs",
     "invite": "node scripts/invite.mjs",
-    "publish": "node --disable-warning=ExperimentalWarning scripts/publish.mjs"
+    "test:ingest": "node --disable-warning=ExperimentalWarning test/compare-ingest.mjs"
   },
   "dependencies": {
-    "@simplewebauthn/server": "14.0.3"
+    "@simplewebauthn/server": "14.0.3",
+    "@zip.js/zip.js": "2.24.0"
   },
   "devDependencies": {
     "wrangler": "4.156.2"

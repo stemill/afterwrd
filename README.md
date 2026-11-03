@@ -21,38 +21,40 @@ Set `HEYBERT_DATA` to keep it somewhere else.
 ## Publishing to people you invite
 
 `worker/` is a Cloudflare Worker that shows your archive only to people who've signed in with a passkey.
-`npm run publish` copies the parts of `data/heybert.db` you choose into the Worker's D1 database, and the
-photos they use into static files. The Worker builds pages from the database, so search and filters work as
-they do locally. Cloudflare's free plan covers it with no card needed: Workers, static assets and D1 only,
-no R2 or Zero Trust.
+You import from a page on the site itself: your browser reads the Facebook download and uploads only the
+sections you choose. Posts, people and the rest go into D1, photos and videos into Durable Objects, and the
+Worker builds pages from them, so search and filters work as they do locally. Cloudflare's free plan covers
+it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R2 or Zero Trust.
 
 **One-off setup.** Every command below runs in `worker/`.
 
 1. Create a free Cloudflare account at <https://dash.cloudflare.com/sign-up>. It needs only an email address.
-2. Install the Worker's tools and sign in:
+2. Install the Worker's tools, sign in and deploy. The first time, wrangler asks you to pick a workers.dev
+   subdomain and creates the database:
    ```sh
    cd worker
    npm install
    npx wrangler login                       # opens the browser
+   npm run deploy
    ```
-3. Publish. The first time, wrangler asks you to pick a workers.dev subdomain and creates the database:
-   ```sh
-   npm run publish                          # posts and photos; add -- --sections all for everything
-   ```
-4. Invite yourself as the owner. Use the address the publish step printed:
+3. Invite yourself as the owner. Use the address the deploy printed:
    ```sh
    npm run invite -- add "Your Name" --owner --url https://heybert.<subdomain>.workers.dev
    ```
    Open the link and create a passkey.
+4. Go to **Import** in the menu, choose the zip file(s) from Facebook (or the unzipped folder), tick what to
+   publish and press **Import and publish**.
 
-**Afterwards.** No terminal is needed for access. The **People** page (in the menu, owner only) does it:
+**Afterwards.** Nothing needs the terminal:
 
-- invite someone, then copy or share their one-time link;
-- send a fresh link (new phone, lost passkey);
-- revoke access, which signs the person out at once and deletes their passkeys.
+- **Import** again whenever you have a newer download, or to change what's published. Files already on the
+  site aren't uploaded again, and files the new import doesn't use are deleted. Visitors see the old version
+  until the new one is complete.
+- **People** invites someone (copy or share their one-time link), sends a fresh link for a new phone or lost
+  passkey, and revokes access, which signs the person out at once and deletes their passkeys.
 
-After re-importing your archive, run `npm run publish` again. It exports the site, updates the database
-tables, then deploys. `npm run invite` still has `list`, `again` and `revoke` for use from the terminal.
+`npm run deploy` is only for new versions of heybert's code; it never touches your archive.
+`npm run invite` still has `list`, `again` and `revoke` for use from the terminal.
 
 **What's published.** Only what the chosen sections show; the rest never leaves your computer. With the
 default (posts and photos):
@@ -60,12 +62,13 @@ default (posts and photos):
 - likes and your friends list stay on your computer;
 - people appear by name only where a post or photo mentions them, without friendship dates.
 
-Choose more with `npm run publish -- --sections all`, or a list from overview, timeline, posts, photos,
-comments, likes and friends. Files over 25 MB (Cloudflare's limit) are left out with a warning.
+Files over 95 MB (the most Cloudflare accepts in one upload) are left out with a note. The free plan allows
+5 GB of photos and videos in all.
 
-**Testing locally:** in `worker/`, run `npm run publish -- --local` to load the local database, then
-`npm run dev` and `npm run invite -- add "Test" --owner --local`.
-Passkeys work on `http://localhost:8787` but not on `127.0.0.1`.
+**Testing.** `npm run test:ingest -- <export folder>` checks the browser importer against
+`uv run heybert-ingest` row by row. To try the site locally: `npx wrangler d1 migrations apply heybert --local`,
+`npm run dev`, then `npm run invite -- add "Test" --owner --local` and import at
+`http://localhost:8787/_admin/import`. Passkeys work on `localhost` but not on `127.0.0.1`.
 
 ## What the import does
 
