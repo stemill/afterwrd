@@ -3,6 +3,7 @@
 import {
   aspect, dateRange, EMOJI, fmtDate, fmtDatetime, linkify, mediaUrl, number, safeUrl, summary, thumbUrl,
 } from "./format.js";
+import { OWNER_ITEMS, siteHeader } from "../nav.js";
 import { html, raw } from "./html.js";
 
 const NAV = [["", "Overview", "overview"], ["timeline", "Timeline", "timeline"], ["posts", "Posts", "posts"],
@@ -12,8 +13,8 @@ const NAV = [["", "Overview", "overview"], ["timeline", "Timeline", "timeline"],
 // --- layout ------------------------------------------------------------------
 
 function layout(ctx, { title, bodyClass = "", main }) {
-  const section = ctx.url.pathname.split("/")[1];
-  const current = (path) => section === path || (path === "friends" && section === "people");
+  const top = ctx.url.pathname.split("/")[1];
+  const currentSection = { "": "overview", people: "friends" }[top] ?? top;
   return html`<!doctype html>
 <html lang="en-GB">
 <head>
@@ -24,18 +25,15 @@ function layout(ctx, { title, bodyClass = "", main }) {
   <link rel="icon" href="data:,">
 </head>
 <body class="${bodyClass}">
-  <header class="site">
-    <a class="brand" href="/">afterwrd</a>
-    <nav>
-      ${NAV.filter(([, , s]) => ctx.sections.includes(s)).map(([path, label]) =>
-        html`<a href="/${path}" ${current(path) && raw('aria-current="page"')}>${label}</a>`)}
-      ${ctx.user.is_owner ? html`<a href="/_admin">People</a><a href="/_admin/import">Import</a><a href="/_admin/update">Update</a>` : ""}
-      <form method="post" action="/_auth/logout"><button class="link">Sign out</button></form>
-    </nav>
-  </header>
+  ${raw(siteHeader(navItems(ctx), currentSection))}
   ${main}
 </body>
 </html>`;
+}
+
+function navItems(ctx) {
+  const items = NAV.filter(([, , s]) => ctx.sections.includes(s)).map(([path, label, key]) => ({ key, label, href: `/${path}` }));
+  return ctx.user.is_owner ? [...items, ...OWNER_ITEMS] : items;
 }
 
 const page = (ctx, title, content, bodyClass = "") =>

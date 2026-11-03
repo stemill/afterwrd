@@ -7,6 +7,7 @@
 //   POST /_admin/update/deploy     {token, account, tag, jwt} -> the new version
 // Releases come from the GitHub repository in package.json (afterwrd.releases). Every file is checked against
 // the release's manifest; as with installing, trust rests on that repository.
+import { ownerHeader } from "./nav.js";
 import pkg from "../package.json";
 import { api, deployVersion, existingDatabase, findWorker, loadRelease, uploadAssets } from "./deploy.js";
 import { escape, html, json } from "./util.js";
@@ -108,21 +109,18 @@ updating and not kept.</p>
 <style>
   .how { padding-left: 1.2rem; }
   .how li { margin: 0.6rem 0; }
-  .button, #go { display: inline-block; padding: 0.5rem 1rem; border: 0; border-radius: 8px; background: var(--accent); color: #fff;
+  .button, #go { display: inline-block; padding: 0.5rem 1rem; border: 0; border-radius: 999px; background: var(--accent); color: var(--on-accent);
     font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
   .button.secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
   #go:disabled { opacity: 0.6; cursor: default; }
-  #token { width: 100%; font: inherit; padding: 0.5rem; margin-top: 0.3rem; border: 1px solid var(--border); border-radius: 8px;
+  #token { width: 100%; font: inherit; padding: 0.5rem; margin-top: 0.3rem; border: 1px solid var(--border); border-radius: 999px;
     background: var(--bg); color: var(--text); -webkit-text-security: disc; }
   #error { color: #d93025; }
   #done[hidden] { display: none; }
 </style>
 </head>
 <body>
-<header class="site">
-  <a class="brand" href="/">afterwrd</a>
-  <nav><a href="/">← Back to the archive</a><a href="/_admin">People</a><a href="/_admin/import">Import</a><a href="/_admin/update" aria-current="page">Update</a><form method="post" action="/_auth/logout"><button class="link">Sign out</button></form></nav>
-</header>
+${ownerHeader("update")}
 <main>
 <h1>Update afterwrd</h1>
 <p class="meta">Signed in as ${escape(owner.name)}. This site is afterwrd ${escape(VERSION)}.</p>

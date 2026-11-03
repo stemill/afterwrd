@@ -1,29 +1,34 @@
 // The only pages served to people who aren't signed in. Styles and script are inline because /static is
 // behind the login too.
+import { LOGO } from "./nav.js";
 import { escape } from "./util.js";
 
 const STYLE = `
-  :root { --bg: #f6f2eb; --surface: #fcfaf6; --text: #24201b; --muted: #6f675b; --border: #e3dacb; --accent: #a3482a;
-          --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif; }
+  :root { --bg: #f6f4f0; --surface: #fff; --text: #1d2420; --muted: #69736e; --border: #e5e1da; --accent: #0b8a6c;
+          --accent-strong: #08745b; --on-accent: #fff;
+          --round: ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", system-ui, sans-serif; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #191714; --surface: #221f1b; --text: #ece5d9; --muted: #a69d8f; --border: #38322b; --accent: #e08a62; }
+    :root { --bg: #111513; --surface: #191f1c; --text: #e8eeea; --muted: #9aa69f; --border: #28302c; --accent: #3fcf9f;
+            --accent-strong: #66dbb4; --on-accent: #08251c; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: var(--bg);
-         color: var(--text); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
-  main { width: 100%; max-width: 400px; background: var(--surface); border: 1px solid var(--border);
-         border-radius: 6px; padding: 32px; }
-  .brand { font: italic 1.4rem var(--serif); color: var(--text); margin: 0 0 22px; }
-  .brand::after { content: "."; color: var(--accent); font-style: normal; }
-  h1 { font: 600 1.6rem/1.2 var(--serif); margin: 0 0 10px; letter-spacing: -0.01em; }
-  p { margin: 0 0 18px; color: var(--muted); }
-  button, .button { display: block; width: 100%; padding: 12px; border: 0; border-radius: 4px; background: var(--text);
-           color: var(--bg); font: inherit; font-weight: 600; text-align: center; text-decoration: none; cursor: pointer; }
-  button:hover, .button:hover { background: var(--accent); color: #fff; }
+         color: var(--text); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { width: 100%; max-width: 420px; background: var(--surface); border-radius: 22px; padding: 34px;
+         box-shadow: 0 1px 2px rgb(20 30 25 / 0.05), 0 12px 40px rgb(20 30 25 / 0.08); }
+  .brand { display: flex; align-items: center; gap: 0.5rem; font: 800 1.3rem var(--round); margin: 0 0 24px; letter-spacing: -0.02em; color: var(--text); }
+  .mark { display: grid; place-items: center; width: 1.9rem; height: 1.9rem; border-radius: 9px;
+          background: linear-gradient(140deg, var(--accent), var(--accent-strong)); color: var(--on-accent); }
+  .mark svg { width: 1rem; height: 1rem; }
+  h1 { font: 800 1.7rem/1.2 var(--round); margin: 0 0 10px; letter-spacing: -0.015em; }
+  p { margin: 0 0 20px; color: var(--muted); }
+  button, .button { display: block; width: 100%; min-height: 3rem; padding: 12px; border: 0; border-radius: 999px; background: var(--accent);
+           color: var(--on-accent); font: inherit; font-weight: 700; text-align: center; text-decoration: none; cursor: pointer; }
+  button:hover, .button:hover { background: var(--accent-strong); }
   button:disabled { opacity: 0.6; cursor: default; }
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  #error { color: #b3261e; margin: 12px 0 0; min-height: 1.5em; }
-  input { width: 100%; font: inherit; padding: 11px; border: 1px solid var(--border); border-radius: 4px;
+  :focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
+  #error { color: #c0392b; margin: 12px 0 0; min-height: 1.5em; }
+  input { width: 100%; font: inherit; min-height: 3rem; padding: 11px 16px; border: 1px solid var(--border); border-radius: 999px;
           background: var(--bg); color: var(--text); }
 `;
 
@@ -87,7 +92,7 @@ function page(title, body, script = "") {
 </head>
 <body>
 <main>
-<p class="brand">afterwrd</p>
+<p class="brand">${LOGO}</p>
 ${body}
 </main>
 ${script && `<script>${CLIENT}\n${script}</script>`}

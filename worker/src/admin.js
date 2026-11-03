@@ -1,6 +1,7 @@
 // The owner's page for managing who can see the archive: invite someone, send a fresh link, see and delete each
 // person's passkeys, cancel links that haven't been used, sign someone out everywhere, revoke access.
 // scripts/invite.mjs does the same from the terminal.
+import { ownerHeader } from "./nav.js";
 import { handleImport } from "./importer.js";
 import { handleUpdate } from "./update.js";
 import { escape, html, json, now, randomToken, sha256 } from "./util.js";
@@ -148,7 +149,7 @@ function adminPage(list, owner) {
 <style>
   .actions { white-space: nowrap; }
   .actions button, #link button, .manage button { font: inherit; font-size: 0.85rem; padding: 0.25rem 0.6rem; margin-left: 0.25rem;
-    border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); cursor: pointer; }
+    border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text); cursor: pointer; }
   .actions button.danger { color: #d93025; }
   .manage button:disabled { opacity: 0.5; cursor: default; }
   tr.revoked th, tr.revoked td { color: var(--muted); }
@@ -164,9 +165,9 @@ function adminPage(list, owner) {
   #link { margin: 0 0 1.5rem; }
   #link[hidden] { display: none; }
   #link input { width: 100%; font: inherit; font-size: 0.9rem; padding: 0.4rem 0.6rem; margin: 0.5rem 0;
-    border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+    border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--text); }
   #link button { margin: 0 0.4rem 0 0; }
-  #link button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #link button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
   #link .warning { color: #b3261e; margin: 0.4rem 0 0; }
   #link .warning[hidden] { display: none; }
   #error { color: #d93025; margin: 0 0 1rem; }
@@ -179,10 +180,7 @@ function adminPage(list, owner) {
 </style>
 </head>
 <body>
-<header class="site">
-  <a class="brand" href="/">afterwrd</a>
-  <nav><a href="/">← Back to the archive</a><a href="/_admin" aria-current="page">People</a><a href="/_admin/import">Import</a><a href="/_admin/update">Update</a><form method="post" action="/_auth/logout"><button class="link">Sign out</button></form></nav>
-</header>
+${ownerHeader("people")}
 <main>
 <h1>Who can see your archive</h1>
 <p class="meta">Signed in as ${escape(owner.name)}. Each invite link works once, for 7 days, and lets one person create a
