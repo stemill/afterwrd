@@ -296,7 +296,7 @@ ${ctx.user.is_owner && fresh && composer()}
   ${yearSelect(years, year)}
   <button>Search</button>
 </form>
-${feed(posts, (p) => postCard(ctx, p), "No posts match.")}
+${feed(posts, (p) => postCard(ctx, p), fresh ? "No posts yet." : "No posts match.")}
 ${pager(ctx, paging)}`);
 }
 
@@ -607,7 +607,4 @@ function feedCard(ctx, p) {
 </article>`;
 }
 
-export function emptyPage(ctx, message) {
-  return page(ctx, "afterwrd", html`<p class="empty">${message}</p>`);
-}
 

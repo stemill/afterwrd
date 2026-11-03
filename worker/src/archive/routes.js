@@ -2,6 +2,8 @@
 // `npm run publish` uploads. Only the sections chosen at publish time are served.
 import { findTarget, latestComments, loadThreads, newCount, photoKey, postKey } from "./comments.js";
 import { loadFeed } from "../feed.js";
+import { ownerName } from "../peers.js";
+import { SITE_ID } from "../posts.js";
 import { now } from "../util.js";
 import { fmtDate, fmtMonth } from "./format.js";
 import * as views from "./views.js";
@@ -58,10 +60,14 @@ export async function renderArchive(request, env, url, user) {
       LEFT JOIN media cm ON cm.id = p.cover_media_id
       WHERE p.is_me = 1`),
   ]);
-  const sections = settings.results[0] ? JSON.parse(settings.results[0].value) : [];
-  const ctx = { db, url, user, sections, me: me.results[0], newComments: await newCount(db, user) };
-  // Feed doesn't need an archive of your own.
-  if ((!ctx.me || !sections.length) && url.pathname !== "/feed") return page(views.emptyPage(ctx, "Nothing has been published here yet."));
+  // `chosen` is what the owner published from Facebook. Posts and Photos are always there, for posts written on
+  // afterwrd, even before anything is imported; without their sections they show only those.
+  const chosen = settings.results[0] ? JSON.parse(settings.results[0].value) : [];
+  const sections = [...new Set([...chosen, "posts", "photos"])];
+  const ctx = {
+    db, url, user, chosen, sections, newComments: await newCount(db, user),
+    me: me.results[0] ?? { id: -1, name: await ownerName(db), is_me: 1 },
+  };
 
   if (url.pathname === "/" && !sections.includes("overview")) {
     return Response.redirect(`${url.origin}/${sections[0]}`, 302);
@@ -216,12 +222,16 @@ async function posts(ctx, params) {
   const { db } = ctx;
   const [q, year, kind] = ["q", "year", "kind"].map((k) => params.get(k) ?? "");
   const f = new Filters();
+  if (!ctx.chosen.includes("posts")) f.add("p.id >= ?", SITE_ID);
   if (q) f.add("(p.text LIKE ? OR p.title LIKE ? OR p.link_url LIKE ?)", ...Array(3).fill(`%${q}%`));
   if (year) f.add("strftime('%Y', p.timestamp, 'unixepoch') = ?", year);
   if (kind) f.add("p.kind = ?", kind);
   const { rows, paging } = await paginate(db, `${POST_SQL} ${f.sql} ORDER BY p.timestamp DESC`, f.params, pageNumber(params));
-  const kinds = (await all(db, "SELECT kind FROM posts GROUP BY kind ORDER BY COUNT(*) DESC")).map((r) => r.kind);
-  return views.postsPage(ctx, { posts: await loadPosts(db, rows), paging, q, year, kind, years: await years(db, "posts"), kinds });
+  const own = ctx.chosen.includes("posts") ? "" : `WHERE id >= ${SITE_ID}`;
+  const kinds = (await all(db, `SELECT kind FROM posts ${own} GROUP BY kind ORDER BY COUNT(*) DESC`)).map((r) => r.kind);
+  const postYears = (await all(db, `SELECT DISTINCT strftime('%Y', timestamp, 'unixepoch') AS y FROM posts ${own} ORDER BY y DESC`))
+    .map((r) => r.y);
+  return views.postsPage(ctx, { posts: await loadPosts(db, rows), paging, q, year, kind, years: postYears, kinds });
 }
 
 async function comments(ctx, params) {
@@ -265,30 +275,32 @@ const setStats = (db, where, params) => first(db,
 
 async function photos(ctx) {
   const { db } = ctx;
+  const imported = ctx.chosen.includes("photos");
   const albums = await all(db, `
     SELECT a.id, a.name, m.hash, m.thumb_hash, m.kind, m.width, m.height,
       COUNT(x.id) AS count, MIN(x.timestamp) AS first_ts, MAX(x.timestamp) AS last_ts
     FROM albums a
     JOIN media x ON x.album_id = a.id
     LEFT JOIN media m ON m.id = a.cover_media_id
+    ${imported ? "" : `WHERE a.id >= ${SITE_ID}`}
     GROUP BY a.id ORDER BY first_ts DESC`);
   const byYear = groupBy(albums, (a) => fmtDate(a.first_ts).slice(-4));
 
   const collections = [];
-  for (const key of ["other", "videos"]) {
+  for (const key of imported ? ["other", "videos"] : []) {
     const { title, where, params } = mediaSet(key);
     const stats = await setStats(db, where, params);
     const cover = await first(db, `SELECT * FROM media WHERE ${where} ORDER BY timestamp DESC LIMIT 1`, params);
     if (cover) collections.push({ key, title, cover, ...stats });
   }
-  const taggedCount = (await first(db, "SELECT COUNT(*) AS n FROM tagged_photos")).n;
+  const taggedCount = imported ? (await first(db, "SELECT COUNT(*) AS n FROM tagged_photos")).n : 0;
   return views.photosPage(ctx, { byYear, collections, tagged: taggedCount });
 }
 
 async function album(ctx, params, key) {
   const { db } = ctx;
   const set = mediaSet(key);
-  if (!set) return null;
+  if (!set || (!ctx.chosen.includes("photos") && !(/^\d+$/.test(key) && Number(key) >= SITE_ID))) return null;
   let { title } = set;
   let info = null;
   if (title === null) {
@@ -306,6 +318,7 @@ async function album(ctx, params, key) {
 }
 
 async function tagged(ctx, params) {
+  if (!ctx.chosen.includes("photos")) return null;
   const { rows, paging } = await paginate(ctx.db, `
     SELECT t.*, p.name AS owner_name FROM tagged_photos t LEFT JOIN people p ON p.id = t.owner_id
     ORDER BY t.timestamp DESC`, [], pageNumber(params));
