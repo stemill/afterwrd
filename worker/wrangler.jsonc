@@ -3,8 +3,11 @@
 	"name": "afterwrd",
 	"main": "src/index.js",
 	"compatibility_date": "2026-10-01",
+	// global_fetch_strictly_public: calls to a friend's site go out over the internet even when it's in the same
+	// Cloudflare account (otherwise Cloudflare answers 404), so two people sharing an account can connect.
 	"compatibility_flags": [
-		"nodejs_compat"
+		"nodejs_compat",
+		"global_fetch_strictly_public"
 	],
 	// The site's own files: stylesheet, import page scripts. The archive itself lives in D1 (pages) and the
 	// MEDIA Durable Objects (photos and videos), so deploying code never touches it.

@@ -161,3 +161,28 @@ export function signOutPage() {
 export function messagePage(message, link = { href: "/_auth/login", label: "Go to sign in" }) {
   return page("afterwrd", `<p>${escape(message)}</p><a class="button" href="${link.href}">${escape(link.label)}</a>`);
 }
+
+// Opened from a Connect link (connect.js). Sends the friend on to their own site to confirm, carrying the link.
+export function connectLinkPage(name) {
+  return page("Connect", `
+<h1>Connect with ${escape(name)}</h1>
+<p>${escape(name)} would like to connect their afterwrd site with yours, so you each see the other's new posts and can
+comment on them. Where is your afterwrd site?</p>
+<form id="site">
+  <input name="site" placeholder="e.g. jo.example.workers.dev" required autocomplete="url" inputmode="url" aria-label="Your site's address">
+  <p id="error" role="alert"></p>
+  <button>Continue on my site</button>
+</form>
+<p style="margin-top: 20px">No afterwrd site yet? <a href="https://afterwrd.app/">Set one up</a>, then open this link again.</p>`, `
+  document.getElementById("site").addEventListener("submit", (e) => {
+    e.preventDefault();
+    let site = e.target.site.value.trim();
+    if (!/^https?:\\/\\//.test(site)) site = "https://" + site;
+    try {
+      const origin = new URL(site).origin;
+      location.assign(origin + "/_admin/connections/new?link=" + encodeURIComponent(location.href));
+    } catch {
+      document.getElementById("error").textContent = "That doesn't look like a web address.";
+    }
+  });`);
+}

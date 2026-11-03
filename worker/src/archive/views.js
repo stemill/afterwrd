@@ -5,6 +5,7 @@ import {
   aspect, dateRange, EMOJI, fmtAgo, fmtDate, fmtDatetime, linkify, mediaUrl, number, safeUrl, summary, thumbUrl,
 } from "./format.js";
 import { asset, icon, OWNER_ITEMS, siteHeader } from "../nav.js";
+import { host } from "../peers.js";
 import { SITE_ID } from "../posts.js";
 import { html, raw } from "./html.js";
 
@@ -36,7 +37,7 @@ function layout(ctx, { title, bodyClass = "", main }) {
 function navItems(ctx) {
   const items = NAV.filter(([, , s]) => ctx.sections.includes(s)).map(([path, label, key]) => ({ key, label, href: `/${path}` }));
   items.push({ key: "activity", label: "Activity", href: "/activity", badge: ctx.newComments });
-  return ctx.user.is_owner ? [...items, ...OWNER_ITEMS] : items;
+  return ctx.user.is_owner ? [{ key: "feed", label: "Feed", href: "/feed" }, ...items, ...OWNER_ITEMS] : items;
 }
 
 const page = (ctx, title, content, bodyClass = "") =>
@@ -95,7 +96,7 @@ function thread(ctx, key, comments) {
   return html`<section class="thread" id="t-${key}" aria-label="Comments">
   ${comments.map((c) => html`<div class="comment" id="c${c.id}">
     <span class="who who-${(c.author_id ?? 0) % 6}" aria-hidden="true">${initial(c.name)}</span>
-    <div class="bubble"><strong>${c.name}</strong><span class="said">${linkify(c.text)}</span></div>
+    <div class="bubble"><strong>${c.name}</strong>${c.origin && c.origin !== "site" && html`<span class="from">${host(c.origin)}</span>`}<span class="said">${linkify(c.text)}</span></div>
     <div class="under">
       <time title="${fmtDatetime(c.created_at)}">${fmtAgo(c.created_at)}</time>
       ${canDelete(c) && html`<form method="post" action="/_comments/${c.id}/delete" onsubmit="return confirm('Delete this comment?')">
@@ -547,6 +548,62 @@ function activityItem(ctx, c, whose) {
     <div class="text">${linkify(c.text)}</div>
     ${snippet && html`<p class="meta on">On “${snippet}”</p>`}
   </div>
+</article>`;
+}
+
+export function feedPage(ctx, { posts, connections, unreachable }) {
+  return page(ctx, "Feed", html`
+<div class="feed-head">
+  <h1>Feed</h1>
+  <a class="chip" href="/_admin/connections">${raw(icon("connections"))}<span>Connections</span></a>
+</div>
+<p class="meta">New posts from friends' afterwrd sites you're connected with. Only you see this page.</p>
+${unreachable.map((u) => html`<p class="notice">Couldn't load ${u.connection.name}'s posts: ${u.error}</p>`)}
+${connections.length
+    ? feed(posts, (p) => feedCard(ctx, p), "No posts from your connections yet. New ones will appear here.")
+    : html`<div class="empty">
+  <p>Connect with friends who have their own afterwrd site to see their new posts here.</p>
+  <a class="chip primary" href="/_admin/connections">${raw(icon("connections"))}<span>Connect with a friend</span></a>
+</div>`}`);
+}
+
+/** A post from a friend's site; photos come through this site, and comments go to theirs. */
+function feedCard(ctx, p) {
+  const c = p.connection;
+  const file = (hash) => `/_feed/files/${c.id}/${hash}`;
+  const n = p.photos.length;
+  return html`<article class="card from-friend">
+  <header>
+    <span class="who who-${c.id % 6}" aria-hidden="true">${initial(c.name)}</span>
+    <span class="what"><strong>${c.name}</strong> <span class="meta">${host(c.origin)}</span></span>
+    <time title="${fmtDatetime(p.created_at)}">${fmtAgo(p.created_at)}</time>
+  </header>
+  ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
+  ${n > 0 && html`<div class="collage collage-${Math.min(n, 4)}">
+    ${p.photos.slice(0, 4).map((m, i) => html`
+      <a href="${file(m.hash)}" class="tile" target="_blank" ${n === 1 && html`style="--bg-img: url('${file(m.thumb_hash)}')"`}>
+        <img src="${file(m.thumb_hash)}" loading="lazy" alt="" width="${m.width}" height="${m.height}">
+        ${i === 3 && n > 4 && html`<span class="more">+${n - 4}</span>`}
+      </a>`)}
+  </div>`}
+  <section class="thread" aria-label="Comments">
+    ${p.comments.map((r) => html`<div class="comment" id="r${c.id}-${r.id}">
+      <span class="who who-${r.mine ? ctx.user.id % 6 : r.id % 6}" aria-hidden="true">${initial(r.mine ? ctx.user.name : r.name)}</span>
+      <div class="bubble"><strong>${r.mine ? ctx.user.name : r.name}</strong>${!r.mine && r.from && html`<span class="from">${r.from}</span>`}<span class="said">${linkify(r.text)}</span></div>
+      <div class="under">
+        <time title="${fmtDatetime(r.created_at)}">${fmtAgo(r.created_at)}</time>
+        ${r.mine && html`<form method="post" action="/_feed/comments/${c.id}/${r.id}/delete" onsubmit="return confirm('Delete this comment?')">
+          <button>Delete</button>
+        </form>`}
+      </div>
+    </div>`)}
+    <form class="say" method="post" action="/_feed/comments">
+      <input type="hidden" name="connection" value="${c.id}">
+      <input type="hidden" name="target" value="${p.key}">
+      <textarea name="text" rows="1" maxlength="${MAX_COMMENT}" required placeholder="Write a comment…" aria-label="Write a comment"></textarea>
+      <button>Post</button>
+    </form>
+  </section>
 </article>`;
 }
 

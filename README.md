@@ -106,6 +106,12 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   *Posts*. Photos are resized to at most 2560px in the browser before uploading, which also removes the
   details phones hide in them (such as where a photo was taken), and they're collected in a *Posted on
   afterwrd* album. Importing again keeps them; deleting a post deletes its photos and comments.
+- **Feed and connections.** Connect with friends who have their own afterwrd site: make a one-time Connect
+  link under *Feed → Connections* and send it to them; they open it, say where their site is, and confirm there.
+  Connections are mutual. *Feed* (only the owner sees it) shows the newest posts written on each connected site,
+  and comments you make there are stored on your friend's site, with a copy kept on yours. Only posts written on
+  afterwrd are shared, never an imported archive. Either side can disconnect. Two sites in the same Cloudflare
+  account can connect too.
 - **Comments.** Anyone who can see the site can comment under a post or photo; comments show straight away.
   People can delete their own, and the owner can delete any. *Activity* lists the latest, with a count in the
   menu of those that are new to you. Comments are kept when you import again, and stay (under the person's

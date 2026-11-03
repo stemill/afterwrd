@@ -1,6 +1,7 @@
 // The archive's pages, ported from the routes in afterwrd/app.py and reading the D1 copy that
 // `npm run publish` uploads. Only the sections chosen at publish time are served.
 import { findTarget, latestComments, loadThreads, newCount, photoKey, postKey } from "./comments.js";
+import { loadFeed } from "../feed.js";
 import { now } from "../util.js";
 import { fmtDate, fmtMonth } from "./format.js";
 import * as views from "./views.js";
@@ -44,6 +45,7 @@ const ROUTES = [
   [/^\/friends$/, "friends", friends],
   [/^\/people\/(\d+)$/, "friends", person],
   [/^\/activity$/, null, activity],
+  [/^\/feed$/, null, feed],
 ];
 
 export async function renderArchive(request, env, url, user) {
@@ -57,7 +59,8 @@ export async function renderArchive(request, env, url, user) {
   ]);
   const sections = settings.results[0] ? JSON.parse(settings.results[0].value) : [];
   const ctx = { db, url, user, sections, me: me.results[0], newComments: await newCount(db, user) };
-  if (!ctx.me || !sections.length) return page(views.emptyPage(ctx, "Nothing has been published here yet."));
+  // Feed doesn't need an archive of your own.
+  if ((!ctx.me || !sections.length) && url.pathname !== "/feed") return page(views.emptyPage(ctx, "Nothing has been published here yet."));
 
   if (url.pathname === "/" && !sections.includes("overview")) {
     return Response.redirect(`${url.origin}/${sections[0]}`, 302);
@@ -396,4 +399,10 @@ async function activity(ctx, params) {
   }
   const items = rows.map((c) => ({ ...c, on: targets.get(c.target), isNew: c.created_at > seen && c.author_id !== user.id }));
   return views.activityPage(ctx, { items, paging });
+}
+
+/** The owner's Feed: new posts from connected friends' sites. */
+async function feed(ctx) {
+  if (!ctx.user.is_owner) return null;
+  return views.feedPage(ctx, await loadFeed(ctx.db));
 }
