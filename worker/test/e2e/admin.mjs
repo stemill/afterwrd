@@ -10,7 +10,8 @@ const BASE = "http://localhost:8787";
 const cli = (...a) => execFileSync("node", ["scripts/invite.mjs", ...a, "--local"], { cwd: WORKER, encoding: "utf8" });
 const results = [];
 const check = (name, ok, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? `  (${extra})` : ""}`); };
-const navLabels = (page) => page.$$eval("header.site a.chip", (a) => a.map((x) => x.querySelector("span").textContent.trim()).join(","));
+// The main menu, then what's behind the person's picture.
+const navLabels = (page) => page.$$eval("header.site nav.main a, header.site .menu a", (a) => a.map((x) => x.querySelector("span").textContent.trim()).join(","));
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
 
@@ -34,7 +35,7 @@ const ownerName = `Owner ${Date.now()}`;
 const ownerLink = cli("add", ownerName, "--owner").match(/http\S+\/_auth\/invite\/\S+/)[0];
 const owner = await person();
 await register(owner, ownerLink);
-check("owner sees People in the nav, before Sign out", (await navLabels(owner)) === "Feed,Friends,Posts,Photos,Activity,People,Import,Download everything,Update", await navLabels(owner));
+check("owner sees People in their menu", (await navLabels(owner)) === "Home,Photos,Friends,Notifications,Your profile,People,Import,Download everything,Update", await navLabels(owner));
 
 await owner.goto(`${BASE}/_admin`);
 const ownerRow = await owner.$$eval("tbody tr", (rows, n) => rows.find((r) => r.textContent.includes(n))?.innerHTML ?? "", ownerName);
@@ -51,7 +52,7 @@ check("invite form shows a one-time link", /\/_auth\/invite\/[\w-]{40,}$/.test(g
 const guest = await person();
 await register(guest, guestLink);
 check("guest registers from the page's link", ["/", "/posts"].includes(new URL(guest.url()).pathname), guest.url());
-check("guest has no People link", (await navLabels(guest)) === "Posts,Photos,Activity", await navLabels(guest));
+check("guest has no People link", (await navLabels(guest)) === "Home,Photos,Notifications", await navLabels(guest));
 const guestAdmin = await guest.goto(`${BASE}/_admin`);
 check("guest gets 404 on /_admin", guestAdmin.status() === 404);
 await guest.goto(`${BASE}/posts`);

@@ -26,7 +26,7 @@ await page.type("#name", "New Owner");
 await Promise.all([page.waitForNavigation(), page.click("#go")]);
 await Promise.all([page.waitForNavigation(), page.click("#go")]);
 
-const nav = () => page.$$eval("header.site nav a", (l) => l.map((a) => a.querySelector("span").textContent).join(","));
+const nav = () => page.$$eval("header.site nav.main a", (l) => l.map((a) => a.querySelector("span").textContent).join(","));
 const texts = () => page.$$eval("main article.card .text", (l) => l.map((t) => t.textContent));
 const albums = () => page.$$eval(".albums a.album strong", (l) => l.map((s) => s.textContent));
 async function importZip(sections) {
@@ -41,10 +41,10 @@ async function importZip(sections) {
 
 // Nothing imported yet.
 await page.goto(BASE);
-check("a new site opens on Posts", new URL(page.url()).pathname === "/posts", page.url());
-check("menu has Posts and Photos before any import", (await nav()) === "Feed,Friends,Posts,Photos,Activity", await nav());
+check("a new site opens on Home", new URL(page.url()).pathname === "/", page.url());
+check("menu has Home, Photos, Friends and Notifications before any import", (await nav()) === "Home,Photos,Friends,Notifications", await nav());
 check("composer is there", Boolean(await page.$("#composer")));
-check("empty Posts says so kindly", (await page.$eval("main .empty", (e) => e.textContent)) === "No posts yet.");
+check("empty Home says so kindly", (await page.$eval("main .empty", (e) => e.textContent.trim())) === "Nothing here yet. Write your first post above.");
 await page.type("#composer textarea", "My very first post");
 await (await page.$("#composer input[type=file]")).uploadFile(`${fixtures}/photo1.jpg`);
 await Promise.all([page.waitForNavigation({ timeout: 60_000 }), page.click("#composer button.post")]);

@@ -4,53 +4,86 @@ import { MAX_COMMENT } from "./comments.js";
 import {
   aspect, dateRange, EMOJI, fmtAgo, fmtDate, fmtDatetime, linkify, mediaUrl, number, safeUrl, summary, thumbUrl,
 } from "./format.js";
-import { asset, icon, OWNER_ITEMS, siteHeader } from "../nav.js";
+import { asset, FAVICON, icon, ownerMain, ownerMenu, siteHeader } from "../nav.js";
 import { host } from "../peers.js";
 import { SITE_ID } from "../posts.js";
 import { html, raw } from "./html.js";
 
-const NAV = [["", "Overview", "overview"], ["timeline", "Timeline", "timeline"], ["posts", "Posts", "posts"],
-  ["photos", "Photos", "photos"], ["comments", "Comments", "comments"], ["likes", "Likes", "likes"],
-  ["friends", "Friends", "friends"]];
+// Memories: everything from the Facebook download, each shown if the owner published that section.
+const MEMORIES = [
+  ["timeline", "Timeline", "Everything, in date order"],
+  ["comments", "Comments", "What you said on Facebook"],
+  ["likes", "Likes", "What you liked and reacted to"],
+  ["friends", "Facebook friends", "Everyone you were friends with"],
+  ["overview", "Overview", "Your Facebook years in numbers"],
+];
+const hasMemories = (ctx) => MEMORIES.some(([s]) => ctx.chosen.includes(s));
 
 // --- layout ------------------------------------------------------------------
 
-function layout(ctx, { title, bodyClass = "", main }) {
+/** Which menu item the page belongs under. */
+function currentKey(ctx) {
   const top = ctx.url.pathname.split("/")[1];
-  const currentSection = ctx.user.is_owner
-    ? { "": "overview", people: "connected", friends: "connected", friend: "connected" }[top] ?? top
-    : { "": "overview", people: "friends" }[top] ?? top;
+  if (top === "") return "home";
+  if (top === "posts") return ctx.user.is_owner ? "profile" : "home";
+  if (top === "friend" || (top === "people" && ctx.user.is_owner)) return "connected";
+  if (["memories", "people", ...MEMORIES.map(([s]) => s)].includes(top)) return "memories";
+  return top;
+}
+
+function header(ctx) {
+  if (ctx.user.is_owner) {
+    const picture = ctx.profile?.profile;
+    return siteHeader({
+      main: ownerMain(ctx.newComments),
+      menu: ownerMenu({ memories: hasMemories(ctx), updateWaiting: ctx.updateWaiting }),
+      current: currentKey(ctx),
+      face: { initial: initial(ctx.user.name), picture: picture && `/files/${picture.thumb_hash ?? picture.hash}` },
+    });
+  }
+  return siteHeader({
+    main: [
+      { key: "home", label: "Home", href: "/" },
+      { key: "photos", label: "Photos", href: "/photos" },
+      { key: "activity", label: "Notifications", href: "/activity", badge: ctx.newComments },
+    ],
+    menu: hasMemories(ctx) ? [{ key: "memories", label: "Memories", href: "/memories" }] : [],
+    current: currentKey(ctx),
+    face: { initial: initial(ctx.user.name) },
+  });
+}
+
+function layout(ctx, { title, bodyClass = "", main }) {
   return html`<!doctype html>
 <html lang="en-GB">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#16201b">
   <title>${title} · afterwrd</title>
   <link rel="stylesheet" href="${asset("/static/style.css")}">
-  <link rel="icon" href="data:,">
+  ${raw(FAVICON)}
 </head>
 <body class="${bodyClass}">
-  ${raw(siteHeader(navItems(ctx), currentSection))}
+  ${raw(header(ctx))}
   ${main}
 </body>
 </html>`;
 }
 
-function navItems(ctx) {
-  const items = NAV.filter(([, , s]) => ctx.sections.includes(s)).map(([path, label, key]) => ({ key, label, href: `/${path}` }));
-  items.push({ key: "activity", label: "Activity", href: "/activity", badge: ctx.newComments });
-  if (ctx.user.is_owner) {
-    // One Friends for the owner: friends on afterwrd and from Facebook together (/friend). Visitors keep the
-    // published Facebook list.
-    const tools = OWNER_ITEMS.map((i) => (i.key === "update" && ctx.updateWaiting ? { ...i, label: "Update available", badge: true } : i));
-    return [{ key: "feed", label: "Feed", href: "/feed" }, { key: "connected", label: "Friends", href: "/friend" },
-      ...items.filter((i) => i.key !== "friends"), ...tools];
-  }
-  return items;
+/** On the Facebook sections' pages, tabs between them and back to Memories. */
+function memoriesTabs(ctx) {
+  const top = ctx.url.pathname.split("/")[1];
+  if (!MEMORIES.some(([s]) => s === top)) return "";
+  return html`<nav class="tabs" aria-label="Memories">
+  <a href="/memories">All memories</a>
+  ${MEMORIES.filter(([s]) => ctx.chosen.includes(s)).map(([s, label]) =>
+    html`<a href="/${s}" ${s === top && raw('aria-current="page"')}>${label}</a>`)}
+</nav>`;
 }
 
 const page = (ctx, title, content, bodyClass = "") =>
-  layout(ctx, { title, bodyClass, main: html`<main>${content}</main>` });
+  layout(ctx, { title, bodyClass, main: html`<main>${memoriesTabs(ctx)}${content}</main>` });
 
 // --- pieces (_macros.html) ---------------------------------------------------
 
@@ -122,7 +155,31 @@ function thread(ctx, key, comments) {
 </section>`;
 }
 
+/** The owner's picture, or their initial: for posts written here. */
+function ownerFace(ctx) {
+  const picture = ctx.profile?.profile;
+  return picture ? html`<img class="who" src="/files/${picture.thumb_hash ?? picture.hash}" alt="" aria-hidden="true">`
+    : html`<span class="who" aria-hidden="true">${initial(ctx.ownerName)}</span>`;
+}
+
 function postCard(ctx, p) {
+  // Posts written here look like friends' posts: who, when, and what they did if it's more than writing.
+  if (p.id >= SITE_ID) {
+    const did = p.title && p.title !== "Posted on afterwrd." ? p.title : "";
+    return html`<article class="card social own">
+  <header>
+    ${ownerFace(ctx)}
+    <span class="what"><strong>${ctx.user.is_owner ? "You" : ctx.ownerName}</strong>${did && html`<span class="meta">${did}</span>`}</span>
+    ${p.thread ? html`<a class="when" href="/posts/${p.key}" title="${fmtDatetime(p.timestamp)}"><time>${fmtAgo(p.timestamp)}</time></a>`
+      : html`<time title="${fmtDatetime(p.timestamp)}">${fmtAgo(p.timestamp)}</time>`}
+    ${ctx.user.is_owner && p.thread && html`<form method="post" action="/_admin/posts/${p.id}/delete"
+      onsubmit="return confirm('Delete this post, its photos and its comments? This can’t be undone.')"><button class="delete">Delete</button></form>`}
+  </header>
+  ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
+  ${collage(p.media)}
+  ${p.thread && thread(ctx, p.key, p.thread)}
+</article>`;
+  }
   let what;
   if (p.kind === "wall") what = html`Wrote on ${personLink(ctx, p.target_id, p.target_name)}'s profile`;
   else if (p.kind === "group") what = html`Posted in <em>${p.group_name}</em>`;
@@ -611,22 +668,6 @@ function activityItem(ctx, c, whose) {
 </article>`;
 }
 
-export function feedPage(ctx, { posts, connections, unreachable }) {
-  return page(ctx, "Feed", html`
-<div class="feed-head">
-  <h1>Feed</h1>
-  <a class="chip" href="/_admin/connections">${raw(icon("connections"))}<span>Connections</span></a>
-</div>
-<p class="meta">New posts from friends' afterwrd sites you're connected with. Only you see this page.</p>
-${unreachable.map((u) => html`<p class="notice">Couldn't load ${u.connection.name}'s posts: ${u.error}</p>`)}
-${connections.length
-    ? feed(posts, (p) => remoteCard(ctx, p.connection, p), "No posts from your connections yet. New ones will appear here.")
-    : html`<div class="empty">
-  <p>Connect with friends who have their own afterwrd site to see their new posts here.</p>
-  <a class="chip primary" href="/_admin/connections">${raw(icon("connections"))}<span>Connect with a friend</span></a>
-</div>`}`);
-}
-
 // --- a connected friend's posts and photos, read from their site (friends.js) ----------------------------------
 
 const friendBase = (c) => `/friend/${c.id}`;
@@ -674,7 +715,7 @@ const friendFace = (c) => (c.avatar
 function remoteCard(ctx, c, p, { thread = true } = {}) {
   const n = p.photos.length;
   const what = p.title && p.title !== "Posted on afterwrd." ? summary(p.title, c.name) : "";
-  return html`<article class="card from-friend">
+  return html`<article class="card social from-friend">
   <header>
     ${friendFace(c)}
     <span class="what"><a href="${friendBase(c)}/posts"><strong>${c.name}</strong></a>
@@ -846,3 +887,62 @@ ${friendHead(ctx, c, "")}
 }
 
 
+
+// --- Home and Memories ----------------------------------------------------------------------------------------------
+
+/** Posts from this day in past years, from the Facebook download (and anything posted here a year or more ago). */
+function onThisDayCard(ctx, memories) {
+  if (!memories.length) return "";
+  return html`<section class="card onthisday">
+  <h2>On this day</h2>
+  ${memories.map((p) => {
+    const photo = p.media?.find((m) => m.hash && m.kind === "photo");
+    const href = photo ? `/photos/${photo.id}` : `/posts/${p.key}`;
+    const words = p.text ? p.text.slice(0, 140) + (p.text.length > 140 ? "…" : "") : summary(p.title, ctx.me.name);
+    return html`<a class="memory" href="${href}">
+      ${photo && html`<img src="${thumbUrl(photo)}" alt="" loading="lazy">`}
+      <span class="year">${new Date(p.timestamp * 1000).getUTCFullYear()}</span>
+      <span>${words}</span>
+    </a>`;
+  })}
+</section>`;
+}
+
+/** The owner's Home: write something, then your posts and your friends' together, newest first. */
+export function homePage(ctx, { own, feed, onThisDay, friends }) {
+  const stream = [
+    ...own.map((p) => ({ at: p.timestamp, card: postCard(ctx, p) })),
+    ...feed.posts.map((p) => ({ at: p.created_at, card: remoteCard(ctx, p.connection, p) })),
+  ].sort((a, b) => b.at - a.at);
+  return page(ctx, "Home", html`
+<div class="home">
+  <section class="stream" aria-label="Posts">
+    <h1 class="hidden">Home</h1>
+    ${composer()}
+    ${feed.unreachable.map((u) => html`<p class="notice">Couldn't load ${u.connection.name}'s posts: ${u.error}</p>`)}
+    ${stream.length ? stream.map((s) => s.card) : html`<div class="empty"><p>Nothing here yet. Write your first post above.</p></div>`}
+  </section>
+  <aside class="side">
+    ${onThisDayCard(ctx, onThisDay)}
+    <section class="card">
+      <h2>Friends</h2>
+      ${friends.length ? html`<ul class="mini-friends">
+        ${friends.map((c) => html`<li><a href="/friend/${c.id}/posts"><span class="who who-${c.id % 6}" aria-hidden="true">${initial(c.name)}</span>${c.name}</a></li>`)}
+      </ul>` : html`<p class="meta">Connect with friends who have their own afterwrd site to see their posts here.</p>`}
+      <p><a class="chip" href="/_admin/connections">${raw(icon("connections"))}<span>Connect with a friend</span></a></p>
+    </section>
+  </aside>
+</div>`, "wide");
+}
+
+/** Memories: the sections of the Facebook download that were published, and what happened on this day. */
+export function memoriesPage(ctx, { onThisDay }) {
+  const available = MEMORIES.filter(([s]) => ctx.chosen.includes(s));
+  return page(ctx, "Memories", html`
+<h1>Memories</h1>
+<p class="meta">From ${ctx.user.is_owner ? "your" : `${ctx.me.name}'s`} Facebook download.</p>
+${available.length ? html`<ul class="memory-tiles">
+  ${available.map(([s, label, about]) => html`<li><a href="/${s}">${raw(icon(s))}<strong>${label}</strong><span class="meta">${about}</span></a></li>`)}
+</ul>` : html`<p class="empty">Nothing from Facebook has been published here.</p>`}
+${onThisDayCard(ctx, onThisDay)}`);
+}

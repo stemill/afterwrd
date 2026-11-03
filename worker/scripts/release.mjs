@@ -39,7 +39,7 @@ if (build.status !== 0) {
 
 const TYPES = {
   ".js": "application/javascript", ".css": "text/css", ".html": "text/html", ".json": "application/json",
-  ".svg": "image/svg+xml", ".png": "image/png", ".wasm": "application/wasm",
+  ".svg": "image/svg+xml", ".png": "image/png", ".wasm": "application/wasm", ".woff2": "font/woff2", ".txt": "text/plain",
 };
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 

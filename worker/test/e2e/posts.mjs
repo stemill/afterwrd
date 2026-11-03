@@ -67,8 +67,8 @@ await owner.goto(`${BASE}/posts`);
 await owner.type("#composer textarea", "First post written on the site\nwith two lines");
 await Promise.all([owner.waitForNavigation(), owner.click("#composer button.post")]);
 let first = (await cards(owner))[0];
-check("text post appears first", first.text === "First post written on the site\nwith two lines" && first.badge === "status"
-  && first.what === "Posted on afterwrd.", JSON.stringify(first));
+check("text post appears first, as yours", first.text === "First post written on the site\nwith two lines" && !first.badge
+  && first.what === "You", JSON.stringify(first));
 check("owner can delete it; friend can't", first.canDelete && !(await cards(friend)).some((c) => c.canDelete));
 
 // A photo post: one 4000×3000 photo with a hidden location, one small one.
@@ -77,7 +77,7 @@ await (await owner.$("#composer input[type=file]")).uploadFile(`${fixtures}/big-
 check("picked photos preview, removable", (await owner.$$("#composer .picked li")).length === 2 && Boolean(await owner.$("#composer .picked button")));
 await Promise.all([owner.waitForNavigation({ timeout: 60_000 }), owner.click("#composer button.post")]);
 first = (await cards(owner))[0];
-check("photo post appears first with both photos", first.text === "Two photos" && first.badge === "photo" && first.photos === 2, JSON.stringify(first));
+check("photo post appears first with both photos", first.text === "Two photos" && first.what === "You" && first.photos === 2, JSON.stringify(first));
 const stored = sql("SELECT id, hash, thumb_hash, width, height FROM media WHERE id >= 1000000000 ORDER BY id");
 const cookie = await cookieOf(owner);
 const get = (hash, c = cookie) => fetch(`${BASE}/files/${hash}`, { headers: { Cookie: `__Host-hb_session=${c}` } });

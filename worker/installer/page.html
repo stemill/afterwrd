@@ -4,41 +4,39 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Install afterwrd</title>
-<meta name="description" content="Your Facebook archive as a private website, in your own free Cloudflare account.">
-<link rel="icon" href="data:,">
+<meta name="description" content="A small, private social network of your own, with your Facebook years brought along. Free, in your own Cloudflare account.">
+<meta name="theme-color" content="#16201b">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Crect%20width%3D%2224%22%20height%3D%2224%22%20rx%3D%226%22%20fill%3D%22%23ff8a3d%22%2F%3E%3Cpath%20d%3D%22M12%204a8%208%200%201%201-4.7%2014.5L3.8%2020l1.2-3.6A8%208%200%200%201%2012%204z%22%20transform%3D%22translate(2.4%202.2)%20scale(0.8)%22%20fill%3D%22none%22%20stroke%3D%22%2316201b%22%20stroke-width%3D%223.6%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E">
 <style>
-  :root { --bg: #f6f4f0; --surface: #ffffff; --text: #1d2420; --muted: #69736e; --border: #e5e1da; --accent: #0b8a6c; --accent-strong: #08745b; --accent-soft: #dff3ec; --on-accent: #ffffff; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #111513; --surface: #191f1c; --text: #e8eeea; --muted: #9aa69f; --border: #28302c; --accent: #3fcf9f; --accent-strong: #66dbb4; --accent-soft: #183a2e; --on-accent: #08251c; }
-  }
+  /* Campfire, as on the sites themselves (the fonts are the device's own here). */
+  :root { --bg: #16201b; --surface: #1f2b25; --raised: #263329; --sunken: #121a16; --text: #ede6da; --muted: #a9a092; --border: #2e3d35;
+          --accent: #ff8a3d; --accent-strong: #ffab73; --accent-soft: #2b2118; --on-accent: #16201b; color-scheme: dark;
+          --round: ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", system-ui, sans-serif; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
   main { max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }
-  h1 { font: 800 2.4rem/1.15 ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", system-ui, sans-serif; margin: 0 0 10px; letter-spacing: -0.015em; }
-  .mark { display: inline-grid; place-items: center; width: 1.9rem; height: 1.9rem; border-radius: 9px; vertical-align: middle;
-    background: linear-gradient(140deg, var(--accent), var(--accent-strong)); color: var(--on-accent); margin-right: 0.45rem; }
-  .mark svg { width: 1rem; height: 1rem; }
-  .brand { font: 800 1.3rem ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", system-ui, sans-serif; margin: 0 0 18px; }
-  .lede { color: var(--muted); margin: 0 0 28px; font-size: 1.05rem; }
+  h1 { font: 900 2.5rem/1.12 var(--round); margin: 0 0 12px; letter-spacing: -0.02em; }
+  .brand { display: inline-flex; align-items: center; font: 900 1.7rem/1 var(--round); margin: 0 0 26px; letter-spacing: -0.02em; }
+  .brand .o { width: 0.82em; height: 0.82em; margin: 0.08em 0.01em 0; color: var(--accent); }
+  .lede { color: var(--muted); margin: 0 0 30px; font-size: 1.08rem; }
   ol.steps { list-style: none; counter-reset: step; padding: 0; margin: 0; display: grid; gap: 14px; }
-  ol.steps > li { counter-increment: step; background: var(--surface); border: 0; border-radius: 20px; box-shadow: 0 1px 2px rgb(20 30 25 / 0.05), 0 6px 20px rgb(20 30 25 / 0.06);
-    padding: 18px 20px 18px 64px; position: relative; }
+  ol.steps > li { counter-increment: step; background: var(--surface); border-radius: 22px; padding: 18px 20px 18px 64px; position: relative; }
   ol.steps > li::before { content: counter(step); position: absolute; left: 18px; top: 16px; width: 30px; height: 30px; border-radius: 50%;
-    background: var(--accent-soft); color: var(--accent); font-weight: 700; display: grid; place-items: center; }
-  h2 { font: 800 1.2rem ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", system-ui, sans-serif; margin: 2px 0 6px; }
+    background: var(--accent); color: var(--on-accent); font: 900 0.95rem var(--round); display: grid; place-items: center; }
+  h2 { font: 900 1.2rem var(--round); margin: 2px 0 6px; }
   p { margin: 6px 0; }
   .meta { color: var(--muted); font-size: 0.9rem; }
-  a { color: var(--accent); }
-  .button { display: inline-block; margin: 8px 8px 0 0; padding: 11px 20px; border-radius: 999px; border: 1px solid var(--border);
-    background: var(--surface); color: var(--text); font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
-  .button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  a { color: var(--accent-strong); }
+  .button { display: inline-block; margin: 8px 8px 0 0; padding: 11px 20px; border-radius: 999px; border: 0;
+    background: var(--raised); color: var(--text); font: 800 1rem var(--round); text-decoration: none; cursor: pointer; }
+  .button.primary { background: var(--accent); color: var(--on-accent); }
   .path { font-weight: 600; }
   details { margin-top: 10px; }
   summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
-  textarea { width: 100%; height: 260px; margin-top: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 8px;
-    background: var(--bg); color: var(--text); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
-  .safe { margin-top: 28px; background: var(--accent-soft); border: 0; border-radius: 20px; padding: 18px 20px; }
-  .safe h2 { margin-top: 0; }
+  textarea { width: 100%; height: 260px; margin-top: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--sunken); color: var(--text); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+  .safe { margin-top: 28px; background: var(--accent-soft); border: 0; border-radius: 22px; padding: 18px 20px; }
+  .safe h2 { margin-top: 0; color: var(--accent-strong); }
   .safe ul { margin: 0; padding-left: 1.2rem; }
   .safe li { margin: 0.4rem 0; }
   footer { margin-top: 28px; color: var(--muted); font-size: 0.85rem; }
@@ -47,10 +45,11 @@
 </head>
 <body>
 <main>
-<p class="brand"><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 3h10a1 1 0 0 1 1 1v17l-6-4-6 4V4a1 1 0 0 1 1-1z"/></svg></span>afterwrd</p>
-<h1>Your Facebook years, kept somewhere of your own</h1>
-<p class="lede">Your Facebook archive as a private website that only people you invite can see. It runs in your own
-free Cloudflare account: no one else holds your data, and there's nothing to pay. About 15 minutes on a computer.</p>
+<p class="brand" aria-label="afterwrd">afterw<svg class="o" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 1-4.7 14.5L3.8 20l1.2-3.6A8 8 0 0 1 12 4z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>rd</p>
+<h1>A small social network of your own</h1>
+<p class="lede">Post, share photos and talk with friends who have their own afterwrd site, and bring your Facebook years
+along. Only people you invite can see it. It runs in your own free Cloudflare account, so no one else holds your data
+and there's nothing to pay. About 15 minutes on a computer.</p>
 
 <ol class="steps">
   <li>

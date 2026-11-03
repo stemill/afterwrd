@@ -96,25 +96,24 @@ function page() {
 <link rel="icon" href="data:,">
 <title>Install afterwrd</title>
 <style>
-  :root { --bg: #f6f4f0; --surface: #ffffff; --text: #1d2420; --muted: #69736e; --border: #e5e1da; --accent: #0b8a6c; --accent-strong: #08745b; --accent-soft: #dff3ec; --on-accent: #ffffff; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #111513; --surface: #191f1c; --text: #e8eeea; --muted: #9aa69f; --border: #28302c; --accent: #3fcf9f; --accent-strong: #66dbb4; --accent-soft: #183a2e; --on-accent: #08251c; }
-  }
+  :root { --bg: #16201b; --surface: #1f2b25; --sunken: #121a16; --text: #ede6da; --muted: #a9a092; --border: #2e3d35;
+          --accent: #ff8a3d; --accent-strong: #ffab73; --on-accent: #16201b; color-scheme: dark; }
   * { box-sizing: border-box; }
   body { margin: 0; padding: 16px; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  main { max-width: 560px; margin: 24px auto; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 24px; }
-  h1 { font: 800 1.7rem/1.2 ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", system-ui, sans-serif; margin: 0 0 10px; letter-spacing: -0.01em; }
+  main { max-width: 560px; margin: 24px auto; background: var(--surface); border-radius: 24px; padding: 26px; }
+  h1 { font: 900 1.75rem/1.2 ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", system-ui, sans-serif; margin: 0 0 10px; letter-spacing: -0.015em; }
+  a { color: var(--accent-strong); }
   ol.how { padding-left: 1.2rem; }
   ol.how li { margin: 0.5rem 0; }
   .meta { color: var(--muted); font-size: 0.85rem; }
   a.button, button { display: inline-block; padding: 10px 16px; border: 0; border-radius: 999px; background: var(--accent); color: var(--on-accent);
     font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
-  a.button.secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  a.button.secondary { background: #263329; color: var(--text); }
   button:disabled { opacity: 0.6; cursor: default; }
-  input { width: 100%; font: inherit; padding: 10px; margin: 6px 0 12px; border: 1px solid var(--border); border-radius: 8px;
-    background: var(--bg); color: var(--text); -webkit-text-security: disc; }
+  input { width: 100%; font: inherit; padding: 10px 14px; margin: 6px 0 12px; border: 1px solid var(--border); border-radius: 999px;
+    background: var(--sunken); color: var(--text); -webkit-text-security: disc; }
   #log { padding-left: 1.2rem; }
-  #error { color: #d93025; }
+  #error { color: #ff8070; }
   #done { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 12px; }
   #done[hidden] { display: none; }
 </style>

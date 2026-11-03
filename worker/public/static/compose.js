@@ -33,7 +33,7 @@ form.addEventListener("submit", async (event) => {
     const photos = await uploadPhotos(picked.map((p) => p.file), (message) => { status.textContent = message; });
     status.textContent = "Posting…";
     await call("/_admin/posts", { text, photos });
-    location.href = "/posts";
+    location.href = location.pathname; // back to the page it was written on (Home or Posts), showing the new post
   } catch (err) {
     error.textContent = err.message;
     status.textContent = "";

@@ -67,7 +67,7 @@ await compose(bob, B, "Bob's holiday", [`${fixtures}/photo1.jpg`]);
 
 // Before connecting.
 await ann.goto(`${A}/feed`);
-check("Feed is in the owner's menu, first", (await ann.$$eval("header.site nav a", (l) => l.map((a) => a.querySelector("span").textContent)))[0] === "Feed");
+check("Home is first in the owner's menu", (await ann.$$eval("header.site nav.main a", (l) => l.map((a) => a.querySelector("span").textContent)))[0] === "Home");
 check("empty Feed explains connecting", (await ann.$eval("main", (m) => m.textContent)).includes("Connect with friends"));
 
 // Ann makes a Connect link; Bob opens it, gives his site, and confirms there.
@@ -86,13 +86,15 @@ await Promise.all([bob.waitForNavigation(), bob.click("#site button")]);
 check("Bob is sent to his own site to confirm", bob.url().startsWith(`${B}/_admin/connections/new?link=`)
   && (await bob.$eval("h1", (h) => h.textContent)) === "Connect with Ann Example?");
 await Promise.all([bob.waitForNavigation({ timeout: 30_000 }), bob.click("#go")]);
-check("confirming connects and opens Bob's Feed", new URL(bob.url()).pathname === "/feed", bob.url());
+check("confirming connects and opens Bob's Home", new URL(bob.url()).pathname === "/", bob.url());
 
 // Each sees the other's new posts, and only those.
 let bobFeed = await feedCards(bob);
 check("Bob's Feed has Ann's post, and only her afterwrd post", bobFeed.length === 1 && bobFeed[0].who === "Ann Example"
   && bobFeed[0].text === "Ann's news from site A", JSON.stringify(bobFeed));
 await ann.goto(`${A}/feed`);
+check("Feed is now part of Home", new URL(ann.url()).pathname === "/");
+check("Home shows Ann's own posts and Bob's together", Boolean(await ann.$("article.own")) && Boolean(await ann.$("article.from-friend")));
 let annFeed = await feedCards(ann);
 check("Ann's Feed has Bob's post with its photo", annFeed.length === 1 && annFeed[0].who === "Bob Example" && annFeed[0].photos === 1, JSON.stringify(annFeed));
 await ann.waitForFunction(() => document.querySelector("article.from-friend .collage img")?.complete, { timeout: 15_000 });
@@ -203,9 +205,13 @@ check("only Ann (the owner) can open friend pages", (await (await fetch(`${A}/fr
 check("Ann re-imports with her Facebook friends list", !(await importZip(ann, A, zipPath.replace(/fake-export\.zip$/, "friends-export.zip"),
   ["posts", "photos", "friends"])));
 await ann.goto(`${A}/posts`);
-const annMenu = await ann.$$eval("header.site nav a", (l) => l.map((a) => a.querySelector("span").textContent));
+const annMenu = await ann.$$eval("header.site nav.main a", (l) => l.map((a) => a.querySelector("span").textContent));
+check("with Facebook sections published, Memories appears in her menu", Boolean(await ann.$('header.site .menu a[href="/memories"]')));
+await ann.goto(`${A}/memories`);
+check("Memories gathers the Facebook sections", (await ann.$$eval(".memory-tiles strong", (l) => l.map((s) => s.textContent))).join() === "Facebook friends");
+await ann.goto(`${A}/posts`);
 check("the owner has one Friends in the menu", annMenu.filter((l) => l === "Friends").length === 1, annMenu.join());
-await Promise.all([ann.waitForNavigation(), ann.click('header.site nav a[href="/friend"]')]);
+await Promise.all([ann.waitForNavigation(), ann.click('header.site nav.main a[href="/friend"]')]);
 const friendsText = () => ann.$eval("main", (m) => m.innerText);
 check("Friends lists Bob on afterwrd, and suggests his Facebook self", (await friendsText()).includes("Is this Bob Example from your Facebook download?"));
 const fbRow = (name) => ann.$$eval("#fb-people tbody tr", (rows, n) => rows.find((r) => r.cells[0].textContent === n)?.cells[2].textContent.trim(), name);

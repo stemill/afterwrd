@@ -9,7 +9,7 @@
 // Without a session:   GET /_connect/<token>  (the page the link opens), GET …/info, POST …/accept
 // The owner's:         GET /_admin/connections, POST …/link, GET|POST …/new?link=, POST …/<id>/disconnect,
 //                      POST …/<id>/facebook (name, or none=1): which person in the Facebook download they are
-import { asset, ownerHeader } from "./nav.js";
+import { asset, FAVICON, ownerHeader } from "./nav.js";
 import { connectLinkPage, messagePage } from "./pages.js";
 import { callSite, host, KEY_RE, ownerName, siteOrigin } from "./peers.js";
 import { escape, html, json, now, randomToken, sha256 } from "./util.js";
@@ -188,7 +188,7 @@ function shell(title, body, script = "") {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escape(title)} · afterwrd</title>
 <link rel="stylesheet" href="${asset("/static/style.css")}">
-<link rel="icon" href="data:,">
+${FAVICON}
 </head>
 <body>
 ${ownerHeader("connections")}

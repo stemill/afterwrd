@@ -57,8 +57,10 @@ check("tiny export imports", !(await importZip(owner)));
 
 const friendName = `Friend <b>${Date.now()}</b>`;
 const friend = await person(cli("add", friendName).match(/http\S+\/_auth\/invite\/\S+/)[0]);
-const nav = await friend.$$eval("header.site a.chip", (a) => a.map((x) => x.textContent.trim()).join(","));
-check("friend's menu has Activity", nav === "Posts,Photos,Activity", nav);
+const nav = await friend.$$eval("header.site nav.main a", (a) => a.map((x) => x.querySelector("span").textContent).join(","));
+check("friend's menu has Notifications", nav === "Home,Photos,Notifications", nav);
+await friend.goto(`${BASE}/`);
+check("an invited friend's Home is the owner's posts", (await friend.$$("main article.card")).length === 2 && !(await friend.$("#composer")));
 
 // The friend comments on the first post, including some HTML and a link.
 await friend.goto(`${BASE}/posts`);

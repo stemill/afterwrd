@@ -8,7 +8,7 @@
 // Album and photo ids are the archive's copies (SITE_ID and up, see posts.js); only those made here can change.
 import { photoKey } from "./archive/comments.js";
 import { safeNext } from "./auth.js";
-import { asset, ownerHeader } from "./nav.js";
+import { asset, FAVICON, ownerHeader } from "./nav.js";
 import { addPhotos, checkPhotos, mirror, removeUnusedFiles, SITE_ID } from "./posts.js";
 import { escape, html, json, now } from "./util.js";
 
@@ -149,7 +149,7 @@ function addPage(albums, chosen, role) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title} · afterwrd</title>
 <link rel="stylesheet" href="${asset("/static/style.css")}">
-<link rel="icon" href="data:,">
+${FAVICON}
 </head>
 <body>
 ${ownerHeader("photos")}

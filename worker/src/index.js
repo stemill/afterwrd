@@ -44,6 +44,8 @@ async function route(request, env, work) {
   if (url.pathname.startsWith("/_peer/")) return handlePeer(request, env, url);
   const reading = request.method === "GET" || request.method === "HEAD";
   const [, top, rest] = url.pathname.split("/");
+  // The fonts are public, so the sign-in pages can use them too; they're open-licensed and say nothing about the site.
+  if (reading && /^\/static\/fonts\/[\w-]+\.woff2$/.test(url.pathname)) return serveStatic(request, env);
   // A photo or video a connected friend's site was given a signed link to (share.js): no session needed until it
   // expires, and only that one file.
   if (reading && top === "files" && HASH_RE.test(rest ?? "") && url.searchParams.has("sig")) {
@@ -66,14 +68,16 @@ async function route(request, env, work) {
   if (!reading) return new Response("Method not allowed", { status: 405 });
 
   if (top === "files" && HASH_RE.test(rest ?? "")) return serveFile(request, env, rest);
-  if (top === "static") {
-    const asset = await env.ASSETS.fetch(request);
-    if (asset.status === 404) return new Response("Not found", { status: 404 });
-    const response = new Response(asset.body, asset);
-    response.headers.set("Cache-Control", "private, no-cache");
-    return response;
-  }
+  if (top === "static") return serveStatic(request, env);
   return renderArchive(request, env, url, user, work);
+}
+
+async function serveStatic(request, env) {
+  const asset = await env.ASSETS.fetch(request);
+  if (asset.status === 404) return new Response("Not found", { status: 404 });
+  const response = new Response(asset.body, asset);
+  response.headers.set("Cache-Control", "private, no-cache");
+  return response;
 }
 
 // A file's address is its contents' hash, so it can be cached for good (or, through a signed link, while it lasts).

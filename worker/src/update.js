@@ -12,7 +12,7 @@
 // Without a token in the request, the remembered one is used.
 // Releases come from the GitHub repository in package.json (afterwrd.releases). Every file is checked against
 // the release's manifest; as with installing, trust rests on that repository.
-import { asset, ownerHeader } from "./nav.js";
+import { asset, FAVICON, ownerHeader } from "./nav.js";
 import pkg from "../package.json";
 import { api, deployVersion, existingDatabase, findWorker, loadRelease, uploadAssets } from "./deploy.js";
 import { escape, html, json, now } from "./util.js";
@@ -167,7 +167,7 @@ ${remembered ? `${forget}
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Update · afterwrd</title>
 <link rel="stylesheet" href="${asset("/static/style.css")}">
-<link rel="icon" href="data:,">
+${FAVICON}
 <style>
   .how { padding-left: 1.2rem; }
   .how li { margin: 0.6rem 0; }

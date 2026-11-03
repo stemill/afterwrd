@@ -1,12 +1,16 @@
 # afterwrd
 
-Your Facebook archive as a private website that only people you invite can see: your posts, photos and
-videos (and, if you choose, comments, likes and friends), with search. The people you invite can comment on
-your posts and photos, and those comments become part of your archive. It runs in your own free Cloudflare
-account, so no one else holds your data, and setting it up needs no terminal, no GitHub account and no card.
+A small, private social network of your own, with your Facebook years brought along. Post and share photos, comment,
+and connect with friends who have their own afterwrd site; your Facebook download (posts, photos, comments, likes,
+friends) comes too, under *Memories*. Only people you invite can see it. It runs in your own free Cloudflare account,
+so no one else holds your data, and setting it up needs no terminal, no GitHub account and no card.
 
 afterwrd isn't affiliated with or endorsed by Meta. It only reads the "Download your information" file Facebook
 gives you; it never signs in to Facebook or fetches anything from it.
+
+**Finding your way round.** *Home* is your posts and your friends' together, with a box to write in; *Photos*,
+*Friends* and *Notifications* sit beside it. Your picture (top right) opens your profile, *Memories* (everything from
+Facebook, with "On this day"), and your tools: *People* (invites), *Import*, *Download everything* and *Update*.
 
 ## Install your own
 

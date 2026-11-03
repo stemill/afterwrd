@@ -37,7 +37,9 @@ const PERSON_TABS = {
 // [pattern, section(s) any of which must be published (null: always), handler]; handlers return a page, a
 // Response, or null for 404.
 const ROUTES = [
-  [/^\/$/, "overview", overview],
+  [/^\/$/, null, home],
+  [/^\/overview$/, "overview", overview],
+  [/^\/memories$/, null, memories],
   [/^\/timeline$/, "timeline", timeline],
   [/^\/posts$/, "posts", posts],
   [/^\/posts\/(post-\d+-[0-9a-f]{8})$/, ["posts", "timeline", "friends"], post],
@@ -77,15 +79,13 @@ export async function renderArchive(request, env, url, user, work) {
     db, url, user, chosen, sections, newComments: await newCount(db, user),
     updateWaiting: user.is_owner ? await updateWaiting(env, work) : false,
     me: me.results[0] ?? { id: -1, name: await ownerName(db), is_me: 1 },
+    ownerName: await ownerName(db), // their name here, which can differ from the Facebook one (me.name)
     profile: await profilePictures(db),
   };
   // A profile picture or cover chosen here takes over from Facebook's.
   if (ctx.profile.profile) Object.assign(ctx.me, { profile_hash: ctx.profile.profile.hash, profile_media_id: ctx.profile.profile.id });
   if (ctx.profile.cover) Object.assign(ctx.me, { cover_hash: ctx.profile.cover.hash, cover_media_id: ctx.profile.cover.id });
 
-  if (url.pathname === "/" && !sections.includes("overview")) {
-    return Response.redirect(`${url.origin}/${sections[0]}`, 302);
-  }
   for (const [pattern, section, handler] of ROUTES) {
     const match = pattern.exec(url.pathname);
     if (!match || (section && ![section].flat().some((s) => sections.includes(s)))) continue;
@@ -429,10 +429,36 @@ async function activity(ctx, params) {
   return views.activityPage(ctx, { items, paging });
 }
 
-/** The owner's Feed: new posts from connected friends' sites. */
+/** Feed became part of Home. */
 async function feed(ctx) {
-  if (!ctx.user.is_owner) return null;
-  return views.feedPage(ctx, await loadFeed(ctx.db, ctx.url.origin));
+  return ctx.user.is_owner ? Response.redirect(`${ctx.url.origin}/`, 302) : null;
+}
+
+/**
+ * Home. The owner's: write something, then their own posts written here and their friends' newest, together.
+ * Everyone else's: the owner's posts (with their profile at the top), as Posts shows them.
+ */
+async function home(ctx, params) {
+  if (!ctx.user.is_owner) return posts(ctx, params);
+  const { db } = ctx;
+  const own = await loadPosts(db, await all(db, `${POST_SQL} WHERE p.id >= ? ORDER BY p.timestamp DESC LIMIT 30`, [SITE_ID]));
+  const friendsFeed = await loadFeed(db, ctx.url.origin);
+  return views.homePage(ctx, {
+    own, feed: friendsFeed, onThisDay: await onThisDay(ctx, 2), friends: friendsFeed.connections,
+  });
+}
+
+async function memories(ctx) {
+  return views.memoriesPage(ctx, { onThisDay: await onThisDay(ctx, 6) });
+}
+
+/** Posts from this day of the year (in London) in earlier years, newest first, with their photos. */
+async function onThisDay(ctx, limit) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" })
+    .formatToParts(new Date()).map(({ type, value }) => [type, value]));
+  const rows = await all(ctx.db, `${POST_SQL} WHERE strftime('%m-%d', p.timestamp, 'unixepoch') = ?
+    AND strftime('%Y', p.timestamp, 'unixepoch') < ? ORDER BY p.timestamp DESC LIMIT ?`, [`${parts.month}-${parts.day}`, parts.year, limit]);
+  return loadPosts(ctx.db, rows, { threads: false });
 }
 
 /** A photo's permanent address (public/static/activity.js), which survives re-imports, leads to its page. */

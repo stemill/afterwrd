@@ -3,7 +3,7 @@
 // scripts/invite.mjs does the same from the terminal.
 import { handleConnections } from "./connect.js";
 import { handleExport } from "./export.js";
-import { asset, ownerHeader } from "./nav.js";
+import { asset, FAVICON, ownerHeader } from "./nav.js";
 import { handleImport } from "./importer.js";
 import { handlePhotos } from "./photos.js";
 import { handlePosts } from "./posts.js";
@@ -156,7 +156,7 @@ function adminPage(list, owner) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>People · afterwrd</title>
 <link rel="stylesheet" href="${asset("/static/style.css")}">
-<link rel="icon" href="data:,">
+${FAVICON}
 <style>
   .actions { white-space: nowrap; }
   .actions button, #link button, .manage button { font: inherit; font-size: 0.85rem; padding: 0.25rem 0.6rem; margin-left: 0.25rem;

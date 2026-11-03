@@ -32,7 +32,7 @@ await Promise.all([page.waitForNavigation(), page.click("#go")]);
 await page.goto(`${BASE}/posts`);
 await new Promise((r) => setTimeout(r, 2500));
 await page.goto(`${BASE}/posts`);
-const update = await page.$eval('header.site a[href="/_admin/update"]', (a) => ({ label: a.getAttribute("aria-label"), dot: Boolean(a.querySelector(".dot")) }));
+const update = await page.$eval('header.site a[href="/_admin/update"]', (a) => ({ label: a.querySelector("span").textContent, dot: Boolean(a.querySelector(".dot")) }));
 const behind = mode !== "current";
 check(behind ? "Update button marked when a release is waiting" : "no mark when up to date",
   update.dot === behind && update.label === (behind ? "Update available" : "Update"), JSON.stringify(update));

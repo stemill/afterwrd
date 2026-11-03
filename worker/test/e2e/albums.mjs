@@ -55,7 +55,7 @@ check("lands on the new album with both photos", /^\/photos\/album\/\d+$/.test(a
 await owner.goto(`${BASE}/posts`);
 const first = await owner.$eval("main article.card", (a) => ({ what: a.querySelector(".what").textContent.trim(), text: a.querySelector(".text")?.textContent,
   photos: a.querySelectorAll(".collage .tile").length }));
-check("shared as a post, saying where they went", first.what === "Added 2 photos to Summer." && first.text === "Our summer" && first.photos === 2, JSON.stringify(first));
+check("shared as a post, saying where they went", first.what.endsWith("Added 2 photos to Summer.") && first.text === "Our summer" && first.photos === 2, JSON.stringify(first));
 await owner.type("main article.card:first-of-type .say textarea", "Lovely");
 await Promise.all([owner.waitForNavigation(), owner.click("main article.card:first-of-type .say button")]);
 

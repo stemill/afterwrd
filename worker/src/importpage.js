@@ -1,6 +1,6 @@
 // The owner's import page. The work happens in the browser (public/static/import/main.js): the export is read
 // on this computer and only the ticked sections are uploaded.
-import { asset, ownerHeader } from "./nav.js";
+import { asset, FAVICON, ownerHeader } from "./nav.js";
 import { escape } from "./util.js";
 
 const SECTION_CHOICES = [
@@ -22,7 +22,7 @@ export function importPage(owner) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Import · afterwrd</title>
 <link rel="stylesheet" href="${asset("/static/style.css")}">
-<link rel="icon" href="data:,">
+${FAVICON}
 <style>
   .pickers { display: grid; gap: 0.75rem; margin: 1rem 0; }
   .picker { display: block; background: var(--surface); border: 1px dashed var(--border); border-radius: 18px;

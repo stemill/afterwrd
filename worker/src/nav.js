@@ -1,4 +1,5 @@
-// The site header shared by every signed-in page: the logo and a row of chips, each an icon and a label.
+// The site header shared by every signed-in page: the logo, the main menu (Home, Photos, Friends, Notifications),
+// and the person's picture, behind which sits everything else (profile, Memories, the owner's tools, Sign out).
 // Icons are inline SVG so nothing is fetched.
 import pkg from "../package.json";
 import { escape } from "./util.js";
@@ -8,20 +9,21 @@ import { escape } from "./util.js";
 export const asset = (path) => `${path}?v=${pkg.version}`;
 
 const ICONS = {
-  overview: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  overview: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   timeline: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   posts: '<path d="M6 3h9l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M9 12h6M9 16h4"/>',
   photos: '<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/>',
   comments: '<path d="M5 4h14a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5 4V5a1 1 0 0 1 1-1z"/>',
   likes: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
   friends: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 5a3 3 0 0 1 0 6M21 20c0-2.6-1.6-4.8-4-5.6"/>',
-  // connected friends (their own afterwrd sites): two people, linked
+  // connected friends (their own afterwrd sites): two people
   connected: '<circle cx="7" cy="9" r="3"/><circle cx="17" cy="9" r="3"/><path d="M2 20c0-2.8 2.2-5 5-5s5 2.2 5 5"/><path d="M12 20c0-2.8 2.2-5 5-5s5 2.2 5 5"/>',
-  archive: '<path d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z"/><path d="M4 20a2 2 0 0 0 2 1h13v-3"/>',
+  profile: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>',
+  memories: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>',
   people: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M19 8v6M16 11h6"/>',
   import: '<path d="M12 15V4M7 9l5-5 5 5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
   update: '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/>',
-  feed: '<path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/>',
   connections: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
   export: '<path d="M12 4v11M7 10l5 5 5-5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
   activity: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
@@ -31,35 +33,68 @@ const ICONS = {
 export const icon = (name) =>
   `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
 
-// The logo: a bookmark (somewhere kept) on a jade tile, beside the name.
-export const LOGO = `<span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 3h10a1 1 0 0 1 1 1v17l-6-4-6 4V4a1 1 0 0 1 1-1z"/></svg></span>afterwrd`;
+// The logo: "the missing o". afterwrd drops the o from afterword; the logo puts it back as a speech bubble, so the
+// name reads whole. On its own, the bubble on an ember tile is the site's icon.
+const BUBBLE = "M12 4a8 8 0 1 1-4.7 14.5L3.8 20l1.2-3.6A8 8 0 0 1 12 4z";
+export const LOGO = `<span class="wordmark">afterw<svg class="o" viewBox="0 0 24 24" aria-hidden="true"><path d="${BUBBLE}" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>rd</span>`;
+export const FAVICON = `<link rel="icon" href="data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="6" fill="#ff8a3d"/><path d="${BUBBLE}" transform="translate(2.4 2.2) scale(0.8)" fill="none" stroke="#16201b" stroke-width="3.6" stroke-linejoin="round"/></svg>`,
+)}">`;
 
 /**
- * items: [{ key, label, href, badge? }], each key one of ICONS; `current` is the key to mark as the page you're on;
- * `badge` is a count to show on the chip, such as new comments, or true for a dot (something's waiting).
- * Sign out is always last, as a small form (so another site can't sign people out with a link).
+ * The header. `main`: [{ key, label, href, badge? }] (badge: a count, or true for a dot); `menu`: the same, shown
+ * behind the person's picture, with Sign out last (a small form, so another site can't sign people out with a link);
+ * `current`: the key of the page you're on; `face`: { initial, picture? } for the picture.
  */
-export function siteHeader(items, current) {
-  const chip = ({ key, label, href, tool, badge }) =>
-    `<a href="${escape(href)}" class="chip${tool ? " tool" : ""}"${key === current ? ' aria-current="page"' : ""}${tool ? ` title="${escape(label)}" aria-label="${escape(label)}"` : ""}>${icon(key)}<span>${escape(label)}</span>${badge === true ? '<span class="dot" aria-hidden="true"></span>' : badge ? `<span class="count">${Number(badge)}<span class="hidden"> new</span></span>` : ""}</a>`;
-  const main = items.filter((i) => !i.tool).map(chip).join("");
-  const tools = items.filter((i) => i.tool).map(chip).join("");
-  return `<header class="site">
-  <a class="brand" href="/">${LOGO}</a>
-  <nav>${main}</nav>
-  <div class="tools">${tools}<form method="post" action="/_auth/logout"><button class="chip tool" title="Sign out" aria-label="Sign out">${icon("signout")}<span>Sign out</span></button></form></div>
-</header>`;
+export function siteHeader({ main, menu, current, face = {} }) {
+  const badge = (b) => (b === true ? '<span class="dot" aria-hidden="true"></span>'
+    : b ? `<span class="count">${Number(b)}<span class="hidden"> new</span></span>` : "");
+  const link = ({ key, label, href, badge: b }) =>
+    `<a href="${escape(href)}"${key === current ? ' aria-current="page"' : ""}>${icon(key)}<span>${escape(label)}</span>${badge(b)}</a>`;
+  const waiting = menu.some((i) => i.badge);
+  const picture = face.picture
+    ? `<img src="${escape(face.picture)}" alt="">`
+    : face.initial ? escape(face.initial) : icon("profile");
+  return `<header class="site"><div class="bar">
+  <a class="brand" href="/" aria-label="afterwrd, home">${LOGO}</a>
+  <nav class="main" aria-label="Main">${main.map(link).join("")}</nav>
+  <details class="me">
+    <summary aria-label="Your menu${waiting ? " (something's waiting)" : ""}"><span class="face">${picture}</span>${waiting ? '<span class="dot" aria-hidden="true"></span>' : ""}</summary>
+    <div class="menu">
+      ${menu.map(link).join("")}
+      ${menu.length ? "<hr>" : ""}
+      <form method="post" action="/_auth/logout"><button>${icon("signout")}<span>Sign out</span></button></form>
+    </div>
+  </details>
+</div></header>
+<script>
+  // Close the menu when clicking anywhere else.
+  document.addEventListener("click", (e) => {
+    const menu = document.querySelector("details.me[open]");
+    if (menu && !menu.contains(e.target)) menu.open = false;
+  });
+</script>`;
 }
 
-// The owner's pages, shown as compact icon buttons beside Sign out so the archive's sections keep the menu to one row.
-export const OWNER_ITEMS = [
-  { key: "people", label: "People", href: "/_admin", tool: true },
-  { key: "import", label: "Import", href: "/_admin/import", tool: true },
-  { key: "export", label: "Download everything", short: "Download", href: "/_admin/export", tool: true },
-  { key: "update", label: "Update", href: "/_admin/update", tool: true },
+/** The owner's main menu. Notifications carries the count of new comments where known. */
+export const ownerMain = (newComments = 0) => [
+  { key: "home", label: "Home", href: "/" },
+  { key: "photos", label: "Photos", href: "/photos" },
+  { key: "connected", label: "Friends", href: "/friend" },
+  { key: "activity", label: "Notifications", href: "/activity", badge: newComments },
 ];
 
-/** The header for the owner's pages: back to the archive, then People, Import, Update (labelled, since they're the subject). */
+/** What's behind the owner's picture. `memories`: whether there's anything from Facebook to show. */
+export const ownerMenu = ({ memories = true, updateWaiting = false } = {}) => [
+  { key: "profile", label: "Your profile", href: "/posts" },
+  ...(memories ? [{ key: "memories", label: "Memories", href: "/memories" }] : []),
+  { key: "people", label: "People", href: "/_admin" },
+  { key: "import", label: "Import", href: "/_admin/import" },
+  { key: "export", label: "Download everything", href: "/_admin/export" },
+  { key: "update", label: updateWaiting ? "Update available" : "Update", href: "/_admin/update", badge: updateWaiting },
+];
+
+/** The header for the owner's own pages (People, Import, Update…), which sit behind the picture. */
 export function ownerHeader(current) {
-  return siteHeader([{ key: "archive", label: "Archive", href: "/" }, ...OWNER_ITEMS.map((i) => ({ ...i, label: i.short ?? i.label, tool: false }))], current);
+  return siteHeader({ main: ownerMain(), menu: ownerMenu(), current });
 }

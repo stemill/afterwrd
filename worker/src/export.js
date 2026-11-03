@@ -4,7 +4,7 @@
 //   GET /_admin/export                         the page
 //   GET /_admin/export/rows?table=<t>&after=<n>  up to 1000 rows of one table, after rowid n
 // Keys and anything to do with signing in never leave: connections give only who and where, users only names.
-import { asset, ownerHeader } from "./nav.js";
+import { asset, FAVICON, ownerHeader } from "./nav.js";
 import { html, json } from "./util.js";
 
 const PAGE = 1000;
@@ -49,7 +49,7 @@ function exportPage() {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Download everything · afterwrd</title>
 <link rel="stylesheet" href="${asset("/static/style.css")}">
-<link rel="icon" href="data:,">
+${FAVICON}
 </head>
 <body>
 ${ownerHeader("export")}
