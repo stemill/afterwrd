@@ -77,6 +77,7 @@ export async function renderArchive(request, env, url, user, work) {
   const sections = [...new Set([...chosen, "posts", "photos"])];
   const ctx = {
     db, url, user, chosen, sections, newComments: await newCount(db, user),
+    requests: user.is_owner ? (await first(db, "SELECT COUNT(*) AS n FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL")).n : 0,
     updateWaiting: user.is_owner ? await updateWaiting(env, work) : false,
     me: me.results[0] ?? { id: -1, name: await ownerName(db), is_me: 1 },
     ownerName: await ownerName(db), // their name here, which can differ from the Facebook one (me.name)
@@ -490,10 +491,13 @@ async function fromFriend(ctx, id, load) {
 async function friendsIndex(ctx) {
   if (!ctx.user.is_owner) return null;
   const { db } = ctx;
-  const [connections, links, people] = await db.batch([
-    db.prepare("SELECT * FROM connections WHERE connected_at IS NOT NULL ORDER BY name COLLATE NOCASE"),
+  const [connections, links, people, requests, invites] = await db.batch([
+    db.prepare("SELECT * FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NOT NULL ORDER BY name COLLATE NOCASE"),
     db.prepare("SELECT * FROM friend_links"),
     db.prepare("SELECT id, name, friend_since FROM people WHERE is_me = 0 AND friend_since IS NOT NULL ORDER BY name COLLATE NOCASE"),
+    db.prepare("SELECT id, origin, name, invited_as, connected_at FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL ORDER BY connected_at DESC"),
+    db.prepare(`SELECT person_name, MAX(created_at) AS invited_at FROM connect_links
+      WHERE person_name IS NOT NULL AND used_at IS NULL AND expires_at > ? GROUP BY person_name`).bind(now()),
   ]);
   const same = (a, b) => a.localeCompare(b, "en", { sensitivity: "accent" }) === 0;
   const linked = new Map(links.results.map((l) => [l.connection_id, l]));
@@ -505,8 +509,16 @@ async function friendsIndex(ctx) {
     const matches = people.results.filter((p) => same(p.name, c.name) && !taken.some((t) => same(t.person_name, p.name)));
     return matches.length === 1 ? { ...c, suggestion: matches[0] } : c;
   });
-  const facebook = people.results.map((p) => ({ ...p, friend: friends.find((f) => f.person && same(f.person.name, p.name)) }));
-  return views.friendsIndexPage(ctx, { friends, facebook });
+  // Where each Facebook friend stands: on afterwrd, asking to connect, invited, or not yet.
+  const facebook = people.results.map((p) => ({
+    ...p,
+    friend: friends.find((f) => f.person && same(f.person.name, p.name)),
+    asking: requests.results.find((r) => r.invited_as && same(r.invited_as, p.name)),
+    invited: invites.results.find((i) => same(i.person_name, p.name))?.invited_at,
+  }));
+  // Requests show only what their site said when it connected: nothing is fetched from a site you haven't approved,
+  // so a stranger can't slow this page down or see when you look at it.
+  return views.friendsIndexPage(ctx, { friends, facebook, requests: requests.results });
 }
 
 /** Who a friend on afterwrd is in the owner's Facebook download, if the owner has linked them. */
@@ -547,6 +559,6 @@ async function friendPhoto(ctx, params, id, hash) {
 
 /** Friends' profile pictures by site, where the link their site gave is still good. */
 async function friendFaces(db) {
-  const rows = await all(db, "SELECT origin, avatar_url FROM connections WHERE connected_at IS NOT NULL AND avatar_exp > ?", [now()]);
+  const rows = await all(db, "SELECT origin, avatar_url FROM connections WHERE approved_at IS NOT NULL AND avatar_exp > ?", [now()]);
   return Object.fromEntries(rows.map((r) => [r.origin, r.avatar_url]));
 }

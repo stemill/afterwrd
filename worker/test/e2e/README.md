@@ -20,13 +20,13 @@ and downloads go to `out/`, which git ignores.
 | Suite | What it covers |
 |---|---|
 | core: `security.mjs` | setup links, cookies and headers, sign-in redirects, CSRF, invites, revoking, the import's checks |
-| core: `comments.mjs` | comments by the owner and a friend, Activity, deleting, rate limits (even sent all at once), surviving re-import |
+| core: `comments.mjs` | the owner's comments, escaping, deleting, rate limits (even sent all at once), surviving re-import |
 | core: `posts.mjs` | the composer, photos resized and stripped of hidden details, deleting posts and their files |
-| core: `admin.mjs`, `dup.mjs` | the People page, and inviting someone with the same name twice |
+| core: `admin.mjs` | Your devices: adding a device, removing a passkey, signing out everywhere, no inviting anyone else |
 | `fresh.mjs` | a brand-new site with nothing imported, then imports with only Photos or only Posts ticked |
-| `albums.mjs` | albums, adding and deleting photos, profile picture and cover, what visitors can't do |
+| `albums.mjs` | albums, adding and deleting photos, profile picture and cover |
 | `update-ui.mjs` | the Update page with an update waiting, a remembered token, and up to date; no downgrades |
-| `feed.mjs` | three sites: connecting, Feed, friend pages, comments across sites, signed photo links, the Friends list, Download everything matching up, disconnecting, and attempts to impersonate a site |
+| `feed.mjs` | three sites: connecting and approving (or declining) requests, inviting a Facebook friend, Feed, friend pages, comments across sites, signed photo links, the Friends list, Download everything matching up, disconnecting, and attempts to impersonate a site |
 | `forged.mjs` | the code that reads friends' sites, fed what a hostile site might send |
 | `upgrade.mjs` | posts, photos and comments made on an older release survive the upgrade |
 

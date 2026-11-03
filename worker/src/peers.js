@@ -103,6 +103,10 @@ export async function handlePeer(request, env, url) {
     return json({ name: await ownerName(db) });
   }
   if (!peer?.connected_at) return json({ error: "Not connected." }, 401);
+  // A connection this site's owner hasn't approved yet gets nothing but the chance to withdraw.
+  if (!peer.approved_at && route !== "POST /_peer/disconnect") {
+    return json({ error: `Waiting for ${await ownerName(db)} to approve the connection.` }, 403);
+  }
 
   if (route === "GET /_peer/feed") return json(await feed(env, url.origin));
   const page = Math.min(10_000, Math.max(1, Number.parseInt(url.searchParams.get("page"), 10) || 1));

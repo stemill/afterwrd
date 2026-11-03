@@ -1,5 +1,6 @@
 // Two afterwrd sites on this computer (A on 8787, B on 8788), each with its own owner: connect them with a
-// Connect link, see each other's new posts in Feed, comment across sites, delete, and disconnect.
+// Connect link (Ann approves the request), see each other's new posts in Feed, comment across sites, delete, and
+// disconnect. Then Ann invites Facebook friends: a forwarded invite is declined, the right person approved and linked.
 //   node feed.mjs <zip> <fixtures dir> <A state dir> <B state dir> <C state dir>   (C, on 8789, plays a third site)
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -87,6 +88,21 @@ check("Bob is sent to his own site to confirm", bob.url().startsWith(`${B}/_admi
   && (await bob.$eval("h1", (h) => h.textContent)) === "Connect with Ann Example?");
 await Promise.all([bob.waitForNavigation({ timeout: 30_000 }), bob.click("#go")]);
 check("confirming connects and opens Bob's Home", new URL(bob.url()).pathname === "/", bob.url());
+
+// Nothing is shared until Ann approves: a passed-on link gets someone no further than a request.
+check("Bob's Home says Ann hasn't approved yet", (await bob.$eval("main", (m) => m.textContent)).includes("Waiting for Ann Example to approve"));
+const keyBobHolds = sql(stateB, "SELECT their_key FROM connections")[0].their_key;
+check("Bob's key can't read Ann's site yet", (await fetch(`${A}/_peer/feed`, { headers: { Authorization: `Bearer ${keyBobHolds}` } })).status === 403);
+await ann.goto(`${A}/`);
+check("Ann's Friends shows 1 request", (await ann.$eval('header.site a[href="/friend"] .count', (c) => c.firstChild.textContent).catch(() => "")) === "1");
+check("Ann's Home doesn't show Bob yet", !(await ann.$("article.from-friend")));
+await ann.goto(`${A}/friend`);
+const asking = await ann.$eval(".requests", (r) => r.innerText).catch(() => "");
+check("Friends lists Bob under Asking to connect", asking.includes("Bob Example") && asking.includes("Used a Connect link you made"), asking);
+await Promise.all([ann.waitForNavigation(), ann.click('.requests button[formaction$="/approve"]')]);
+check("Approve makes Bob a friend", !(await ann.$(".requests")) && (await ann.$eval("main", (m) => m.innerText)).includes("Bob Example")
+  && sql(stateA, "SELECT approved_at FROM connections")[0].approved_at > 0);
+await bob.goto(`${B}/`);
 
 // Each sees the other's new posts, and only those.
 let bobFeed = await feedCards(bob);
@@ -226,7 +242,7 @@ await Promise.all([ann.waitForNavigation(), ann.click('header.site nav.main a[hr
 const friendsText = () => ann.$eval("main", (m) => m.innerText);
 check("Friends lists Bob on afterwrd, and suggests his Facebook self", (await friendsText()).includes("Is this Bob Example from your Facebook download?"));
 const fbRow = (name) => ann.$$eval("#fb-people tbody tr", (rows, n) => rows.find((r) => r.cells[0].textContent === n)?.cells[2].textContent.trim(), name);
-check("…and everyone from Facebook below, not on afterwrd yet", (await fbRow("John Smith")) === "Not on afterwrd" && (await fbRow("Bob Example")) === "Not on afterwrd");
+check("…and everyone from Facebook below, with an Invite button", (await fbRow("John Smith")) === "Invite" && (await fbRow("Bob Example")) === "Invite");
 await Promise.all([ann.waitForNavigation(), ann.click(".fb-link button.chip:not([name])")]);
 check("Yes links them", (await friendsText()).includes("On Facebook as Bob Example") && (await fbRow("Bob Example")) === "On afterwrd");
 await ann.goto(`${A}/friend/${bobId}/posts`);
@@ -333,6 +349,56 @@ check("disconnecting removes it on both sites", sql(stateA, "SELECT COUNT(*) AS 
 check("the old key stops working", (await peer("/_peer/feed", keyForB)).status === 401);
 check("Ann keeps her copies of what she said after disconnecting", sql(stateA, "SELECT site FROM comments_elsewhere").some((c) => c.site === B));
 check("disconnecting forgets who they were on Facebook", sql(stateA, "SELECT COUNT(*) AS n FROM friend_links")[0].n === 0);
+
+// Ann invites Facebook friends to afterwrd. Zoe's invite is passed on to Cara, so Ann declines it; Cara's own is
+// approved, and she's linked to her Facebook self.
+await ann.goto(`${A}/friend`);
+async function invite(name) {
+  await ann.goto(`${A}/friend`);
+  await ann.$$eval("#fb-people tbody tr", (rows, n) => rows.find((r) => r.cells[0].textContent === n).querySelector("button[data-invite]").click(), name);
+  await ann.waitForFunction(() => document.getElementById("invite-message").value, { timeout: 10_000 });
+  const message = await ann.$eval("#invite-message", (t) => t.value);
+  return { message, link: message.match(/http\S+\/_connect\/[\w-]+/)?.[0] };
+}
+async function connectFrom(page, site, link) {
+  await page.goto(link);
+  await page.type("#site input", site);
+  await Promise.all([page.waitForNavigation(), page.click("#site button")]);
+  await Promise.all([page.waitForNavigation({ timeout: 30_000 }), page.click("#go")]);
+}
+const zoe = await invite("Zoe Quinn");
+await ann.screenshot({ path: `${OUT}/invite-panel.png` });
+check("Invite gives a message to send, with a Connect link", zoe.message.startsWith("Hi Zoe,") && zoe.message.includes("https://afterwrd.app") && Boolean(zoe.link), zoe.message);
+await ann.goto(`${A}/friend`);
+check("…and the list remembers she was invited", (await fbRow("Zoe Quinn")).startsWith("Invited"), await fbRow("Zoe Quinn"));
+const again = await invite("Zoe Quinn");
+check("New link replaces the old one", again.link !== zoe.link && (await fetch(zoe.link)).status === 404);
+check("only people in the download can be invited", (await ann.evaluate(() => fetch("/_admin/connections/invite", { method: "POST",
+  headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Nobody Atall" }) }).then((r) => r.status))) >= 400);
+
+await connectFrom(cara, C, again.link);
+await ann.goto(`${A}/friend`);
+const forwarded = await ann.$eval(".requests", (r) => r.innerText).catch(() => "");
+check("a request shows whose invite was used", forwarded.includes("Cara Example") && forwarded.includes("Used the invite you made for Zoe Quinn"), forwarded);
+check("…warns that it isn't the name invited, and leads with the site's address", forwarded.includes("That's not the name you invited")
+  && (await ann.$eval(".requests strong", (e) => e.textContent)) === "localhost:8789");
+check("nothing is loaded from a site that hasn't been approved", !(await ann.$(".requests img")));
+check("…and Zoe's row says someone's asking", (await fbRow("Zoe Quinn")) === "Asking to connect");
+await ann.screenshot({ path: `${OUT}/friends-request.png`, fullPage: true });
+await Promise.all([ann.waitForNavigation(), ann.click('.requests button[formaction$="/decline"]')]);
+check("Decline forgets the request on both sites", sql(stateA, "SELECT COUNT(*) AS n FROM connections")[0].n === 0
+  && sql(stateC, "SELECT COUNT(*) AS n FROM connections")[0].n === 0 && sql(stateA, "SELECT COUNT(*) AS n FROM friend_links")[0].n === 0);
+
+const caraInvite = await invite("Cara Example");
+await connectFrom(cara, C, caraInvite.link);
+await ann.goto(`${A}/friend`);
+check("Cara's request names her invite", (await ann.$eval(".requests", (r) => r.innerText)).includes("Used the invite you made for Cara Example"));
+await Promise.all([ann.waitForNavigation(), ann.click('.requests button[formaction$="/approve"]')]);
+check("approving links her to her Facebook self", (await fbRow("Cara Example")) === "On afterwrd"
+  && (await ann.$eval("main", (m) => m.innerText)).includes("On Facebook as Cara Example"));
+await cara.goto(`${C}/`);
+check("Cara's Home now has Ann's post", (await feedCards(cara)).some((c) => c.who === "Ann Example"));
+await ann.screenshot({ path: `${OUT}/friends-invited.png`, fullPage: true });
 
 check("no script errors", errors.length === 0, errors.join(" | "));
 await browser.close();

@@ -9,7 +9,6 @@ const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/M
 
 const [fixtures] = process.argv.slice(2);
 const BASE = "http://localhost:8787";
-const cli = (...a) => execFileSync("node", ["scripts/invite.mjs", ...a, "--local"], { cwd: WORKER, encoding: "utf8" });
 const results = [];
 const check = (name, ok, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? `  (${extra})` : ""}`); };
 const errors = [];
@@ -112,18 +111,9 @@ check("back on Posts with the new picture", new URL(owner.url()).pathname === "/
 await owner.goto(`${BASE}/photos`);
 check("kept in a Profile pictures album", (await owner.$$eval(".albums a.album strong", (l) => l.map((s) => s.textContent))).includes("Profile pictures"));
 
-// A visitor sees the profile, but none of the tools.
-const link = cli("add", `Visitor ${Date.now()}`).match(/http\S+\/_auth\/invite\/\S+/)[0];
-const visitor = await person(async (page) => { await page.goto(link); await Promise.all([page.waitForNavigation(), page.click("#go")]); });
-await visitor.goto(`${BASE}/posts`);
-check("visitors see the picture and cover", Boolean(await visitor.$("section.profile .avatar img")) && !(await visitor.$(".change-cover")));
-await visitor.goto(BASE + albumPath);
-check("…but no album tools", !(await visitor.$(".album-tools")));
-await visitor.goto(BASE + photoHrefs[0]);
-check("…or photo tools", !(await visitor.$(".photo-tools")));
-check("…and can't use them directly", (await (await fetch(`${BASE}/_admin/photos`, { method: "POST", headers: { Origin: BASE,
-  Cookie: `__Host-hb_session=${(await visitor.cookies()).find((c) => c.name === "__Host-hb_session").value}`, "Content-Type": "application/json" },
-  body: "{}" })).status) === 404);
+// Nobody signed out can use the tools.
+check("photo tools need the owner", ![200, 201].includes((await fetch(`${BASE}/_admin/photos`, { method: "POST", redirect: "manual",
+  headers: { Origin: BASE, "Content-Type": "application/json" }, body: "{}" })).status));
 
 // Delete one photo (album-only), then the album.
 await owner.goto(BASE + photoHrefs[2]);

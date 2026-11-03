@@ -35,7 +35,7 @@ function header(ctx) {
   if (ctx.user.is_owner) {
     const picture = ctx.profile?.profile;
     return siteHeader({
-      main: ownerMain(ctx.newComments),
+      main: ownerMain(ctx.newComments, ctx.requests),
       menu: ownerMenu({ memories: hasMemories(ctx), updateWaiting: ctx.updateWaiting }),
       current: currentKey(ctx),
       face: { initial: initial(ctx.user.name), picture: picture && `/files/${picture.thumb_hash ?? picture.hash}` },
@@ -746,7 +746,7 @@ function remoteCard(ctx, c, p, { thread = true } = {}) {
 }
 
 /** The owner's Friends: friends on afterwrd first, then everyone from the Facebook download, in one list. */
-export function friendsIndexPage(ctx, { friends, facebook }) {
+export function friendsIndexPage(ctx, { friends, facebook, requests = [] }) {
   const people = has(ctx, "friends"); // Facebook people have pages only if the friends list is published
   const fbLink = (p) => (people && p.id ? html`<a href="/people/${p.id}">${p.name}</a>` : p.name);
   const linkForm = (c, body) => html`<form method="post" action="/_admin/connections/${c.id}/facebook" class="fb-link">${body}</form>`;
@@ -756,6 +756,23 @@ export function friendsIndexPage(ctx, { friends, facebook }) {
   <a class="chip primary" href="/_admin/connections">${raw(icon("connections"))}<span>Connect with a friend</span></a>
 </div>
 <p class="meta">Only you see this page.</p>
+
+${requests.length > 0 && html`
+<h2>Asking to connect</h2>
+<p class="meta">Someone used one of your Connect links. Nothing is shared until you approve. Links can be passed on, and
+anyone can call their site anything, so check the address is one you expect; if not, decline.</p>
+<ul class="friend-list requests">
+  ${requests.map((r) => html`<li class="card">
+    <span class="friend-link"><span class="who who-${r.id % 6}" aria-hidden="true">${initial(r.name)}</span>
+      <span><strong>${host(r.origin)}</strong><span class="meta">says they're ${r.name}</span></span></span>
+    <p class="meta">${r.invited_as ? html`Used the invite you made for <strong>${r.invited_as}</strong>.` : "Used a Connect link you made."}
+      ${r.invited_as && r.invited_as.toLowerCase() !== r.name.toLowerCase() && html`<strong class="warn">That's not the name you invited.</strong>`}</p>
+    <form method="post" class="fb-link">
+      <button class="chip primary" formaction="/_admin/connections/${r.id}/approve">Approve</button>
+      <button class="chip danger" formaction="/_admin/connections/${r.id}/decline" onclick="return confirm('Decline? Their site will be told no.')">Decline</button>
+    </form>
+  </li>`)}
+</ul>`}
 
 <h2>On afterwrd</h2>
 ${friends.length ? html`<ul class="friend-list">
@@ -785,21 +802,69 @@ ${facebook.length > 0 && html`
   <input type="search" id="fb-filter" placeholder="Search names" aria-label="Search names">
 </form>
 <table class="numbers people" id="fb-people">
-  <thead><tr><th>Name</th><th>Friends since</th><th>On afterwrd</th></tr></thead>
+  <thead><tr><th>Name</th><th>Friends since</th><th>afterwrd</th></tr></thead>
   <tbody>
     ${facebook.map((p) => html`<tr>
       <th>${fbLink(p)}</th>
       <td>${fmtDate(p.friend_since)}</td>
-      <td>${p.friend ? html`<a class="badge" href="${friendBase(p.friend)}/posts">On afterwrd</a>` : raw('<span class="meta">Not on afterwrd</span>')}</td>
+      <td>${p.friend ? html`<a class="badge as-written" href="${friendBase(p.friend)}/posts">On afterwrd</a>`
+        : p.asking ? html`<span class="badge badge-new as-written">Asking to connect</span>`
+          : p.invited ? html`<span class="meta">Invited ${fmtDate(p.invited)}</span> <button class="link" data-invite="${p.name}">New link</button>`
+            : html`<button class="chip" data-invite="${p.name}">Invite</button>`}</td>
     </tr>`)}
   </tbody>
 </table>
+<section class="card invite-panel" id="invite" hidden>
+  <h2>Invite <span id="invite-name"></span> to afterwrd</h2>
+  <p class="meta">Send this however you like. Their link works once, for 30 days; when they use it you'll be asked to
+  approve, and they'll be linked to this name here.</p>
+  <textarea id="invite-message" readonly rows="5" aria-label="Invitation message"></textarea>
+  <p class="row"><button class="chip primary" id="invite-copy">Copy message</button>
+    <button class="chip" id="invite-share" hidden>Share…</button>
+    <button class="chip" id="invite-done">Done</button></p>
+  <p class="error" id="invite-error" role="alert"></p>
+</section>
 <datalist id="fb-names">${facebook.map((p) => html`<option value="${p.name}">`)}</datalist>
 <script>
   document.getElementById("fb-filter").addEventListener("input", (e) => {
     const q = e.target.value.trim().toLowerCase();
     for (const row of document.querySelectorAll("#fb-people tbody tr")) row.hidden = q && !row.cells[0].textContent.toLowerCase().includes(q);
   });
+  // Invite: make a Connect link for that person and show a message to send them.
+  const panel = document.getElementById("invite");
+  const message = document.getElementById("invite-message");
+  document.getElementById("fb-people").addEventListener("click", async (e) => {
+    const button = e.target.closest("button[data-invite]");
+    if (!button) return;
+    button.disabled = true;
+    document.getElementById("invite-error").textContent = "";
+    try {
+      const res = await fetch("/_admin/connections/invite", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: button.dataset.invite }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Something went wrong.");
+      document.getElementById("invite-name").textContent = data.name;
+      message.value = data.message;
+      panel.hidden = false;
+      panel.scrollIntoView({ block: "center" });
+      message.select();
+    } catch (err) {
+      document.getElementById("invite-error").textContent = err.message;
+      panel.hidden = false;
+    }
+    button.disabled = false;
+  });
+  document.getElementById("invite-copy").addEventListener("click", async (e) => {
+    await navigator.clipboard.writeText(message.value);
+    e.target.textContent = "Copied";
+    setTimeout(() => { e.target.textContent = "Copy message"; }, 1500);
+  });
+  const share = document.getElementById("invite-share");
+  if (navigator.share) {
+    share.hidden = false;
+    share.addEventListener("click", () => navigator.share({ text: message.value }).catch(() => {}));
+  }
+  document.getElementById("invite-done").addEventListener("click", () => location.reload());
 </script>`}`);
 }
 

@@ -2,7 +2,7 @@
 
 A small, private social network of your own, with your Facebook years brought along. Post and share photos, comment,
 and connect with friends who have their own afterwrd site; your Facebook download (posts, photos, comments, likes,
-friends) comes too, under *Memories*. Only people you invite can see it. It runs in your own free Cloudflare account,
+friends) comes too, under *Memories*. Only you sign in to your site; friends see it from their own. It runs in your own free Cloudflare account,
 so no one else holds your data, and setting it up needs no terminal, no GitHub account and no card.
 
 afterwrd isn't affiliated with or endorsed by Meta. It only reads the "Download your information" file Facebook
@@ -10,7 +10,7 @@ gives you; it never signs in to Facebook or fetches anything from it.
 
 **Finding your way round.** *Home* is your posts and your friends' together, with a box to write in; *Photos*,
 *Friends* and *Notifications* sit beside it. Your picture (top right) opens your profile, *Memories* (everything from
-Facebook, with "On this day"), and your tools: *People* (invites), *Import*, *Download everything* and *Update*.
+Facebook, with "On this day"), and your tools: *Your devices*, *Import*, *Download everything* and *Update*.
 
 ## Install your own
 
@@ -40,7 +40,8 @@ for Facebook.
    (your face, fingerprint or device PIN; there's no password).
 7. **Import.** Choose *Import* in the menu, pick your Facebook zip file(s), tick what to publish and press
    *Import and publish*. Your browser reads the download; only what you tick is uploaded.
-8. **Invite people** from *People* in the menu: each gets a one-time link to make their own passkey.
+8. **Invite friends** from *Friends*: press *Invite* beside someone from your Facebook download for a message to
+   send them. Once they've set up their own site and used the link, approve them and you're connected.
 
 Afterwards you can delete the token (Cloudflare: *My Profile* → *API Tokens*); it's only used while
 installing. The installer checks every file it downloads against the fingerprint built into it, so what's
@@ -51,12 +52,13 @@ installed is exactly the published release. Cloudflare's free plan allows 5 GB o
 - **Turn on two-factor authentication for your Cloudflare account** (My Profile → Authentication). Anyone who gets
   into that account can see your whole archive.
 - **Delete the installer's token afterwards.** afterwrd doesn't keep it, but while it exists it can change your Workers.
-- **Send invite links somewhere only that person will see them**: whoever opens a link first gets in. Under
-  *People → Devices & links* you can cancel unused links, delete a passkey or sign someone out everywhere. Links for
-  your own account (to add a device) give owner access, so they last only an hour.
+- **Only open a device link on your own phone or computer**: whoever opens it first gets owner access, so it works
+  once and lasts an hour. *Your devices* can cancel unused links, remove a passkey or sign out everywhere.
+- **Approve only friends you know.** A Connect or invite link can be passed on, so each one only asks: nothing is
+  shared until you approve the request on *Friends*.
 - **Photo locations are left out** unless you tick *Photo locations* when importing; they can show where you live.
-- **Keep it up to date.** The owner's *Update* page installs a newer release, keeping everyone's access and your
-  archive. (Pasting a newer `installer.js` over your afterwrd Worker does the same.)
+- **Keep it up to date.** The owner's *Update* page installs a newer release, keeping your passkeys, connections
+  and archive. (Pasting a newer `installer.js` over your afterwrd Worker does the same.)
 
 ## Browsing an export locally
 
@@ -102,10 +104,11 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
 **Afterwards.** Nothing needs the terminal:
 
 - **Import** again whenever you have a newer download, or to change what's published. Files already on the
-  site aren't uploaded again, and files the new import doesn't use are deleted. Visitors see the old version
+  site aren't uploaded again, and files the new import doesn't use are deleted. Friends see the old version
   until the new one is complete.
-- **People** invites someone (copy or share their one-time link), sends a fresh link for a new phone or lost
-  passkey, and revokes access, which signs the person out at once and deletes their passkeys.
+- **Your devices** adds another phone or computer (a one-time link to open on it), removes a passkey (never your
+  last one) and signs out everywhere. Only the owner signs in; there's no inviting others to your site, because
+  friends see it from their own.
 - **Photos and albums.** *Add photos* (on Photos) puts photos into a new or existing album, optionally shared
   as a post so friends see them in Feed. Albums you make can be renamed, described or deleted, and photos added
   here can be deleted. Any photo can be made your profile picture or cover, or upload one for it; they head
@@ -125,26 +128,27 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   `…/photos/sha256/<fingerprint>`, `…#c<n>` for a comment), so two friends' downloads agree on which comment
   replied to which post. The README inside explains the files. Keys and sign-in details are never included.
 - **Friends** (the owner's alone) is one list: friends on afterwrd first, each with their posts and photos, then
-  everyone from the Facebook download, marked *on afterwrd* or not. Say which Facebook friend an afterwrd friend is
-  (matching names are suggested; nothing is linked without you), and their page links to your Facebook history
-  together. Invited people still see the published Facebook friends list.
+  everyone from the Facebook download, marked *on afterwrd*, *invited*, or with an *Invite* button. Invite makes a
+  Connect link for that person (it lasts 30 days) and a message to send; when it's used you'll see who the invite
+  was for, and approving links them to their Facebook self. Otherwise, say which Facebook friend an afterwrd friend
+  is (matching names are suggested; nothing is linked without you), and their page links to your Facebook history
+  together. Requests to connect wait at the top of *Friends* (with a count in the menu) for *Approve* or *Decline*.
 - **Feed and connections.** Connect with friends who have their own afterwrd site: make a one-time Connect
-  link under *Feed → Connections* and send it to them; they open it, say where their site is, and confirm there.
-  Connections are mutual, and make you friends: *Feed* (only the owner sees it) shows the newest posts written on
+  link (*Friends → Connect with a friend*) and send it to them; they open it, say where their site is, and confirm
+  there; then you approve their request. Connections are mutual, and make you friends: *Feed* (only the owner sees it) shows the newest posts written on
   each connected site, and either of you can read the other's posts and photos (everything they've published)
   without leaving your own site: press their name. Comments you make are stored on your friend's site, with a
   copy kept on yours. Their photos and videos load straight from their site through links it signs, which last
-  an hour or two. Disconnecting ends it all at once. Invites (*People*) are for people without a site of their own. Sites exchange posts
-  and comments as ActivityStreams too. Only posts written on
+  an hour or two. Disconnecting ends it all at once. Sites exchange posts and comments as ActivityStreams too. Only posts written on
   afterwrd are shared, never an imported archive. Either side can disconnect. Two sites in the same Cloudflare
   account can connect too.
-- **Comments.** Anyone who can see the site can comment under a post or photo; comments show straight away.
-  People can delete their own, and the owner can delete any. *Activity* lists the latest, with a count in the
-  menu of those that are new to you. Comments are kept when you import again, and stay (under the person's
-  name) if you revoke someone, until you delete them.
+- **Comments.** You and your friends (from their own sites) can comment under a post or photo; comments show
+  straight away. Friends can delete their own, and you can delete any. *Notifications* lists the latest, with a
+  count in the menu of those that are new to you. Comments are kept when you import again, and stay if you
+  disconnect, until you delete them.
 
 `npm run deploy` is only for new versions of afterwrd's code; it never touches your archive.
-`npm run invite` still has `list`, `again` and `revoke` for use from the terminal.
+`npm run invite` still has `list`, `again` (a new device link) and `revoke` for use from the terminal.
 
 **What's published.** Only what the chosen sections show; the rest never leaves your computer. With the
 default (posts and photos):

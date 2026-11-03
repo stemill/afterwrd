@@ -1,5 +1,5 @@
-// Passkey sign-in. The owner's People page (or scripts/invite.mjs) creates a person and a one-time invite link;
-// opening the link lets them register a passkey on their device, which they then use to sign in. Nothing here
+// Passkey sign-in, for the owner only. Your devices (or setup, or scripts/invite.mjs) makes a one-time link; opening
+// it registers a passkey on that device, which then signs in. Nothing here
 // needs a password or email.
 import {
   generateAuthenticationOptions,
@@ -21,8 +21,9 @@ export async function currentUser(request, env) {
   const token = readCookie(request, SESSION_COOKIE);
   if (!token) return null;
   return env.DB.prepare(
+    // Only the owner signs in: friends see each other from their own sites.
     `SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
-     WHERE s.token_hash = ? AND s.expires_at > ? AND u.revoked_at IS NULL`,
+     WHERE s.token_hash = ? AND s.expires_at > ? AND u.revoked_at IS NULL AND u.is_owner = 1`,
   ).bind(await sha256(token), now()).first();
 }
 
@@ -128,7 +129,7 @@ async function registerVerify(request, env, url, { token, response }) {
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).bind(credential.id, invite.user_id, toBase64Url(credential.publicKey), credential.counter,
     JSON.stringify(credential.transports ?? []), now(), now()).run();
-  return startSession(env, invite.user_id, json({ ok: true }));
+  return startSession(env, invite.user_id, json({ ok: true }), credential.id);
 }
 
 // --- sign-in ---------------------------------------------------------------
@@ -142,7 +143,7 @@ async function loginVerify(request, env, url, { response }) {
   const challenge = await readChallenge(request, env, "login");
   if (!challenge) return json({ error: "The request timed out. Try again." }, 400);
   const stored = await env.DB.prepare(
-    "SELECT c.* FROM credentials c JOIN users u ON u.id = c.user_id WHERE c.id = ? AND u.revoked_at IS NULL",
+    "SELECT c.* FROM credentials c JOIN users u ON u.id = c.user_id WHERE c.id = ? AND u.revoked_at IS NULL AND u.is_owner = 1",
   ).bind(String(response?.id)).first();
   if (!stored) return json({ error: "That passkey isn't recognised here." }, 400);
 
@@ -161,7 +162,7 @@ async function loginVerify(request, env, url, { response }) {
   if (!verified || !(await spendChallenge(env, challenge))) return json({ error: "The passkey couldn't be verified." }, 400);
   await env.DB.prepare("UPDATE credentials SET counter = ?, last_used_at = ? WHERE id = ?")
     .bind(authenticationInfo.newCounter, now(), stored.id).run();
-  return startSession(env, stored.user_id, json({ ok: true }));
+  return startSession(env, stored.user_id, json({ ok: true }), stored.id);
 }
 
 async function logout(request, env) {
@@ -235,16 +236,16 @@ async function findInvite(env, token) {
   if (!token) return null;
   return env.DB.prepare(
     `SELECT i.token_hash, u.id AS user_id, u.name FROM invites i JOIN users u ON u.id = i.user_id
-     WHERE i.token_hash = ? AND i.used_at IS NULL AND i.expires_at > ? AND u.revoked_at IS NULL`,
+     WHERE i.token_hash = ? AND i.used_at IS NULL AND i.expires_at > ? AND u.revoked_at IS NULL AND u.is_owner = 1`,
   ).bind(await sha256(String(token)), now()).first();
 }
 
-async function startSession(env, userId, response) {
+async function startSession(env, userId, response, credentialId) {
   const token = randomToken();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(now()),
-    env.DB.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)")
-      .bind(await sha256(token), userId, now() + SESSION_SECONDS),
+    env.DB.prepare("INSERT INTO sessions (token_hash, user_id, expires_at, credential_id) VALUES (?, ?, ?, ?)")
+      .bind(await sha256(token), userId, now() + SESSION_SECONDS, credentialId),
   ]);
   response.headers.append("Set-Cookie",
     `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${SESSION_SECONDS}; HttpOnly; Secure; SameSite=Lax`);

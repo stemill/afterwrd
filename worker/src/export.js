@@ -21,7 +21,7 @@ const TABLES = {
   tagged_photos: { columns: "*" },
   site_comments: { columns: "*" },
   comments_elsewhere: { columns: "*" },
-  connections: { columns: "id, origin, name, connected_at", where: "connected_at IS NOT NULL" },
+  connections: { columns: "id, origin, name, connected_at", where: "approved_at IS NOT NULL" },
   friend_links: { columns: "connection_id, person_name" },
   users: { columns: "id, name, is_owner, revoked_at, site" },
 };

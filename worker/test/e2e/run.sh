@@ -61,7 +61,6 @@ run_core() { # these share one database, in this order
   suite comments.mjs "$OUT/fake-export.zip"
   suite posts.mjs "$OUT/fake-export.zip" "$PHOTOS"
   suite admin.mjs
-  suite dup.mjs
   stop
 }
 run_fresh() { fresh; suite fresh.mjs "$OUT/fake-export.zip" "$PHOTOS"; stop; }

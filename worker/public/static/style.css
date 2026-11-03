@@ -121,6 +121,7 @@ main { max-width: 900px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
 .chip.primary:hover, .button.primary:hover { background: var(--button-hover); color: var(--on-button); }
 .chip.danger { color: var(--danger); }
 .chip.danger:hover { background: color-mix(in srgb, var(--raised) 70%, var(--danger)); color: #fff; }
+.chip:disabled, .chip:disabled:hover { opacity: 0.45; cursor: not-allowed; background: var(--raised); color: var(--muted); }
 button.link { padding: 0; border: 0; background: none; color: var(--accent-strong); font: inherit; font-size: 0.85rem; text-decoration: underline; cursor: pointer; }
 
 /* search and filters */
@@ -166,6 +167,7 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent-stron
 .badge-group, .badge-wall { background: var(--tint-4); color: #e9cd74; }
 .badge-new { background: var(--accent); color: var(--on-accent); }
 a.badge:hover { text-decoration: none; }
+.badge.as-written { text-transform: none; } /* names and phrases, not kinds of thing */
 
 /* the composer */
 .composer { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.25rem; }
@@ -290,6 +292,16 @@ img.who { object-fit: cover; padding: 0; }
 .fb-pick summary { cursor: pointer; }
 .fb-pick[open] summary { margin-bottom: 0.5rem; }
 #fb-people tr[hidden] { display: none; }
+#fb-people td:last-child { white-space: nowrap; }
+.invite-panel { position: sticky; bottom: 1rem; margin-top: 1rem; display: flex; flex-direction: column; gap: 0.6rem; box-shadow: var(--shadow); }
+.invite-panel[hidden] { display: none; }
+.invite-panel h2 { margin: 0; }
+.invite-panel textarea { width: 100%; font: inherit; padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: 16px; background: var(--sunken); color: var(--text); resize: vertical; }
+.invite-panel .row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0; }
+.invite-panel .error { color: var(--danger); margin: 0; }
+.invite-panel .error:empty { display: none; }
+.requests .warn { color: var(--danger); }
+.requests .friend-link { cursor: default; }
 
 /* Connections */
 .connections .actions-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }

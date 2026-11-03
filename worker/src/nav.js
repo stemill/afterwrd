@@ -76,11 +76,11 @@ export function siteHeader({ main, menu, current, face = {} }) {
 </script>`;
 }
 
-/** The owner's main menu. Notifications carries the count of new comments where known. */
-export const ownerMain = (newComments = 0) => [
+/** The owner's main menu. Notifications carries the count of new comments, Friends of requests to connect. */
+export const ownerMain = (newComments = 0, requests = 0) => [
   { key: "home", label: "Home", href: "/" },
   { key: "photos", label: "Photos", href: "/photos" },
-  { key: "connected", label: "Friends", href: "/friend" },
+  { key: "connected", label: "Friends", href: "/friend", badge: requests },
   { key: "activity", label: "Notifications", href: "/activity", badge: newComments },
 ];
 
@@ -88,7 +88,7 @@ export const ownerMain = (newComments = 0) => [
 export const ownerMenu = ({ memories = true, updateWaiting = false } = {}) => [
   { key: "profile", label: "Your profile", href: "/posts" },
   ...(memories ? [{ key: "memories", label: "Memories", href: "/memories" }] : []),
-  { key: "people", label: "People", href: "/_admin" },
+  { key: "people", label: "Your devices", href: "/_admin" },
   { key: "import", label: "Import", href: "/_admin/import" },
   { key: "export", label: "Download everything", href: "/_admin/export" },
   { key: "update", label: updateWaiting ? "Update available" : "Update", href: "/_admin/update", badge: updateWaiting },

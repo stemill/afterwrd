@@ -1,5 +1,5 @@
-// Comments written on the site by anyone who can see it, under the owner's posts and photos. They show straight
-// away; the author or the owner can delete one. Forms post here and land back on the page they came from:
+// Comments the owner writes on their own site, under their posts and photos (friends' comments arrive through
+// /_peer/comments from their own sites). They show straight away; the author or the owner can delete one. Forms post here and land back on the page they came from:
 //   POST /_comments                 target, text, back
 //   POST /_comments/<id>/delete     back
 // See migrations/0006_site_comments.sql for how `target` survives a re-import.
@@ -76,7 +76,6 @@ export async function handleComments(request, env, url, user) {
     if (text.length > MAX_COMMENT) return message(`Comments can be up to ${MAX_COMMENT} characters.`, back, 400);
     if (!(await findTarget(db, target))) return message("That's no longer in the archive.", back, 404);
     // The limits are checked in the same statement as the insert, so comments sent all at once can't slip past.
-    // A connected friend visiting from their own site is marked with it, as when they comment from their Feed.
     const row = await db.prepare(`INSERT INTO site_comments (target, author_id, author_name, text, created_at, origin)
       SELECT ?1, ?2, ?3, ?4, ?5, ?6
       WHERE (SELECT COUNT(*) FROM site_comments WHERE author_id = ?2 AND created_at > ?5 - ?7) < ?8

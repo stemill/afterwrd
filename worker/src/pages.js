@@ -100,7 +100,7 @@ ${script && `<script>${CLIENT}\n${script}</script>`}
 export function loginPage(next) {
   return page("Sign in", `
 <h1>Sign in</h1>
-<p>This is a private archive. Use the passkey you set up from your invite.</p>
+<p>This is a private afterwrd site. Sign in with your passkey.</p>
 <button id="go">Sign in with a passkey</button>
 <p id="error" role="alert"></p>`, `
   const next = ${JSON.stringify(next).replace(/</g, "\\u003c")};
@@ -113,11 +113,12 @@ export function loginPage(next) {
   });`);
 }
 
+// A link to add one of the owner's devices (from Your devices, or setting up a new site).
 export function invitePage(name) {
-  return page("You're invited", `
+  return page("Add this device", `
 <h1>Hello, ${escape(name)}</h1>
-<p>You've been invited to a private archive. Create a passkey on this device to get in: your phone or computer
-will ask for your face, fingerprint or PIN. There's no password, and this link only works once.</p>
+<p>Add this phone or computer to your afterwrd site by creating a passkey on it: it will ask for your face,
+fingerprint or PIN. There's no password, and this link only works once.</p>
 <button id="go">Create a passkey</button>
 <p id="error" role="alert"></p>`, `
   const token = location.pathname.split("/").pop();
@@ -135,7 +136,7 @@ export function setupPage() {
   return page("Set up afterwrd", `
 <h1>Your archive is ready</h1>
 <p>afterwrd is installed in your Cloudflare account. Next, make yourself its owner: you'll create a passkey on
-this device, then you can import your Facebook download and invite people.</p>
+this device, then you can import your Facebook download and invite friends.</p>
 <p><input id="name" placeholder="Your name" autocomplete="name" maxlength="100"></p>
 <button id="go">Continue</button>
 <p id="error" role="alert"></p>`, `

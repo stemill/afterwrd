@@ -12,6 +12,12 @@ const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/M
 const [zipPath, fixtures] = process.argv.slice(2);
 const BASE = "http://localhost:8787";
 const cli = (...a) => execFileSync("node", ["scripts/invite.mjs", ...a, "--local"], { cwd: WORKER, encoding: "utf8" });
+// These suites share one database, so each starts with an owner of its own: the last suite's is revoked first
+// (a site has only one).
+const newOwner = (name) => {
+  for (const line of cli("list").split("\n")) { const id = /^\s*(\d+)\s.*owner$/.exec(line)?.[1]; if (id) cli("revoke", id); }
+  return cli("add", name, "--owner").match(/http\S+\/_auth\/invite\/\S+/)[0];
+};
 const sql = (q) => JSON.parse(execFileSync("./node_modules/.bin/wrangler", ["d1", "execute", "afterwrd", "--local", "--json", "--command", q],
   { cwd: WORKER, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }))[0].results;
 const results = [];
@@ -51,14 +57,11 @@ const cards = (page) => page.$$eval("main article.card", (l) => l.map((a) => ({
   canDelete: Boolean(a.querySelector("header .delete")),
 })));
 
-const owner = await person(cli("add", `Poster ${Date.now()}`, "--owner").match(/http\S+\/_auth\/invite\/\S+/)[0]);
+const owner = await person(newOwner(`Poster ${Date.now()}`));
 check("tiny export imports", !(await importZip(owner)));
-const friend = await person(cli("add", `Reader ${Date.now()}`).match(/http\S+\/_auth\/invite\/\S+/)[0]);
 
 await owner.goto(`${BASE}/posts`);
 check("owner sees the composer on Posts", Boolean(await owner.$("#composer")));
-await friend.goto(`${BASE}/posts`);
-check("friends don't", !(await friend.$("#composer")));
 await owner.goto(`${BASE}/posts?page=1&q=test`);
 check("composer only on the plain first page", !(await owner.$("#composer")));
 
@@ -69,7 +72,7 @@ await Promise.all([owner.waitForNavigation(), owner.click("#composer button.post
 let first = (await cards(owner))[0];
 check("text post appears first, as yours", first.text === "First post written on the site\nwith two lines" && !first.badge
   && first.what === "You", JSON.stringify(first));
-check("owner can delete it; friend can't", first.canDelete && !(await cards(friend)).some((c) => c.canDelete));
+check("owner can delete it", first.canDelete);
 
 // A photo post: one 4000×3000 photo with a hidden location, one small one.
 await owner.type("#composer textarea", "Two photos");
@@ -96,13 +99,13 @@ await owner.goto(`${BASE}/photos/${stored[0].id}`);
 check("photo page shows it, with the post", (await owner.$eval(".info .album-link", (a) => a.textContent)) === "Posted on afterwrd"
   && (await owner.$eval(".info article.card .text", (t) => t.textContent)) === "Two photos");
 
-// The friend comments on the post and on a photo; everything survives a re-import.
-await friend.goto(`${BASE}/posts`);
-await friend.type("main article.card:first-of-type .say textarea", "Nice ones");
-await Promise.all([friend.waitForNavigation(), friend.click("main article.card:first-of-type .say button")]);
-await friend.goto(`${BASE}/photos/${stored[0].id}`);
-await friend.type(".info .say textarea", "Love this");
-await Promise.all([friend.waitForNavigation(), friend.click(".info .say button")]);
+// Comments on the post and on a photo; everything survives a re-import.
+await owner.goto(`${BASE}/posts`);
+await owner.type("main article.card:first-of-type .say textarea", "Nice ones");
+await Promise.all([owner.waitForNavigation(), owner.click("main article.card:first-of-type .say button")]);
+await owner.goto(`${BASE}/photos/${stored[0].id}`);
+await owner.type(".info .say textarea", "Love this");
+await Promise.all([owner.waitForNavigation(), owner.click(".info .say button")]);
 check("re-import finishes", !(await importZip(owner)));
 await owner.goto(`${BASE}/posts`);
 const after = await cards(owner);
@@ -112,11 +115,10 @@ check("comments on them survive too", sql("SELECT COUNT(*) AS n FROM site_commen
   && (await owner.$$eval("main article.card:first-of-type .comment", (l) => l.length)) === 1);
 
 // Who may do what.
-const friendCookie = await cookieOf(friend);
 const api = (path, body, c, origin = BASE) => fetch(BASE + path, { method: "POST", redirect: "manual",
   headers: { Cookie: `__Host-hb_session=${c}`, Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify(body) });
-check("a friend can't post", (await api("/_admin/posts", { text: "sneaky" }, friendCookie)).status === 404);
-check("a friend can't delete", (await api(`/_admin/posts/${1000000000 + 1}/delete`, {}, friendCookie)).status === 404);
+check("signed out, nobody can post", ![200, 201].includes((await api("/_admin/posts", { text: "sneaky" }, "nobody")).status));
+check("…or delete", ![200, 201, 303].includes((await api(`/_admin/posts/${1000000000 + 1}/delete`, {}, "nobody")).status));
 check("another site can't post as the owner", (await api("/_admin/posts", { text: "csrf" }, cookie, "https://evil.example")).status === 403);
 check("empty post refused", (await api("/_admin/posts", { text: "  " }, cookie)).status === 400);
 check("photo that was never uploaded refused", (await api("/_admin/posts", { text: "x", photos: [{ hash: "a".repeat(64),

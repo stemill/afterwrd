@@ -14,7 +14,7 @@ import { html, now } from "./util.js";
 const MAX_SITES = 40; // each one is a request; the free plan allows 50 per page
 const TARGET_RE = /^(post-\d+-[0-9a-f]{8}|photo-[0-9a-f]{64})$/;
 
-export const connectionById = (db, id) => db.prepare("SELECT * FROM connections WHERE id = ? AND connected_at IS NOT NULL")
+export const connectionById = (db, id) => db.prepare("SELECT * FROM connections WHERE id = ? AND connected_at IS NOT NULL AND approved_at IS NOT NULL")
   .bind(Number(id) || 0).first();
 
 /** Remembers a friend's profile picture link (and when it stops working), from what their site just sent. */
@@ -41,7 +41,7 @@ export async function markMine(db, connectionId, target, comments, ownOrigin) {
 
 export async function loadFeed(db, ownOrigin) {
   const { results: connections } = await db.prepare(`SELECT * FROM connections WHERE connected_at IS NOT NULL
-    ORDER BY name COLLATE NOCASE LIMIT ?`).bind(MAX_SITES).all();
+    AND approved_at IS NOT NULL ORDER BY name COLLATE NOCASE LIMIT ?`).bind(MAX_SITES).all();
   const replies = await Promise.all(connections.map(async (connection) => {
     try {
       const feed = await callSite(connection.origin, "/_peer/feed", { key: connection.their_key });

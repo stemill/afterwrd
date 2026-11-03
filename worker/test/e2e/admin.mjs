@@ -1,5 +1,7 @@
-// End-to-end for the People page: owner invites a guest from the page, guest can't manage, owner revokes.
+// End-to-end for Your devices: only the owner signs in. The owner adds a second device from the page, removes a
+// passkey (never the last), cancels unused links and signs out everywhere; there's no inviting anyone else.
 import { execFileSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
@@ -8,16 +10,26 @@ const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/M
 
 const BASE = "http://localhost:8787";
 const cli = (...a) => execFileSync("node", ["scripts/invite.mjs", ...a, "--local"], { cwd: WORKER, encoding: "utf8" });
+// These suites share one database, so each starts with an owner of its own: the last suite's is revoked first
+// (a site has only one).
+const newOwner = (name) => {
+  for (const line of cli("list").split("\n")) { const id = /^\s*(\d+)\s.*owner$/.exec(line)?.[1]; if (id) cli("revoke", id); }
+  return cli("add", name, "--owner").match(/http\S+\/_auth\/invite\/\S+/)[0];
+};
+const sql = (command) => JSON.parse(execFileSync("./node_modules/.bin/wrangler", ["d1", "execute", "afterwrd", "--local", "--json", "--command", command],
+  { cwd: WORKER, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }))[0].results;
 const results = [];
 const check = (name, ok, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? `  (${extra})` : ""}`); };
+const errors = [];
 // The main menu, then what's behind the person's picture.
 const navLabels = (page) => page.$$eval("header.site nav.main a, header.site .menu a", (a) => a.map((x) => x.querySelector("span").textContent.trim()).join(","));
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
 
-async function person() {
+async function device() {
   const context = await browser.createBrowserContext();
   const page = await context.newPage();
+  page.on("pageerror", (e) => errors.push(e.message));
   const cdp = await page.createCDPSession();
   await cdp.send("WebAuthn.enable");
   await cdp.send("WebAuthn.addVirtualAuthenticator", { options: { protocol: "ctap2", transport: "internal",
@@ -29,67 +41,98 @@ async function register(page, link) {
   await page.goto(link);
   await Promise.all([page.waitForNavigation(), page.click("#go")]);
 }
+const passkeys = (page) => page.$$eval(".devices li", (l) => l.map((li) => ({
+  id: li.querySelector("button").dataset.credential, disabled: li.querySelector("button").disabled })));
 
-// Owner joins via the CLI, as on a brand-new site.
+// Only owners can be added from the terminal.
+let refused = "";
+try { cli("add", `Someone ${Date.now()}`); } catch (e) { refused = String(e.stderr); }
+check("the terminal won't add anyone but the owner", refused.includes("add --owner"), refused.trim());
+
+// The owner joins via the terminal, as on a brand-new site.
 const ownerName = `Owner ${Date.now()}`;
-const ownerLink = cli("add", ownerName, "--owner").match(/http\S+\/_auth\/invite\/\S+/)[0];
-const owner = await person();
-await register(owner, ownerLink);
-check("owner sees People in their menu", (await navLabels(owner)) === "Home,Photos,Friends,Notifications,Your profile,People,Import,Download everything,Update", await navLabels(owner));
+const phone = await device();
+await register(phone, newOwner(ownerName));
+let second = "";
+try { cli("add", `Second ${Date.now()}`, "--owner"); } catch (e) { second = String(e.stderr); }
+check("the terminal won't make a second owner", second.includes("already has an owner"), second.trim());
+check("the menu has Your devices", (await navLabels(phone)) === "Home,Photos,Friends,Notifications,Your profile,Your devices,Import,Download everything,Update", await navLabels(phone));
+await phone.goto(`${BASE}/_admin`);
+check("Your devices lists one passkey, which can't be removed", (await phone.$eval("h1", (h) => h.textContent)) === "Your devices"
+  && JSON.stringify((await passkeys(phone)).map((k) => k.disabled)) === "[true]");
+check("no inviting other people", !(await phone.$("#invite")) && !(await phone.$("button[data-action=revoke]")));
 
-await owner.goto(`${BASE}/_admin`);
-const ownerRow = await owner.$$eval("tbody tr", (rows, n) => rows.find((r) => r.textContent.includes(n))?.innerHTML ?? "", ownerName);
-check("owner listed, marked owner, signed in today, no Revoke button", ownerRow.includes("owner") && ownerRow.includes("Signed in") && !ownerRow.includes("Revoke"));
+// Add a laptop from the page.
+await phone.click("#new-link");
+await phone.waitForSelector("#link:not([hidden])");
+const link = await phone.$eval("#link-url", (i) => i.value);
+check("Add a device shows a one-time link", /\/_auth\/invite\/[\w-]{40,}$/.test(link), link.slice(0, 60) + "…");
+const laptop = await device();
+await laptop.goto(link);
+check("the link says it's adding a device", (await laptop.title()).startsWith("Add this device") && (await laptop.$eval("main, body", (m) => m.textContent)).includes("Add this phone or computer"));
+await Promise.all([laptop.waitForNavigation(), laptop.click("#go")]);
+check("the laptop is signed in as the owner", (await navLabels(laptop)).includes("Your devices"), await navLabels(laptop));
+const reuse = await (await device()).goto(link);
+check("the link only works once", reuse.status() === 404);
 
-// Invite a guest from the page; the name tries to inject HTML.
-const guestName = `Guest <img src=x onerror=alert(1)> ${Date.now()}`;
-await owner.type("#invite input[name=name]", guestName);
-await owner.click("#invite button");
-await owner.waitForSelector("#link:not([hidden])");
-const guestLink = await owner.$eval("#link-url", (i) => i.value);
-check("invite form shows a one-time link", /\/_auth\/invite\/[\w-]{40,}$/.test(guestLink), guestLink.slice(0, 60) + "…");
+await phone.goto(`${BASE}/_admin`);
+let keys = await passkeys(phone);
+check("two passkeys now, both removable", keys.length === 2 && keys.every((k) => !k.disabled));
 
-const guest = await person();
-await register(guest, guestLink);
-check("guest registers from the page's link", ["/", "/posts"].includes(new URL(guest.url()).pathname), guest.url());
-check("guest has no People link", (await navLabels(guest)) === "Home,Photos,Notifications", await navLabels(guest));
-const guestAdmin = await guest.goto(`${BASE}/_admin`);
-check("guest gets 404 on /_admin", guestAdmin.status() === 404);
-await guest.goto(`${BASE}/posts`);
-const guestPost = await guest.evaluate(() => fetch("/_admin/invite", { method: "POST", headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ name: "Sneaky" }) }).then((r) => r.status));
-check("guest can't create invites through the API", guestPost === 404);
+// Unused links can be cancelled.
+await phone.click("#new-link");
+await phone.waitForSelector("#link:not([hidden])");
+const unused = await phone.$eval("#link-url", (i) => i.value);
+await phone.goto(`${BASE}/_admin`);
+await Promise.all([phone.waitForNavigation(), phone.click("button[data-action=cancel-links]")]);
+check("cancelled links stop working", (await (await device()).goto(unused)).status() === 404);
 
-// Back to the owner: list shows the guest safely; new link; cross-site and self-revoke refused; revoke guest.
-await owner.goto(`${BASE}/_admin`);
-check("guest's name is shown as text, not HTML", (await owner.$$("tbody img")).length === 0
-  && (await owner.$eval("tbody", (t) => t.textContent)).includes("<img src=x"));
-const guestRowId = await owner.$$eval("button[data-action=revoke]", (b, n) => b.find((x) => x.dataset.name === n)?.dataset.id, guestName);
-await owner.click(`button[data-action=invite][data-id="${guestRowId}"]`);
-await owner.waitForSelector("#link:not([hidden])");
-const newLink = await owner.$eval("#link-url", (i) => i.value);
-check("New link gives a different link", newLink !== guestLink && newLink.includes("/_auth/invite/"));
+// The API refuses another site, other people's passkeys and the last passkey.
+const cookie = (await phone.cookies()).find((c) => c.name === "__Host-hb_session").value;
+const api = (path, body, origin = BASE) => fetch(BASE + path, { method: "POST", redirect: "manual",
+  headers: { Cookie: `__Host-hb_session=${cookie}`, Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) });
+check("another site can't make a device link", (await api("/_admin/devices/link", {}, "https://evil.example")).status === 403);
+check("the old People actions are gone", (await api("/_admin/invite", { name: "Sneaky" })).status === 404
+  && (await api("/_admin/people/1/revoke")).status === 404);
+const [otherKey] = sql(`SELECT c.id FROM credentials c JOIN users u ON u.id = c.user_id WHERE u.name != '${ownerName}' LIMIT 1`);
+if (otherKey) check("can't remove another account's passkey", (await api("/_admin/devices/delete-passkey", { credential: otherKey.id })).status === 404);
 
-const cookie = (await owner.cookies()).find((c) => c.name === "__Host-hb_session").value;
-const evil = await fetch(`${BASE}/_admin/people/${guestRowId}/revoke`, { method: "POST",
-  headers: { Origin: "https://evil.example", Cookie: `__Host-hb_session=${cookie}`, "Content-Type": "application/json" } });
-check("cross-site POST to the admin API is refused", evil.status === 403, `HTTP ${evil.status}`);
-const ownerId = cli("list").split("\n").find((l) => l.includes(ownerName)).trim().split(/\s+/)[0];
-const selfRevoke = await owner.evaluate((id) => fetch(`/_admin/people/${id}/revoke`, { method: "POST" }).then((r) => r.status), ownerId);
-check("owner can't revoke themselves", selfRevoke === 400);
+// Remove the laptop's passkey: the laptop is signed out, the phone isn't; then the phone's is the last and stays.
+// Which is which, in the order they were made.
+const [phoneKey, laptopKey] = sql(`SELECT c.id FROM credentials c JOIN users u ON u.id = c.user_id WHERE u.name = '${ownerName}' ORDER BY c.rowid`).map((k) => k.id);
+check("removing a passkey works", (await api("/_admin/devices/delete-passkey", { credential: laptopKey })).status === 200);
+await laptop.goto(`${BASE}/posts`);
+await phone.goto(`${BASE}/posts`);
+check("…and signs that device out, only that one", new URL(laptop.url()).pathname === "/_auth/login" && new URL(phone.url()).pathname === "/posts");
+check("the last passkey can't be removed", (await api("/_admin/devices/delete-passkey", { credential: phoneKey })).status === 400);
 
-await guest.goto(`${BASE}/posts`);
-check("guest still signed in before the owner revokes", new URL(guest.url()).pathname === "/posts");
-await owner.goto(`${BASE}/_admin`);
-await Promise.all([owner.waitForNavigation(), owner.click(`button[data-action=revoke][data-id="${guestRowId}"]`)]);
-await guest.goto(`${BASE}/posts`);
-check("revoked guest is signed out straight away", new URL(guest.url()).pathname === "/_auth/login");
-await owner.goto(`${BASE}/_admin`);
-check("guest appears under Revoked", (await owner.$eval("main", (m) => m.innerHTML)).includes("<h2>Revoked</h2>")
-  && (await owner.$$eval("h2 + table tbody tr", (r) => r.map((x) => x.textContent).join("|"))).includes("Guest"));
+// Sign out everywhere.
+const tablet = await device();
+await phone.goto(`${BASE}/_admin`);
+await phone.click("#new-link");
+await phone.waitForSelector("#link:not([hidden])");
+await register(tablet, await phone.$eval("#link-url", (i) => i.value));
+await phone.goto(`${BASE}/_admin`);
+await Promise.all([phone.waitForNavigation(), phone.click("button[data-action=sign-out]")]);
+await tablet.goto(`${BASE}/posts`);
+check("sign out everywhere signs out every device", new URL(phone.url()).pathname === "/_auth/login"
+  && new URL(tablet.url()).pathname === "/_auth/login");
+
+// Someone invited by an older version, before only owners signed in, can't use their link.
+const token = randomBytes(32).toString("base64url");
+const [guest] = sql(`INSERT INTO users (name, is_owner, created_at) VALUES ('Old guest', 0, strftime('%s','now')) RETURNING id`);
+sql(`INSERT INTO invites (token_hash, user_id, expires_at) VALUES ('${createHash("sha256").update(token).digest("hex")}', ${guest.id}, strftime('%s','now') + 3600)`);
+check("an old guest's invite doesn't work", (await (await device()).goto(`${BASE}/_auth/invite/${token}`)).status() === 404);
 const signedOutAdmin = await fetch(`${BASE}/_admin`, { redirect: "manual" });
 check("signed-out /_admin redirects to sign-in", signedOutAdmin.status === 302);
 
+await phone.setViewport({ width: 375, height: 800, isMobile: true });
+await phone.goto(`${BASE}/_auth/login`);
+await Promise.all([phone.waitForNavigation(), phone.click("#go")]).catch(() => {});
+await phone.goto(`${BASE}/_admin`);
+await phone.screenshot({ path: `${OUT}/devices-phone.png`, fullPage: true });
+
+check("no script errors", errors.length === 0, errors.join(" | "));
 await browser.close();
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);
 process.exit(results.every(Boolean) ? 0 : 1);

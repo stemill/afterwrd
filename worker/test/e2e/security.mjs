@@ -89,36 +89,35 @@ const logout = await post("/_auth/logout", null, (await session(owner)).value);
 check("signing out asks the browser to clear cached photos", (logout.headers.get("clear-site-data") ?? "").includes('"cache"'));
 await owner.goto(`${BASE}/_auth/login`);
 await Promise.all([owner.waitForNavigation(), owner.click("#go")]);
-const ownerCookie = (await session(owner)).value;
+let ownerCookie = (await session(owner)).value;
 
-// --- People page: devices, links, sign-out everywhere ---------------------------------
-const viewerLink = (await (await post("/_admin/invite", { name: "Viewer" }, ownerCookie)).json()).link;
-const viewer = await person();
-await viewer.goto(viewerLink);
-await Promise.all([viewer.waitForNavigation(), viewer.click("#go")]);
-const viewerId = sql("SELECT id FROM users WHERE name = 'Viewer'")[0].id;
+// --- Your devices: links, sign-out everywhere, passkeys ------------------------------------
 const ownerId = sql("SELECT id FROM users WHERE is_owner = 1")[0].id;
-await owner.goto(`${BASE}/_admin`);
-const devices = await owner.$$eval("details.manage li", (l) => l.map((x) => x.textContent.trim()));
-check("People shows each person's passkeys", devices.filter((d) => d.startsWith("Passkey 1")).length === 2, devices.length);
-check("owner's only passkey can't be deleted from the page", await owner.$eval(`button[data-action=delete-passkey][data-id="${ownerId}"]`, (b) => b.disabled));
-const ownerKey = sql(`SELECT id FROM credentials WHERE user_id = ${ownerId}`)[0].id;
-check("…nor through the API", (await post(`/_admin/people/${ownerId}/delete-passkey`, { credential: ownerKey }, ownerCookie)).status === 400);
-const ownerLink = await (await post(`/_admin/people/${ownerId}/invite`, {}, ownerCookie)).json();
+const deviceLink = (await (await post("/_admin/devices/link", {}, ownerCookie)).json()).link;
 const left = sql(`SELECT MAX(expires_at) - strftime('%s','now') AS left FROM invites WHERE user_id = ${ownerId} AND used_at IS NULL`)[0].left;
-check("a new link for the owner is flagged and lasts an hour", ownerLink.owner === true && left > 3500 && left <= 3600, `${left}s`);
-await post(`/_admin/people/${ownerId}/cancel-links`, {}, ownerCookie);
-check("Cancel open links removes them", sql(`SELECT COUNT(*) AS n FROM invites WHERE user_id = ${ownerId} AND used_at IS NULL`)[0].n === 0
-  && (await fetch(ownerLink.link)).status === 404);
-await post(`/_admin/people/${viewerId}/sign-out`, {}, ownerCookie);
-await viewer.goto(`${BASE}/posts`);
-check("Sign out everywhere ends the viewer's session", new URL(viewer.url()).pathname === "/_auth/login");
-const viewerKey = sql(`SELECT id FROM credentials WHERE user_id = ${viewerId}`)[0].id;
-await post(`/_admin/people/${viewerId}/delete-passkey`, { credential: viewerKey }, ownerCookie);
-await viewer.click("#go");
-await viewer.waitForFunction(() => document.getElementById("error").textContent.length > 0);
-check("a deleted passkey can't sign in", (await viewer.$eval("#error", (e) => e.textContent)).includes("isn't recognised"));
-check("someone else's passkey can't be deleted via another person", (await post(`/_admin/people/${viewerId}/delete-passkey`, { credential: ownerKey }, ownerCookie)).status === 404);
+check("a device link lasts an hour", left > 3500 && left <= 3600, `${left}s`);
+const laptop = await person();
+await laptop.goto(deviceLink);
+await Promise.all([laptop.waitForNavigation(), laptop.click("#go")]);
+check("a second device signs in as the owner", Boolean(await session(laptop)));
+const [ownerKey, laptopKey] = sql(`SELECT id FROM credentials WHERE user_id = ${ownerId} ORDER BY created_at, rowid`).map((k) => k.id);
+const spare = (await (await post("/_admin/devices/link", {}, ownerCookie)).json()).link;
+await post("/_admin/devices/cancel-links", {}, ownerCookie);
+check("Cancel unused links removes them", sql(`SELECT COUNT(*) AS n FROM invites WHERE user_id = ${ownerId} AND used_at IS NULL`)[0].n === 0
+  && (await fetch(spare)).status === 404);
+await post("/_admin/devices/sign-out", {}, ownerCookie);
+await laptop.goto(`${BASE}/posts`);
+check("Sign out everywhere ends every session", new URL(laptop.url()).pathname === "/_auth/login"
+  && (await fetch(`${BASE}/_admin`, { redirect: "manual", headers: { Cookie: `__Host-hb_session=${ownerCookie}` } })).status === 302);
+await owner.goto(`${BASE}/_auth/login`);
+await Promise.all([owner.waitForNavigation(), owner.click("#go")]);
+ownerCookie = (await session(owner)).value;
+await post("/_admin/devices/delete-passkey", { credential: laptopKey }, ownerCookie);
+await laptop.click("#go");
+await laptop.waitForFunction(() => document.getElementById("error").textContent.length > 0);
+check("a removed passkey can't sign in", (await laptop.$eval("#error", (e) => e.textContent)).includes("isn't recognised"));
+check("the last passkey can't be removed", (await post("/_admin/devices/delete-passkey", { credential: ownerKey }, ownerCookie)).status === 400);
+check("there's no inviting anyone else", (await post("/_admin/invite", { name: "Viewer" }, ownerCookie)).status === 404);
 
 // --- import validation ------------------------------------------------------------------
 await post("/_admin/import/start", {}, ownerCookie);
