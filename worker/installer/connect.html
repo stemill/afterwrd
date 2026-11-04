@@ -50,7 +50,8 @@
 </main>
 <script>
   const CLIENT_ID = "__OAUTH_CLIENT__";
-  const SCOPE = "workers-scripts.edit d1.write account-settings.read";
+  // As in worker/src/cloudflare.js (SCOPES). "Workers Admin", because "Workers Editor" can't create a Worker.
+  const SCOPE = "workers-scripts.admin d1.write account-settings.read";
   const KEY = "afterwrd-connect";
   const status = document.getElementById("status");
   const problem = document.getElementById("error");

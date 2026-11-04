@@ -19,9 +19,10 @@ import { html, json } from "./util.js";
 
 export const CLIENT_ID = pkg.afterwrd.cloudflareClient;
 export const RELAY = `https://${pkg.afterwrd.site}/connect/`;
-// What Cloudflare is asked for: changing Workers (afterwrd's own, and groups'), making databases, and reading the
-// account's workers.dev name. Nothing else.
-export const SCOPES = "workers-scripts.edit d1.write account-settings.read";
+// What Cloudflare is asked for (the relay page, installer/connect.html, sends it; keep the two the same): making,
+// changing and deleting Workers (afterwrd's own, and groups'; "Workers Editor" can't make a new one, so a fresh
+// install or a new group needs "Workers Admin"), making databases, and reading the account's workers.dev name.
+export const SCOPES = "workers-scripts.admin d1.write account-settings.read";
 const TOKEN_ENDPOINT = "https://dash.cloudflare.com/oauth2/token";
 // Both cookies are host-only. (workers.dev is a public suffix, so other Workers under the same account subdomain
 // count as the same site: they're all afterwrd's own, and every POST here checks Origin exactly, which is what holds.)

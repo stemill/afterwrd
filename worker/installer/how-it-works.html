@@ -251,8 +251,8 @@ and the friends they've chosen. This page explains how, and how to check it for 
   <h2>Installing and updating</h2>
   <p>The installer is a small Worker you deploy first. To create your site's database and upload afterwrd into your
   account it needs Cloudflare's permission, which it asks for through Cloudflare's own sign-in for apps: you press
-  <b>Connect Cloudflare</b>, Cloudflare shows what afterwrd is asking for (changing Workers, making databases, reading the
-  account's workers.dev name) and you press <b>Allow</b>. Cloudflare then gives your installer a token that lasts an hour,
+  <b>Connect Cloudflare</b>, Cloudflare shows what afterwrd is asking for (making, changing and deleting Workers, which Cloudflare
+  calls <i>Workers Admin</i>; making databases; reading the account's workers.dev name) and you press <b>Allow</b>. Cloudflare then gives your installer a token that lasts an hour,
   kept only in a cookie on that page, used only against Cloudflare's API over HTTPS, and never shown, logged or sent
   anywhere else. afterwrd never asks for permission to make longer-lived tokens. The installer downloads the release from
   GitHub and checks every file against the fingerprint built into it, so what's installed is exactly the published
