@@ -1,5 +1,6 @@
 // Page templates, ported from afterwrd/templates. `ctx` carries me, the published sections, the signed-in user
 // and the request URL.
+import { connectLink } from "../cloudflare.js";
 import { MAX_COMMENT } from "./comments.js";
 import {
   aspect, dateRange, EMOJI, fmtAgo, fmtDate, fmtDatetime, linkify, mediaUrl, number, safeUrl, summary, thumbUrl,
@@ -999,7 +1000,7 @@ function groupWhere(g) {
 }
 
 /** The owner's groups, starting one, and joining one with an invite link. */
-export function groupsIndexPage(ctx, { groups, unfinished = [], plans = [], remembered = false }) {
+export function groupsIndexPage(ctx, { groups, unfinished = [], plans = [], connected = false }) {
   return page(ctx, "Groups", html`
 <div class="feed-head">
   <h1>Groups</h1>
@@ -1034,7 +1035,7 @@ ${unfinished.length > 0 && html`<section class="card" id="unfinished">
     <div class="actions-row"><button class="chip primary" data-finish="${g.id}">Finish setting up</button>
       <button class="chip" data-delete="${g.id}">Delete</button></div>
   </li>`)}</ul>
-  ${tokenField(remembered, "to delete what was made")}
+  ${connectField(connected, "to delete what was made", "/groups")}
   <ol id="log"></ol>
   <p id="error" role="alert"></p>
 </section>
@@ -1068,13 +1069,19 @@ ${unfinished.length > 0 && html`<section class="card" id="unfinished">
 </form>`);
 }
 
-/** The Cloudflare token a step needs: the remembered one, or one pasted here (with a link to make one). */
-function tokenField(remembered, purpose) {
-  return remembered ? html`<p class="meta">This uses the Cloudflare token your site remembers for updates.</p>`
-    : html`<p class="meta">This needs a Cloudflare API token that can edit Workers and D1 databases:
-    <a href="${TOKEN_LINK}" target="_blank" rel="noopener">create one</a> (the permissions are filled in; scroll down,
-    press <b>Continue to summary</b>, then <b>Create Token</b>), copy it, and paste it here. It's used only ${purpose}.</p>
-  <input id="token" type="text" autocomplete="off" spellcheck="false" placeholder="Your API token" aria-label="Cloudflare API token">`;
+/**
+ * What a step that changes the owner's Cloudflare account needs: their connection from Connect (an hour's token,
+ * cloudflare.js), coming back to `back` once Cloudflare's said yes; or, if that can't be used, a token pasted here.
+ */
+function connectField(connected, purpose, back) {
+  return connected ? html`<p class="meta">Connected to Cloudflare for the next hour, ${purpose}.</p>`
+    : html`<p class="meta"><a class="chip primary connect" href="${connectLink(back)}">Connect Cloudflare</a>
+    Cloudflare asks you to allow afterwrd to change Workers and databases in your account, for an hour, ${purpose}. Nothing is kept afterwards.</p>
+  <details class="meta"><summary>If connecting doesn't work, use an API token</summary>
+    <p><a href="${TOKEN_LINK}" target="_blank" rel="noopener">Create one</a> (the permissions are filled in; scroll down,
+    press <b>Continue to summary</b>, then <b>Create Token</b>), copy it, and paste it here. Delete it in Cloudflare afterwards.</p>
+    <input id="token" type="text" autocomplete="off" spellcheck="false" placeholder="Your API token" aria-label="Cloudflare API token">
+  </details>`;
 }
 const TOKEN_LINK = "https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=" + encodeURIComponent(JSON.stringify([
   { key: "workers_scripts", type: "edit" }, { key: "d1", type: "edit" }, { key: "account_settings", type: "read" }]))
@@ -1093,7 +1100,7 @@ const STEP_SCRIPT = `
   const token = () => document.getElementById("token")?.value.trim() || "";`;
 
 /** Starting a group: name it, and this site makes its Worker (groupsites.js), step by step. */
-export function groupNewPage(ctx, { remembered, domain, maxPhotos }) {
+export function groupNewPage(ctx, { connected, domain, maxPhotos }) {
   return page(ctx, "Start a group", html`
 <p class="crumbs"><a href="/groups">Groups</a> /</p>
 <h1>Start a group</h1>
@@ -1106,13 +1113,22 @@ up to date when you update.</p>
 ${domain ? html`<form class="card stack" id="start">
   <input name="name" required maxlength="100" placeholder="Its name" aria-label="Group name">
   <textarea name="about" rows="2" maxlength="1000" placeholder="What it's for (optional)" aria-label="What it's for"></textarea>
-  ${tokenField(remembered, "to make the group's site")}
+  ${connectField(connected, "to make the group's site", "/groups/new")}
   <div class="actions-row"><button class="chip primary" id="go">Start the group</button></div>
   <ol id="log"></ol>
   <p id="error" role="alert"></p>
 </form>
 <script>${raw(STEP_SCRIPT)}
   const form = document.getElementById("start");
+  // Connect takes a page away and back: what's typed is kept for the return.
+  const kept = "afterwrd-group-start";
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(kept) || "null");
+    if (saved) { form.name.value = saved.name; form.about.value = saved.about; sessionStorage.removeItem(kept); }
+  } catch {}
+  document.querySelector("a.connect")?.addEventListener("click", () => {
+    try { sessionStorage.setItem(kept, JSON.stringify({ name: form.name.value, about: form.about.value })); } catch {}
+  });
   let made = null; // a group whose site is made, still to be claimed: trying again carries on from there
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1380,7 +1396,7 @@ ${groupHead(ctx, g, info, "calendar")}
 }
 
 /** Who's in a group. For its admins: requests to join, the invite link, roles, and (its owner) deleting it. */
-export function groupMembersPage(ctx, g, { group: info, members }, { max, remembered }) {
+export function groupMembersPage(ctx, g, { group: info, members }, { max, connected }) {
   const owner = g.role === "owner";
   const person = (m, actions) => html`<li class="card member">
     ${faceFor(ctx, m.from, m.name, m.id ?? 0)}
@@ -1435,7 +1451,7 @@ ${owner ? html`<section class="card" id="delete">
   <h2>Delete the group</h2>
   <p class="meta">Everything in it goes, for everyone: posts, photos and comments, and the group's site itself.
   Members' sites are told. This can't be undone.</p>
-  ${g.script ? tokenField(remembered, "to delete the group's site") : ""}
+  ${g.script ? connectField(connected, "to delete the group's site", `/groups/${g.id}/members`) : ""}
   <div class="actions-row"><button class="chip" id="delete-go">Delete the group</button></div>
   <ol id="log"></ol>
   <p id="error" role="alert"></p>

@@ -1,6 +1,6 @@
 // Starting a group: this site makes the group its own Worker in the owner's Cloudflare account, with its own database,
-// running this same afterwrd release in group mode (groups.js), at <name>.<their subdomain>.workers.dev. It needs a
-// Cloudflare API token that can edit Workers and D1: the one remembered for updates, or one pasted for the purpose.
+// running this same afterwrd release in group mode (groups.js), at <name>.<their subdomain>.workers.dev. It needs the
+// owner's Cloudflare connection (cloudflare.js: an hour's token from Connect), or an API token pasted for the purpose.
 // Each step is its own request (the free plan allows 50 calls out per request), driven by the page (views.js):
 //   POST /_groups/create/check    {token?, name} -> {account, script}: the account, and a free name for the Worker
 //   POST /_groups/create/assets   {token?, account, script} -> {jwt}: the release's site files
@@ -12,8 +12,9 @@
 //                                 group Worker already running on this computer, instead of the steps before claiming
 // And for a group this site made (its owner only):
 //   POST /_groups/<id>/delete     {token?}: the group tells its members it's closing, then its Worker and database go
-// Updating groups to this site's version is on the Update page (update.js), with the same token.
+// Updating groups to this site's version is on the Update page (update.js), with the same connection.
 import pkg from "../package.json";
+import { tokenFor } from "./cloudflare.js";
 import { api, deployVersion, existingDatabase, findWorker, loadRelease, uploadAssets, workerSettings } from "./deploy.js";
 import { claimGroup, forgetGroup } from "./membership.js";
 import { cleanText, MAX_GROUP_ABOUT, MAX_GROUP_NAME } from "./groups.js";
@@ -31,12 +32,6 @@ export function whereAmI(url) {
   return { script, domain: rest.join(".") };
 }
 
-const tokenFrom = (env, body) => {
-  const token = (typeof body.token === "string" && body.token.trim()) || env.UPDATE_TOKEN;
-  if (!token) throw new Error("Paste a Cloudflare API token first.");
-  return token;
-};
-
 /** A Worker name for the group: this site's, then the group's, as letters, numbers and dashes. */
 function scriptName(own, name, n) {
   const slug = name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "group";
@@ -53,7 +48,7 @@ async function isFree(token, account, script) {
   return !(await workerSettings(token, account, script)) && !(await databaseNamed(token, account, script));
 }
 
-async function create(env, url, path, body) {
+async function create(request, env, url, path, body) {
   const db = env.DB;
   if (path === "/local") {
     const origin = siteOrigin(body.origin, env);
@@ -70,17 +65,16 @@ async function create(env, url, path, body) {
   if (path === "/claim") return json({ id: await claimGroup(env, url, body.id) });
 
   const { script: own, domain } = whereAmI(url);
-  const token = tokenFrom(env, body);
+  const token = tokenFor(request, body);
   if (path === "/check") {
     const name = typeof body.name === "string" ? body.name.trim() : "";
     if (!name) throw new Error("Give the group a name.");
     const { account } = await findWorker(token, own);
-    // Before anything's made: the token must be able to manage databases too (one remembered from an Update page
-    // before groups existed can't).
+    // Before anything's made: the token must be able to manage databases too (a pasted one might not).
     try {
       await api(token, `/accounts/${account}/d1/database?per_page=1`);
     } catch {
-      throw new Error("That token can't make databases, which a group needs. Make a new token with the link on this page, and paste it.");
+      throw new Error("That token can't make databases, which a group needs. Connect Cloudflare instead, or make a token with the link on this page.");
     }
     for (let n = 1; n <= 9; n++) {
       const script = scriptName(own, name, n);
@@ -129,10 +123,10 @@ export const isGroupWorker = (settings, group) => Boolean(settings && group.data
  * Deletes a group this site made: the group tells its members' sites, then its Worker and database are deleted. Only
  * that Worker (still bound to the database made for it) and that database, never anything else that has its name.
  */
-async function remove(env, url, group, body) {
+async function remove(request, env, url, group, body) {
   if (group.role !== "owner") throw new Error("Only the group's owner can delete it.");
   if (group.script) {
-    const token = tokenFrom(env, body);
+    const token = tokenFor(request, body);
     if (!ACCOUNT_RE.test(group.account ?? "") || !group.database) throw new Error("Unexpected details.");
     // Check the token can do it before anything's emptied.
     const settings = await workerSettings(token, group.account, group.script);
@@ -166,7 +160,7 @@ async function fetchClose(group) {
 export async function handleGroupSites(request, env, url, group = null) {
   const body = await request.json().catch(() => ({}));
   try {
-    return group ? await remove(env, url, group, body) : await create(env, url, url.pathname.slice("/_groups/create".length), body);
+    return group ? await remove(request, env, url, group, body) : await create(request, env, url, url.pathname.slice("/_groups/create".length), body);
   } catch (error) {
     return json({ error: error.message }, 400);
   }

@@ -17,14 +17,13 @@ Facebook, with "On this day"), and your tools: *Your devices*, *Import*, *Downlo
 **Easiest: use the install page, <https://afterwrd.app/>.** Make your Cloudflare account (step 1 below) and stay
 signed in, then press *Install on Cloudflare*: it opens Cloudflare's Deploy page with the installer filled in. Press
 *Deploy* (the name doesn't matter), press *Visit*, and carry on from step 4: the installer asks for your site's
-address, puts afterwrd there and removes itself. By hand, the steps in full:
+address, connects to your Cloudflare account, puts afterwrd there and removes itself. By hand, the steps in full:
 
 You need a free Cloudflare account and a few minutes on a computer. Bringing your Facebook years is optional, and
 can be done any time.
 
 1. **Make a Cloudflare account** at <https://dash.cloudflare.com/sign-up>. An email address is all it asks
-   for; don't add a card. Make a new account just for afterwrd, even if you have one, so your site can safely
-   remember its update token.
+   for; don't add a card.
 2. **Create a Worker.** In the Cloudflare dashboard's left-hand menu: *Compute* → *Workers & Pages* →
    *Create application* (top right) → *Start with Hello World*. Replace the made-up *Worker name* (something
    like `blue-mud-43e4`) with `afterwrd`, or whatever you like: it becomes your address,
@@ -33,9 +32,9 @@ can be done any time.
 3. **Paste in the installer.** Press *Copy installer* on the [install page](https://afterwrd.app/)
    (or download `installer.js` from the [latest release](https://github.com/stemill/afterwrd/releases/latest) and
    copy all of it), then in the Worker press *Edit code*, select everything there, paste over it and press *Deploy*.
-4. **Run it.** Open your Worker's address. Press **Create a token**: Cloudflare's token page opens with the
-   permissions filled in; scroll down, press *Continue to summary*, *Create Token*, and copy the token. Paste it
-   into the installer, leave *Remember it* ticked (so updates are one click) and press **Install afterwrd**.
+4. **Run it.** Open your Worker's address. Choose your site's address, press **Connect Cloudflare** and, on
+   Cloudflare's page, **Allow**: that lets the installer make your database and upload afterwrd, for an hour, and
+   nothing is kept afterwards. (If connecting doesn't work, the installer can use an API token you make instead.)
 5. **Make yourself the owner.** The installer hands over to afterwrd: give your name and create a passkey
    (your face, fingerprint or device PIN; there's no password). Then write a post, add photos, and connect
    with friends from *Friends*.
@@ -45,17 +44,15 @@ can be done any time.
    bring and press *Import and publish*. Your browser reads the download; only what you tick is uploaded. Your
    Facebook friends then appear on *Friends*, each with an *Invite* button that makes a message to send them.
 
-The token is used to install and, if your site remembers it, to update; you can delete it any time (Cloudflare:
-*My Profile* → *API Tokens*). The installer checks every file it downloads against the fingerprint built into it,
-so what's installed is exactly the published release. Cloudflare's free plan allows 5 GB of photos and videos.
+Connecting uses Cloudflare's own sign-in for apps: afterwrd is a registered app there, and you can see or revoke what
+you've allowed under *My Profile* → *Connected Applications*. The installer checks every file it downloads against the
+fingerprint built into it, so what's installed is exactly the published release. Cloudflare's free plan allows 5 GB of
+photos and videos.
 
 ### Keeping it safe
 
 - **Turn on two-factor authentication for your Cloudflare account** (My Profile → Authentication). Anyone who gets
   into that account can see your whole site.
-- **Only let your site remember the token if the Cloudflare account is just for afterwrd.** The token can change any
-  Worker in the account. Otherwise untick *Remember it*, delete the token after installing, and make a new one each
-  time you update.
 - **Only open a device link on your own phone or computer**: whoever opens it first gets owner access, so it works
   once and lasts an hour. *Your devices* can cancel unused links, remove a passkey or sign out everywhere.
 - **Approve only friends you know.** A Connect or invite link can be passed on, so each one only asks: nothing is
@@ -122,10 +119,9 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   *Posts*. Photos are resized to at most 2560px in the browser before uploading, which also removes the
   details phones hide in them (such as where a photo was taken), and they're collected in a *Posted on
   afterwrd* album. Importing again keeps them; deleting a post deletes its photos and comments.
-- **Update** (marked when a new version is out) shows what's new and installs it. It needs a Cloudflare API
-  token; tick *Remember* and it's kept as an encrypted secret of the site (unreadable, even by you), so later
-  updates are one click. *Forget it* removes it. A remembered token can change any Worker in that Cloudflare
-  account, so only remember it if the account is just for afterwrd.
+- **Update** (marked when a new version is out) shows what's new and installs it: press *Connect Cloudflare*,
+  *Allow* on Cloudflare's page, and it goes ahead. The connection lasts an hour and nothing is kept; sites updated
+  from versions before 0.20.0 are offered *Forget it* for the token they used to remember.
 - **Download everything** (the download icon) saves the whole site as one zip: posts, photos and videos,
   albums, comments (those written here, and yours on friends' sites), likes, friends and connections, as
   [ActivityStreams](https://www.w3.org/TR/activitystreams-core/) JSON, the open format the fediverse uses, with

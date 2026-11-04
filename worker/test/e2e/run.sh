@@ -68,7 +68,8 @@ run_update() {
   fresh; suite update-ui.mjs current; stop
   # Pretend to be an older version, so an update is waiting (package.json is put back afterwards).
   sed -i.bak 's/"version": "[^"]*"/"version": "0.0.1"/' "$WORKER/package.json" && rm -f "$WORKER/package.json.bak"
-  fresh; suite update-ui.mjs behind; stop
+  # With a stand-in for Cloudflare's token endpoint (run by the test) for Connect Cloudflare.
+  fresh --var ALLOW_LOCAL_SITES:1 --var OAUTH_TOKEN_URL:http://127.0.0.1:8799/token; suite update-ui.mjs behind; stop
   fresh --var UPDATE_TOKEN:test-token-not-real; suite update-ui.mjs remembered; stop
   cp "$OUT/package.json.saved" "$WORKER/package.json"
 }

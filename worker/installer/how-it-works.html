@@ -85,8 +85,8 @@ and the friends they've chosen. This page explains how, and how to check it for 
   <p>Two ways to check what the code talks to, without reading all of it:</p>
   <ul>
     <li><b>Search it for <code>fetch(</code>.</b> That's the only way a Cloudflare Worker or a web page can call out to the
-    internet. Every call in afterwrd goes to one of three places: Cloudflare's own API (installing and updating, with the
-    token you make), GitHub (downloading releases and checking for new ones), or a site you've connected with. There are
+    internet. Every call in afterwrd goes to one of three places: Cloudflare (its sign-in and its API, for installing and
+    updating), GitHub (downloading releases and checking for new ones), or a site you've connected with. There are
     no analytics, no error-reporting services, no embedded scripts from anyone else, and no fonts fetched from elsewhere.</li>
     <li><b>Compare the installer with the release.</b> The installer this page offers is the file
     <code>installer.js</code> from the <a href="__RELEASE_PAGE__">published release __VERSION__</a>, which GitHub builds
@@ -124,7 +124,7 @@ and the friends they've chosen. This page explains how, and how to check it for 
   <table>
     <thead><tr><th>Your site calls</th><th>When</th><th>What's sent</th></tr></thead>
     <tbody>
-      <tr><td>Cloudflare's API</td><td>Installing and updating</td><td>The release's files, and the API token you made (over HTTPS, to Cloudflare only)</td></tr>
+      <tr><td>Cloudflare (its sign-in, then its API)</td><td>Installing, updating, and making or deleting a group</td><td>The release's files, and the hour's token Cloudflare gave when you pressed Allow (over HTTPS, to Cloudflare only)</td></tr>
       <tr><td>GitHub (afterwrd's releases)</td><td>Installing, updating, and a check for a newer version at most every six hours</td><td>Nothing about you: it's a download</td></tr>
       <tr><td>A friend's afterwrd site</td><td>Only once you've both connected: when you open Home or their page, when you comment, and when you post or reply</td><td>The key for that connection, your comments on their posts, and a short note when there's something new (the start of a new post, or of a comment on something they've commented on too)</td></tr>
     </tbody>
@@ -249,17 +249,28 @@ and the friends they've chosen. This page explains how, and how to check it for 
 
 <section id="install">
   <h2>Installing and updating</h2>
-  <p>The installer is a small Worker you deploy first. It asks for a Cloudflare API token so it can create your site's
-  database and upload afterwrd into your account; the token goes only to Cloudflare's API, over HTTPS, and is never
-  shown, logged or sent anywhere else. The installer downloads the release from GitHub and checks every file against the
-  fingerprint built into it, so what's installed is exactly the published release and can't be swapped on the way. Then it
-  removes itself.</p>
-  <p>Updates work the same way, from your site's <i>Update</i> page: your site fetches the newer release, checks it, and
-  installs it over itself, keeping your passkeys, connections, photos and database. If you let the site remember the token,
-  it's stored as an encrypted Worker secret that nothing can read back, not even you, and later updates are one click.
-  Updates only ever go forward: an older release can't be installed over a newer one.</p>
-  <p class="meta">Trust, stated plainly: an installed site trusts the GitHub repository it updates from. If you'd rather not, don't
-  remember the token, and read each release's notes and changes before updating.</p>
+  <p>The installer is a small Worker you deploy first. To create your site's database and upload afterwrd into your
+  account it needs Cloudflare's permission, which it asks for through Cloudflare's own sign-in for apps: you press
+  <b>Connect Cloudflare</b>, Cloudflare shows what afterwrd is asking for (changing Workers, making databases, reading the
+  account's workers.dev name) and you press <b>Allow</b>. Cloudflare then gives your installer a token that lasts an hour,
+  kept only in a cookie on that page, used only against Cloudflare's API over HTTPS, and never shown, logged or sent
+  anywhere else. afterwrd never asks for permission to make longer-lived tokens. The installer downloads the release from
+  GitHub and checks every file against the fingerprint built into it, so what's installed is exactly the published
+  release and can't be swapped on the way. Then it removes itself.</p>
+  <p>On the way, Cloudflare sends your browser through <a href="/connect/">afterwrd.app/connect/</a>, the one address
+  registered for afterwrd. That's a static page with no server behind it (this whole site is files on GitHub Pages):
+  it shows you which site is being connected and asks you to continue, sends you to Cloudflare, and on the way back
+  hands the one-time code to that site, in your browser, keeping nothing. It only ever hands codes to sites at
+  <code>workers.dev</code> addresses, where afterwrd lives. Only your own site holds the secret that turns the code
+  into a token (the PKCE standard), so the code is useless to anything else. One thing to check for yourself:
+  Cloudflare's page says what afterwrd is asking for, but not which site it's for. The afterwrd page before it does,
+  so make sure the address it shows is your own site's. The page's code is in the repository with everything else.</p>
+  <p>Updates work the same way, from your site's <i>Update</i> page: connect, press Allow, and your site fetches the newer
+  release, checks it, and installs it over itself, keeping your passkeys, connections, photos and database. Nothing is
+  remembered between updates. Updates only ever go forward: an older release can't be installed over a newer one.</p>
+  <p class="meta">Trust, stated plainly: an installed site trusts the GitHub repository it updates from, and the
+  afterwrd.app pages, which come from the same repository. Read each release's notes and changes before updating if
+  you'd rather check.</p>
 </section>
 
 <section id="yours">

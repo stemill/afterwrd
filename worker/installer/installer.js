@@ -7,7 +7,8 @@
 //   - as a new Worker, it installs afterwrd at the address you choose;
 //   - over an existing afterwrd, it updates it to this version, keeping its passkeys, connections, archive and photos.
 //
-// What it does, with the API token you give it:
+// What it does, once you've connected Cloudflare (press Allow on Cloudflare's page: an hour's token, kept nowhere but
+// a cookie on this page; src/cloudflare.js) or pasted an API token you made for the purpose:
 //   1. finds this Worker in your account
 //   2. creates a D1 database for afterwrd, or reuses the one afterwrd already has
 //   3. downloads afterwrd from the address below and checks every file against the fingerprint below,
@@ -15,9 +16,9 @@
 //   4. uploads it as a new version of this Worker or, for a new site at a different address, as a new Worker with
 //      that name, then removes this installer once afterwrd answers there (Cloudflare's Deploy page gives the
 //      installer a name with a random ending, so the address is chosen here instead)
-// If you tick "Remember it", the token is kept as the site's encrypted secret UPDATE_TOKEN, so the Update page can
-// install later releases in one click (the site can forget it there). Otherwise it isn't stored: delete it afterwards.
-import { accountIds, api, deployVersion, existingDatabase, findOrCreateDatabase, findWorker, loadRelease, uploadAssets, workerSettings } from "../src/deploy.js";
+// Nothing is kept afterwards: later updates connect Cloudflare again from the site's Update page.
+import { connectedToken, connectLink, handleCloudflare, tokenFor } from "../src/cloudflare.js";
+import { api, deployVersion, existingDatabase, findOrCreateDatabase, findWorker, loadRelease, uploadAssets, workerSettings } from "../src/deploy.js";
 
 const RELEASE = "__RELEASE_BASE__";
 const MANIFEST_SHA256 = "__MANIFEST_SHA256__";
@@ -48,15 +49,24 @@ export default {
       // Pasted over an existing afterwrd, the Worker still has its database: that's an update, at the same address.
       // The page checks when afterwrd answers at its new address, so it may also reach this account's other sites.
       const csp = HEADERS["Content-Security-Policy"].replace("default-src 'self'", `default-src 'self'; connect-src 'self' https://*.${accountDomain(url)}`);
-      return new Response(page(url, Boolean(env?.DB)), {
+      return new Response(page(url, Boolean(env?.DB), Boolean(connectedToken(request)), url.searchParams.get("go") === "1"), {
         headers: { ...HEADERS, "Content-Security-Policy": csp, "Content-Type": "text/html; charset=utf-8" },
       });
+    }
+    if (url.pathname.startsWith("/_cloudflare/")) {
+      const response = await handleCloudflare(request, env, url);
+      if (response) {
+        const headers = new Headers(response.headers);
+        for (const [name, value] of Object.entries(HEADERS)) if (!headers.has(name)) headers.set(name, value);
+        return new Response(response.body, { status: response.status, headers });
+      }
     }
     const step = url.pathname.slice("/install/".length);
     if (request.method === "POST" && url.pathname.startsWith("/install/") && Object.hasOwn(STEPS, step)) {
       if (request.headers.get("Origin") !== url.origin) return Response.json({ error: "Request from another site" }, { status: 403 });
       try {
-        return Response.json(await STEPS[step](await request.json(), scriptName(url), url));
+        const body = await request.json();
+        return Response.json(await STEPS[step](body, scriptName(url), url, tokenFor(request, body)));
       } catch (error) {
         return Response.json({ error: error.message }, { status: 400 });
       }
@@ -110,38 +120,28 @@ function siteName(name) {
 const STEPS = {
   // Which of the token's accounts this Worker is in, whether it's already afterwrd, which release goes in, and the
   // Worker afterwrd goes into: this one for an update, or the chosen name (which mustn't be taken) for a new site.
-  async check({ token, name }, script) {
-    if (!String(token ?? "").trim()) throw new Error("Paste your API token first.");
+  async check({ name }, script, url, token) {
     const { account, settings } = await findWorker(token, script); // the token is checked before anything is fetched
     const { manifest } = await loadRelease(RELEASE, MANIFEST_SHA256);
     const upgrade = Boolean(existingDatabase(settings));
     const target = upgrade ? script : siteName(name ?? script);
     if (target !== script) await assertFree(token, account, target);
-    // A token that spans several accounts can change all of them, so the page unticks Remember and says why.
-    const accounts = (await accountIds(token)).length;
-    return { account, version: manifest.version, upgrade, target, severalAccounts: accounts > 1 };
+    return { account, version: manifest.version, upgrade, target };
   },
 
   // The site's own files (stylesheet, import page).
-  async assets({ token, account, target }, script) {
+  async assets({ account, target }, script, url, token) {
     return { jwt: await uploadAssets(token, accountId(account), siteName(target ?? script), await loadRelease(RELEASE, MANIFEST_SHA256)) };
   },
 
   // The database and the code, as a new version of this Worker, or as a new Worker at the chosen address.
-  // With `remember`, the token is kept as the secret UPDATE_TOKEN for one-click updates.
-  async deploy({ token, account, jwt, remember, target }, script, url) {
+  async deploy({ account, jwt, target }, script, url, token) {
     accountId(account);
     const release = await loadRelease(RELEASE, MANIFEST_SHA256);
     const settings = await api(token, `/accounts/${account}/workers/scripts/${script}/settings`);
     const existing = existingDatabase(settings);
     if (existing) {
       await deployVersion(token, account, script, release, { jwt, databaseId: existing, settings });
-      // An update keeps the site's secrets, so a remembered token is set on its own rather than alongside them.
-      if (remember) {
-        await api(token, `/accounts/${account}/workers/scripts/${script}/secrets`, {
-          method: "PUT", body: JSON.stringify({ name: "UPDATE_TOKEN", text: token, type: "secret_text" }),
-        });
-      }
       return { next: "/", upgrade: true };
     }
     const name = siteName(target ?? script);
@@ -149,7 +149,7 @@ const STEPS = {
     if (moved) await assertFree(token, account, name); // checked again here, so a new Worker never lands on another
     const database = await findOrCreateDatabase(token, account, name);
     const setupCode = [...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, "0")).join("");
-    const secrets = { SETUP_CODE: setupCode, ...(remember && { UPDATE_TOKEN: token }) };
+    const secrets = { SETUP_CODE: setupCode };
     await deployVersion(token, account, name, release, { jwt, databaseId: database.uuid, settings: moved ? {} : settings, secrets });
     // A Worker made through the API isn't on its workers.dev address until it's switched on.
     if (moved) {
@@ -163,7 +163,7 @@ const STEPS = {
 
   // Once afterwrd answers at its own address, this installer is removed. Only ever this Worker, only while it isn't
   // afterwrd itself, and only once the new site has its database.
-  async cleanup({ token, account, target }, script) {
+  async cleanup({ account, target }, script, url, token) {
     accountId(account);
     const name = siteName(target);
     if (name === script) return { ok: true };
@@ -176,7 +176,7 @@ const STEPS = {
 
 // --- the page ----------------------------------------------------------------
 
-function page(url, isUpdate) {
+function page(url, isUpdate, connected, go) {
   const domain = accountDomain(url);
   let n = 0;
   const step = (body, cls = "") => `<li${cls ? ` class="${cls}"` : ""}><span class="n">${++n}</span><div>${body}</div></li>`;
@@ -220,9 +220,9 @@ function page(url, isUpdate) {
   ol.how .button { margin-top: 8px; }
   #token { width: 100%; font: inherit; padding: 10px 16px; margin: 6px 0 0; border: 1px solid var(--border); border-radius: 999px;
     background: var(--sunken); color: var(--text); -webkit-text-security: disc; }
-  label.remember { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin-top: 12px; cursor: pointer; }
-  label.remember input { margin: 4px 0 0; width: 16px; height: 16px; accent-color: var(--accent); }
-  label.remember .meta { grid-column: 2; }
+  details.other { margin-top: 10px; }
+  details.other summary { cursor: pointer; color: var(--muted); font-size: 0.88rem; }
+  .connected { color: var(--moss); font-weight: 700; }
   #go { margin-top: 0; }
   p.address { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
   #name { width: 11em; max-width: 100%; font: inherit; font-weight: 700; padding: 8px 14px; border: 1px solid var(--border);
@@ -240,7 +240,7 @@ function page(url, isUpdate) {
   #error:empty { display: none; }
 
   #done { border-top: 1px solid var(--border); margin-top: 20px; padding-top: 16px; }
-  #done[hidden], #done [hidden], #form[hidden], #several[hidden] { display: none; }
+  #done[hidden], #done [hidden], #form[hidden] { display: none; }
   #done h2 { font-size: 1.2rem; }
   #done .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
   .foot { margin: 22px 0 0; }
@@ -256,20 +256,19 @@ function page(url, isUpdate) {
 <section id="form">
 <ol class="how">
   ${address}
-  ${step(`
-    <h2>Make a token</h2>
-    <p class="meta">afterwrd needs it to create a database and upload itself. Cloudflare's page opens with the
-    permissions filled in: scroll down, press <b>Continue to summary</b>, then <b>Create Token</b>, and copy it.</p>
-    <a class="button secondary" href="${TOKEN_URL}" target="_blank" rel="noopener">Create a token</a>`)}
-  ${step(`
-    <h2>Paste it here</h2>
-    <input id="token" type="text" autocomplete="off" spellcheck="false" placeholder="Your API token" aria-label="Your API token">
-    <label class="remember"><input type="checkbox" id="remember" checked><span>Remember it, so updates are one click</span>
-    <span class="meta">It's kept as an encrypted secret of your site, which no one can read back, not even you. It can
-    change the Workers in this Cloudflare account, so untick this if the account is used for anything else. You can
-    forget it from afterwrd's Update page at any time.</span></label>
-    <p id="several" class="meta warn" hidden>This token can see more than one Cloudflare account, so it won't be
-    remembered. For one-click updates, make a token in an account that's just for afterwrd.</p>`)}
+  ${step(connected ? `
+    <h2>Connect Cloudflare</h2>
+    <p class="connected">Connected, for the next hour.</p>` : `
+    <h2>Connect Cloudflare</h2>
+    <p class="meta">afterwrd needs to create a database and upload itself. Cloudflare asks you to allow that, for an
+    hour; nothing is kept afterwards.</p>
+    <a class="button" id="connect" href="${connectLink("/?go=1")}">Connect Cloudflare</a>
+    <details class="other"><summary>If connecting doesn't work, use an API token</summary>
+      <p class="meta"><a href="${TOKEN_URL}" target="_blank" rel="noopener">Create a token</a> in Cloudflare: the permissions
+      are filled in; scroll down, press <b>Continue to summary</b>, then <b>Create Token</b>, copy it and paste it here.
+      Delete it in Cloudflare afterwards (<a href="${TOKENS_PAGE}" target="_blank" rel="noopener">My Profile → API Tokens</a>).</p>
+      <input id="token" type="text" autocomplete="off" spellcheck="false" placeholder="Your API token" aria-label="Your API token">
+    </details>`)}
   ${step(`<button id="go">${isUpdate ? "Update afterwrd" : "Install afterwrd"}</button>`, "go")}
 </ol>
 </section>
@@ -277,16 +276,12 @@ function page(url, isUpdate) {
 <p id="error" role="alert"></p>
 <section id="done" hidden>
   <h2 id="done-title"></h2>
-  <p id="kept" class="meta">Your token is remembered, so later updates are one click from afterwrd's <b>Update</b> page.</p>
-  <div id="not-kept">
-    <p class="meta">One last thing: <b>delete the token</b>. afterwrd hasn't kept it, but while it exists it can change your
-    Workers. Find "afterwrd installer" in the list and choose <b>Delete</b>. You'll make a new one when you update.</p>
-  </div>
+  <p class="meta">Your Cloudflare connection ends within the hour by itself. (If you pasted a token instead, delete it now:
+    <a href="${TOKENS_PAGE}" target="_blank" rel="noopener">My Profile → API Tokens</a>.)</p>
   <p id="leftover" class="meta" hidden>The installer couldn't remove itself: you can delete the Worker called
     <b>${scriptName(url)}</b> in Cloudflare (Workers &amp; Pages).</p>
   <div class="row">
     <a class="button" id="continue" href="/">Continue to afterwrd</a>
-    <a class="button secondary" id="tokens" href="${TOKENS_PAGE}" target="_blank" rel="noopener">Open my API tokens</a>
   </div>
 </section>
 <p class="meta foot">Release files are checked against the fingerprint ${MANIFEST_SHA256.slice(0, 12)}… before anything is installed.</p>
@@ -307,28 +302,33 @@ function page(url, isUpdate) {
     if (!res.ok) throw new Error(data.error || "Something went wrong.");
     return data;
   }
+  const connected = ${connected};
+  // Connect takes a page away and back: the address typed is kept for the return.
+  const nameBox = document.getElementById("name");
+  try {
+    const saved = sessionStorage.getItem("afterwrd-install-name");
+    if (saved && nameBox) nameBox.value = saved;
+    sessionStorage.removeItem("afterwrd-install-name");
+  } catch {}
+  document.getElementById("connect")?.addEventListener("click", () => {
+    try { if (nameBox) sessionStorage.setItem("afterwrd-install-name", nameBox.value); } catch {}
+  });
   document.getElementById("go").addEventListener("click", async (e) => {
     const box = document.getElementById("token");
-    const token = box.value.trim();
+    const token = box ? box.value.trim() : "";
     const error = document.getElementById("error");
     error.textContent = "";
-    if (!token) { error.textContent = "Paste your API token first."; return; }
+    if (!token && !connected) { error.textContent = "Connect Cloudflare first."; return; }
     e.target.disabled = true;
     logList.textContent = ""; // a fresh start after an error
     try {
       const name = document.getElementById("name")?.value;
-      log("Checking the token and the release…");
-      const { account, version, upgrade, target, severalAccounts } = await step("check", { token, name });
-      const rememberBox = document.getElementById("remember");
-      if (severalAccounts && rememberBox.checked) {
-        rememberBox.checked = false;
-        document.getElementById("several").hidden = false;
-      }
+      log("Checking your Cloudflare account and the release…");
+      const { account, version, upgrade, target } = await step("check", { token, name });
       log("Uploading afterwrd " + version + "'s site files…");
       const { jwt } = await step("assets", { token, account, target });
       log(upgrade ? "Updating afterwrd to " + version + "…" : "Creating the database and installing afterwrd…");
-      const remember = document.getElementById("remember").checked;
-      const { next, site, moved } = await step("deploy", { token, account, jwt, remember, target });
+      const { next, site, moved } = await step("deploy", { token, account, jwt, target });
       log("Waiting for afterwrd to start" + (moved ? " at " + new URL(site).host : "") + "…");
       // A new address can take a minute to appear; until it does, fetching it fails.
       for (let i = 0; i < 60; i++) {
@@ -343,14 +343,11 @@ function page(url, isUpdate) {
         const { ok } = await step("cleanup", { token, account, target }).catch(() => ({ ok: false }));
         if (!ok) document.getElementById("leftover").hidden = false;
       }
-      box.value = "";
+      if (box) box.value = "";
       document.getElementById("done-title").textContent = upgrade
         ? "afterwrd is updated to " + version + "."
         : "afterwrd is installed at " + new URL(site).host + ". Next you'll make yourself its owner.";
       document.getElementById("continue").href = next;
-      document.getElementById("kept").hidden = !remember;
-      document.getElementById("not-kept").hidden = remember;
-      document.getElementById("tokens").hidden = remember;
       tick(logList.lastElementChild);
       document.getElementById("form").hidden = true;
       document.getElementById("done").hidden = false;
@@ -359,6 +356,11 @@ function page(url, isUpdate) {
       e.target.disabled = false;
     }
   });
+  // Back from Connect: carry on with the install.
+  if (connected && ${go}) {
+    history.replaceState(null, "", "/");
+    document.getElementById("go").click();
+  }
 </script>
 </body>
 </html>`;

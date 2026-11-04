@@ -7,6 +7,7 @@
 //   <sha256>         every file, named by its hash
 //   installer.js     the installer, with the manifest's hash built in: deployed by the install page's "Install on
 //                    Cloudflare" link, or pasted into a new Worker by hand
+// and release/site/, the install page (with the Connect page Cloudflare's sign-in comes back to, and How it works).
 // Publish every file in the folder at --base unchanged; the installer refuses anything that doesn't match.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -161,6 +162,10 @@ writeFileSync(join(site, "index.html"), readFileSync(join(worker, "installer", "
   .replaceAll("__MANIFEST_SHORT__", sha256(manifestBytes).slice(0, 12))
   .replaceAll("__RELEASE_PAGE__", repo ? `https://github.com/${repo}/releases/tag/v${version}` : base)
   .replaceAll("__REPO_PAGE__", repo ? `https://github.com/${repo}` : base));
+// The Connect page, at /connect/: the address Cloudflare's sign-in sends people back to (src/cloudflare.js).
+mkdirSync(join(site, "connect"), { recursive: true });
+writeFileSync(join(site, "connect", "index.html"), readFileSync(join(worker, "installer", "connect.html"), "utf8")
+  .replaceAll("__OAUTH_CLIENT__", project.cloudflareClient));
 // "How it works", beside it at /how-it-works/.
 mkdirSync(join(site, "how-it-works"), { recursive: true });
 writeFileSync(join(site, "how-it-works", "index.html"), readFileSync(join(worker, "installer", "how-it-works.html"), "utf8")

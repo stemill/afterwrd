@@ -63,9 +63,8 @@ talks to, how signing in and friends work, and how to check all of it in the pub
 <ol class="steps">
   <li>
     <h2>Make a free Cloudflare account</h2>
-    <p>An email address is all it asks for. Don't add a card; afterwrd stays within the free plan. A new account just
-    for afterwrd is best, so your site can safely update itself in one click. Confirm your email from the message
-    Cloudflare sends, and stay signed in.</p>
+    <p>An email address is all it asks for. Don't add a card; afterwrd stays within the free plan. Confirm your email
+    from the message Cloudflare sends, and stay signed in.</p>
     <a class="button" href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">Sign up to Cloudflare</a>
     <p class="meta">Already have an account just for afterwrd? <a href="https://dash.cloudflare.com/login" target="_blank" rel="noopener">Sign in</a>.</p>
   </li>
@@ -96,9 +95,9 @@ talks to, how signing in and friends work, and how to check all of it in the pub
   <li>
     <h2>Open your Worker and follow the installer</h2>
     <p>Press <b>Visit</b>. The installer walks you through the rest: your site's address (<code>afterwrd</code> unless you
-    choose otherwise), a Cloudflare token (leave <b>Remember it</b> ticked, so updates are one click), then a passkey for you
-    (your face, fingerprint or device PIN; no password). Then you're in: write a post, add photos, and invite friends
-    from <b>Friends</b>.</p>
+    choose otherwise), <b>Connect Cloudflare</b> (press <b>Allow</b> on Cloudflare's page; it lasts an hour and nothing is
+    kept), then a passkey for you (your face, fingerprint or device PIN; no password). Then you're in: write a post, add
+    photos, and invite friends from <b>Friends</b>.</p>
   </li>
   <li class="optional">
     <h2>Bring your Facebook years <span class="meta">(optional, any time)</span></h2>
@@ -115,9 +114,6 @@ talks to, how signing in and friends work, and how to check all of it in the pub
   <ul>
     <li><b>Turn on two-factor authentication</b> for your Cloudflare account (My Profile → Authentication). Anyone who gets
       into that account can see your whole site.</li>
-    <li><b>Only let your site remember the token if the Cloudflare account is just for afterwrd.</b> The token can change
-      any Worker in the account. If the account has other things in it, untick <b>Remember it</b>, delete the token after
-      installing (My Profile → API Tokens), and make a new one each time you update.</li>
     <li><b>Open device links only on your own phone or computer.</b> They let a new device in as you, so they work once,
       for an hour. <b>Your devices</b> can cancel them, remove a passkey (signing that device out) or sign out everywhere.</li>
     <li><b>Approve only friends you know.</b> Connect and invite links can be passed on, so each one only asks: nothing is
@@ -131,8 +127,8 @@ talks to, how signing in and friends work, and how to check all of it in the pub
 
 <footer>
   <p>The installer downloads afterwrd __VERSION__ from its <a href="__RELEASE_PAGE__">published release</a> and checks every file
-  against the fingerprint <code>__MANIFEST_SHORT__…</code> before installing anything. The token is used to install and, if
-  your site remembers it, to update; you can delete it any time in Cloudflare under My Profile → API Tokens. <a href="__REPO_PAGE__">Source code</a>.</p>
+  against the fingerprint <code>__MANIFEST_SHORT__…</code> before installing anything. Connecting uses Cloudflare's own
+  sign-in for apps, for an hour at a time; what you've allowed is under My Profile → Connected Applications. <a href="__REPO_PAGE__">Source code</a>.</p>
   <p>afterwrd isn't affiliated with or endorsed by Meta. It only reads the "Download your information" file Facebook gives you.</p>
 </footer>
 </main>

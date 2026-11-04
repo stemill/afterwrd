@@ -2,6 +2,7 @@
 // `npm run publish` uploads. Only the sections chosen at publish time are served.
 import { groupPostId } from "../../public/static/activity.js";
 import { FINISHED_SQL, icsFile } from "../calendar.js";
+import { connectedToken } from "../cloudflare.js";
 import { findTarget, latestComments, loadThreads, newCount, photoKey, postKey } from "./comments.js";
 import { connectionById, loadFeed, markMine, rememberPicture } from "../feed.js";
 import * as friend from "../friends.js";
@@ -91,6 +92,7 @@ export async function renderArchive(request, env, url, user, work) {
   const ctx = {
     env, db, url, user, chosen, sections, newComments: await newCount(db, user),
     zone: request.cf?.timezone ?? "Europe/London", // where the reader is, as near as Cloudflare can tell
+    connected: Boolean(connectedToken(request)), // an hour's Cloudflare token from Connect (cloudflare.js), for groups
     requests: (await first(db, "SELECT COUNT(*) AS n FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL")).n,
     updateWaiting: await updateWaiting(env, work),
     me: me.results[0] ?? { id: -1, name: await ownerName(db), is_me: 1 },
@@ -573,7 +575,7 @@ async function groupsIndex(ctx) {
   await ctx.db.prepare(`DELETE FROM group_plans AS e WHERE ${FINISHED_SQL} < ?`).bind(now() - 30 * 86400).run();
   const plans = await all(ctx.db, `SELECT e.*, g.name AS group_name FROM group_plans e JOIN groups g ON g.id = e.group_id AND g.joined_at IS NOT NULL
     WHERE ${FINISHED_SQL} >= ? ORDER BY e.starts_at LIMIT 20`, [now()]);
-  return views.groupsIndexPage(ctx, { groups: list, unfinished, plans, remembered: Boolean(ctx.env.UPDATE_TOKEN) });
+  return views.groupsIndexPage(ctx, { groups: list, unfinished, plans, connected: ctx.connected });
 }
 
 /** Starting a group: its own Worker, made in the owner's Cloudflare account (groupsites.js). */
@@ -582,7 +584,7 @@ async function groupNew(ctx) {
   try {
     address = whereAmI(ctx.url);
   } catch {}
-  return views.groupNewPage(ctx, { remembered: Boolean(ctx.env.UPDATE_TOKEN), domain: address?.domain ?? null, maxPhotos: MAX_GROUP_PHOTOS });
+  return views.groupNewPage(ctx, { connected: ctx.connected, domain: address?.domain ?? null, maxPhotos: MAX_GROUP_PHOTOS });
 }
 
 /** Opened from a group's invite link: join it? */
@@ -651,7 +653,7 @@ async function groupEventFile(ctx, params, id, postId) {
 /** Who's in a group; for its admins, also requests to join, the invite link, and running it. */
 async function groupMembers(ctx, params, id) {
   return fromGroup(ctx, id, async (g) => views.groupMembersPage(ctx, g, await groups.loadMembers(ctx.env, g),
-    { max: MAX_MEMBERS, remembered: Boolean(ctx.env.UPDATE_TOKEN) }));
+    { max: MAX_MEMBERS, connected: ctx.connected }));
 }
 
 /** Friends' profile pictures by site, where the link their site gave is still good. */

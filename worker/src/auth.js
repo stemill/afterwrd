@@ -178,6 +178,8 @@ async function logout(request, env) {
   if (token) await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256(token)).run();
   const response = html(messagePage("You've signed out.", { href: "/_auth/login", label: "Sign in again" }));
   response.headers.append("Set-Cookie", `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
+  // Nor should an hour's Cloudflare connection (cloudflare.js), for browsers that don't clear cookies below.
+  response.headers.append("Set-Cookie", "cf_token=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict");
   // Photos are cached for a long time; on a shared computer they shouldn't outlive the session.
   response.headers.set("Clear-Site-Data", '"cache", "cookies"');
   return response;

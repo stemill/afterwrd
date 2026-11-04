@@ -9,6 +9,7 @@ import { handleAdmin } from "./admin.js";
 import { handleComments } from "./archive/comments.js";
 import { renderArchive } from "./archive/routes.js";
 import { currentUser, handleAuth } from "./auth.js";
+import { handleCloudflare } from "./cloudflare.js";
 import { handleConnectLink } from "./connect.js";
 import { handleFeed } from "./feed.js";
 import { handleGroupApi, handleJoinLink } from "./groups.js";
@@ -66,6 +67,8 @@ async function route(request, env, work) {
     return Response.redirect(`${url.origin}/_auth/login?next=${encodeURIComponent(url.pathname + url.search)}`, 302);
   }
   if (url.pathname === "/_admin" || url.pathname.startsWith("/_admin/")) return handleAdmin(request, env, url, user);
+  // Connecting to Cloudflare, for updating and groups (an hour's token in a cookie; cloudflare.js).
+  if (url.pathname.startsWith("/_cloudflare/")) return (await handleCloudflare(request, env, url)) ?? new Response("Not found", { status: 404 });
   if (url.pathname === "/_comments" || url.pathname.startsWith("/_comments/")) return handleComments(request, env, url, user);
   if (url.pathname === "/_live") return handleLive(request, env, url, user);
   if (url.pathname.startsWith("/_feed/")) return handleFeed(request, env, url);
