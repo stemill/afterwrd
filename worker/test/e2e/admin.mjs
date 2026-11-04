@@ -1,7 +1,6 @@
 // End-to-end for Your devices: only the owner signs in. The owner adds a second device from the page, removes a
 // passkey (never the last), cancels unused links and signs out everywhere; there's no inviting anyone else.
 import { execFileSync } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
@@ -9,13 +8,9 @@ const OUT = process.env.OUT ?? fileURLToPath(new URL("./out/", import.meta.url))
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 const BASE = "http://localhost:8787";
-const cli = (...a) => execFileSync("node", ["scripts/invite.mjs", ...a, "--local"], { cwd: WORKER, encoding: "utf8" });
-// These suites share one database, so each starts with an owner of its own: the last suite's is revoked first
-// (a site has only one).
-const newOwner = (name) => {
-  for (const line of cli("list").split("\n")) { const id = /^\s*(\d+)\s.*owner$/.exec(line)?.[1]; if (id) cli("revoke", id); }
-  return cli("add", name, "--owner").match(/http\S+\/_auth\/invite\/\S+/)[0];
-};
+const cli = (...a) => execFileSync("node", ["scripts/owner.mjs", ...a, "--local"], { cwd: WORKER, encoding: "utf8" });
+// Each suite starts on a new site (run.sh), and makes its owner from the terminal: the link to add their first device.
+const newOwner = (name) => cli(name).match(/http\S+\/_auth\/device\/\S+/)[0];
 const sql = (command) => JSON.parse(execFileSync("./node_modules/.bin/wrangler", ["d1", "execute", "afterwrd", "--local", "--json", "--command", command],
   { cwd: WORKER, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }))[0].results;
 const results = [];
@@ -44,17 +39,12 @@ async function register(page, link) {
 const passkeys = (page) => page.$$eval(".devices li", (l) => l.map((li) => ({
   id: li.querySelector("button").dataset.credential, disabled: li.querySelector("button").disabled })));
 
-// Only owners can be added from the terminal.
-let refused = "";
-try { cli("add", `Someone ${Date.now()}`); } catch (e) { refused = String(e.stderr); }
-check("the terminal won't add anyone but the owner", refused.includes("add --owner"), refused.trim());
-
 // The owner joins via the terminal, as on a brand-new site.
 const ownerName = `Owner ${Date.now()}`;
 const phone = await device();
 await register(phone, newOwner(ownerName));
 let second = "";
-try { cli("add", `Second ${Date.now()}`, "--owner"); } catch (e) { second = String(e.stderr); }
+try { cli(`Second ${Date.now()}`); } catch (e) { second = String(e.stderr); }
 check("the terminal won't make a second owner", second.includes("already has an owner"), second.trim());
 check("the menu has Your devices", (await navLabels(phone)) === "Home,Photos,Friends,Notifications,Your profile,Your devices,Import,Download everything,Update", await navLabels(phone));
 await phone.goto(`${BASE}/_admin`);
@@ -66,7 +56,7 @@ check("no inviting other people", !(await phone.$("#invite")) && !(await phone.$
 await phone.click("#new-link");
 await phone.waitForSelector("#link:not([hidden])");
 const link = await phone.$eval("#link-url", (i) => i.value);
-check("Add a device shows a one-time link", /\/_auth\/invite\/[\w-]{40,}$/.test(link), link.slice(0, 60) + "…");
+check("Add a device shows a one-time link", /\/_auth\/device\/[\w-]{40,}$/.test(link), link.slice(0, 60) + "…");
 const laptop = await device();
 await laptop.goto(link);
 check("the link says it's adding a device", (await laptop.title()).startsWith("Add this device") && (await laptop.$eval("main, body", (m) => m.textContent)).includes("Add this phone or computer"));
@@ -88,14 +78,13 @@ await Promise.all([phone.waitForNavigation(), phone.click("button[data-action=ca
 check("cancelled links stop working", (await (await device()).goto(unused)).status() === 404);
 
 // The API refuses another site, other people's passkeys and the last passkey.
-const cookie = (await phone.cookies()).find((c) => c.name === "__Host-hb_session").value;
+const cookie = (await phone.cookies()).find((c) => c.name === "__Host-session").value;
 const api = (path, body, origin = BASE) => fetch(BASE + path, { method: "POST", redirect: "manual",
-  headers: { Cookie: `__Host-hb_session=${cookie}`, Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) });
+  headers: { Cookie: `__Host-session=${cookie}`, Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) });
 check("another site can't make a device link", (await api("/_admin/devices/link", {}, "https://evil.example")).status === 403);
 check("the old People actions are gone", (await api("/_admin/invite", { name: "Sneaky" })).status === 404
   && (await api("/_admin/people/1/revoke")).status === 404);
-const [otherKey] = sql(`SELECT c.id FROM credentials c JOIN users u ON u.id = c.user_id WHERE u.name != '${ownerName}' LIMIT 1`);
-if (otherKey) check("can't remove another account's passkey", (await api("/_admin/devices/delete-passkey", { credential: otherKey.id })).status === 404);
+check("a made-up passkey can't be removed", (await api("/_admin/devices/delete-passkey", { credential: "not-a-passkey" })).status === 404);
 
 // Remove the laptop's passkey: the laptop is signed out, the phone isn't; then the phone's is the last and stays.
 // Which is which, in the order they were made.
@@ -118,11 +107,6 @@ await tablet.goto(`${BASE}/posts`);
 check("sign out everywhere signs out every device", new URL(phone.url()).pathname === "/_auth/login"
   && new URL(tablet.url()).pathname === "/_auth/login");
 
-// Someone invited by an older version, before only owners signed in, can't use their link.
-const token = randomBytes(32).toString("base64url");
-const [guest] = sql(`INSERT INTO users (name, is_owner, created_at) VALUES ('Old guest', 0, strftime('%s','now')) RETURNING id`);
-sql(`INSERT INTO invites (token_hash, user_id, expires_at) VALUES ('${createHash("sha256").update(token).digest("hex")}', ${guest.id}, strftime('%s','now') + 3600)`);
-check("an old guest's invite doesn't work", (await (await device()).goto(`${BASE}/_auth/invite/${token}`)).status() === 404);
 const signedOutAdmin = await fetch(`${BASE}/_admin`, { redirect: "manual" });
 check("signed-out /_admin redirects to sign-in", signedOutAdmin.status === 302);
 

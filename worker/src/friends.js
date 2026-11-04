@@ -1,4 +1,4 @@
-// Reading a connected friend's site from this one: their posts and photos (and Feed's newest posts) come as
+// Reading a connected friend's site from this one: their posts and photos (and their newest posts, for Home) come as
 // ActivityStreams from their /_peer endpoints (share.js on their side). Everything is checked here and turned into
 // plain shapes for the pages; anything malformed is dropped, and every address must be on their own site.
 // Photos and videos are shown from the signed links their site gives ("afterwrd:fetch"), which the browser loads
@@ -75,7 +75,7 @@ function parseActor(actor, site) {
   };
 }
 
-/** Feed: a connected site's newest posts. */
+/** A connected site's newest posts, for Home. */
 export function cleanFeed(data, site) {
   const actor = parseActor(data?.attributedTo, site);
   const items = Array.isArray(data?.orderedItems) ? data.orderedItems.slice(0, 50) : [];

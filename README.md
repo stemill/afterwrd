@@ -98,9 +98,9 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
    npx wrangler login                       # opens the browser
    npm run deploy
    ```
-3. Invite yourself as the owner. Use the address the deploy printed:
+3. Make yourself the owner. Use the address the deploy printed:
    ```sh
-   npm run invite -- add "Your Name" --owner --url https://afterwrd.<subdomain>.workers.dev
+   npm run owner -- "Your Name" --url https://afterwrd.<subdomain>.workers.dev
    ```
    Open the link and create a passkey.
 4. Go to **Import** in the menu, choose the zip file(s) from Facebook (or the unzipped folder), tick what to
@@ -153,12 +153,14 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   of those that are new to you. Comments are kept when you import again, and stay if you disconnect, until you
   delete them.
 - **Keeping up, quietly.** When you post or comment, your site sends your friends' sites a short note (a new post
-  to all of them; a comment only to those who commented on the same thing). While a page is open and in view, it
+  to all of them; a comment only to those who commented on the same thing), in batches of 40, trying again for a
+  few hours if a site is down. With more than 40 friends, Home asks those who've posted lately, plus a few others
+  in turn, as a page may only ask 50 other sites on the free plan. While a page is open and in view, it
   checks your own site every 30 seconds: the counts in the menu update, and a small bar offers to show new posts
   or comments. Nothing moves until you choose, and nothing is pushed to your phone.
 
 `npm run deploy` is only for new versions of afterwrd's code; it never touches your archive.
-`npm run invite` still has `list`, `again` (a new device link) and `revoke` for use from the terminal.
+`npm run owner` (with no name) makes a new device link from the terminal, if you're ever without one.
 
 **What's published.** Only what the chosen sections show; the rest never leaves your computer. With the
 default (posts and photos):
@@ -179,7 +181,7 @@ every file attached, including `installer.js`. To build one locally instead:
 
 **Testing.** `npm run test:ingest -- <export folder>` checks the browser importer against
 `uv run afterwrd-ingest` row by row. To try the site locally: `npx wrangler d1 migrations apply afterwrd --local`,
-`npm run dev`, then `npm run invite -- add "Test" --owner --local` and import at
+`npm run dev`, then `npm run owner -- "Test" --local` and import at
 `http://localhost:8787/_admin/import`. Passkeys work on `localhost` but not on `127.0.0.1`.
 
 ## What the import does

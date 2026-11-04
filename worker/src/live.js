@@ -13,7 +13,7 @@ const KEY_RE = /^(post-\d+-[0-9a-f]{8}|photo-[0-9a-f]{64})$/;
 const MAX_TARGETS = 80;
 
 export async function handleLive(request, env, url, user) {
-  if (request.method !== "GET" || !user.is_owner) return new Response("Not found", { status: 404 });
+  if (request.method !== "GET") return new Response("Not found", { status: 404 });
   const db = env.DB;
   const since = Math.min(now(), Math.max(0, Number.parseInt(url.searchParams.get("since"), 10) || now()));
   const list = (name) => (url.searchParams.get(name) ?? "").split(",").filter(Boolean).slice(0, MAX_TARGETS);

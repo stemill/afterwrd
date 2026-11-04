@@ -38,7 +38,7 @@ export function siteOrigin(text, env) {
 export const host = (origin) => new URL(origin).host;
 
 export async function ownerName(db) {
-  const owner = await db.prepare("SELECT name FROM users WHERE is_owner = 1 AND revoked_at IS NULL ORDER BY id LIMIT 1").first();
+  const owner = await db.prepare("SELECT name FROM users LIMIT 1").first();
   return owner?.name ?? "Someone";
 }
 
@@ -91,7 +91,7 @@ async function peerFrom(request, env) {
   return env.DB.prepare("SELECT * FROM connections WHERE key_hash = ?").bind(await sha256(match[1])).first();
 }
 
-export async function handlePeer(request, env, url, work) {
+export async function handlePeer(request, env, url) {
   const route = `${request.method} ${url.pathname}`;
   const peer = await peerFrom(request, env);
   const db = env.DB;
@@ -144,7 +144,7 @@ export async function handlePeer(request, env, url, work) {
         AND (SELECT COUNT(*) FROM site_comments WHERE origin = ?5 AND created_at > ?4 - 86400) < ?8
       RETURNING id`).bind(target, peer.name, text, now(), peer.origin, RATE.seconds, RATE.count, DAILY).first();
     if (!row) return json({ error: "That's a lot of comments for now. Try again later." }, 429);
-    await notifyComment(env, work, url.origin, target, { name: peer.name, text, from: peer.origin });
+    await notifyComment(env, url.origin, target, { name: peer.name, text, from: peer.origin });
     return json({ id: commentId(url.origin, target, row.id) });
   }
 

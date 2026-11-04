@@ -50,7 +50,7 @@ if (!window.showSaveFilePicker) document.getElementById("memory").hidden = false
 
 /** Every document in the download, keyed by its name in the zip. */
 function documents(t) {
-  const owner = t.users.find((u) => u.is_owner) ?? { name: "Owner" };
+  const owner = t.users[0] ?? { name: "Owner" };
   const me = t.people.find((p) => p.is_me);
   const people = new Map(t.people.map((p) => [p.id, p]));
   const users = new Map(t.users.map((u) => [u.id, u]));
@@ -68,7 +68,7 @@ function documents(t) {
   const threads = new Map();
   for (const c of t.site_comments) {
     const user = users.get(c.author_id);
-    const row = { ...c, name: user?.name ?? c.author_name, author_is_owner: user?.is_owner ?? 0 };
+    const row = { ...c, name: user?.name ?? c.author_name, author_is_owner: Boolean(c.author_id) };
     if (!threads.has(c.target)) threads.set(c.target, []);
     threads.get(c.target).push(commentNote(site, row, commentAuthor(site, row)));
   }

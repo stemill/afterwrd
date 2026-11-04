@@ -1,7 +1,7 @@
 // The owner's area (/_admin): Your devices is here (passkeys for the owner's phones and computers, links to add
 // another, signing out everywhere), and every other owner page is routed from here. Only the owner signs in, so
-// there's no one else to invite: friends see each other from their own sites (connect.js).
-// scripts/invite.mjs makes the first device link for a new site from the terminal.
+// no one else needs a way in: friends see each other from their own sites (connect.js).
+// scripts/owner.mjs makes the first device link for a new site from the terminal.
 import { handleConnections } from "./connect.js";
 import { handleExport } from "./export.js";
 import { asset, FAVICON, ownerHeader } from "./nav.js";
@@ -12,9 +12,9 @@ import { handleUpdate } from "./update.js";
 import { escape, html, json, now, randomToken, sha256 } from "./util.js";
 
 // A device link grants owner access to whoever opens it, so it's short-lived.
-export const OWNER_INVITE_SECONDS = 3600;
+export const DEVICE_LINK_SECONDS = 3600;
 
-export async function handleAdmin(request, env, url, owner, work) {
+export async function handleAdmin(request, env, url, owner) {
   if (request.method !== "GET" && request.method !== "HEAD" && request.headers.get("Origin") !== url.origin) {
     return json({ error: "Request from another site" }, 403);
   }
@@ -24,8 +24,8 @@ export async function handleAdmin(request, env, url, owner, work) {
   if (url.pathname === "/_admin/update" || url.pathname.startsWith("/_admin/update/")) {
     return handleUpdate(request, env, url, owner);
   }
-  if (url.pathname === "/_admin/posts" || url.pathname.startsWith("/_admin/posts/")) return handlePosts(request, env, url, work);
-  if (/^\/_admin\/(photos|albums|profile)(\/|$)/.test(url.pathname)) return handlePhotos(request, env, url, work);
+  if (url.pathname === "/_admin/posts" || url.pathname.startsWith("/_admin/posts/")) return handlePosts(request, env, url);
+  if (/^\/_admin\/(photos|albums|profile)(\/|$)/.test(url.pathname)) return handlePhotos(request, env, url);
   if (url.pathname === "/_admin/export" || url.pathname.startsWith("/_admin/export/")) return handleExport(request, env, url);
   if (url.pathname === "/_admin/connections" || url.pathname.startsWith("/_admin/connections/")) {
     return handleConnections(request, env, url);
@@ -33,7 +33,7 @@ export async function handleAdmin(request, env, url, owner, work) {
   if (request.method === "GET" && url.pathname === "/_admin") {
     const [{ results: passkeys }, links, sessions] = await env.DB.batch([
       env.DB.prepare("SELECT id, created_at, last_used_at FROM credentials WHERE user_id = ? ORDER BY created_at").bind(owner.id),
-      env.DB.prepare("SELECT COUNT(*) AS n FROM invites WHERE user_id = ? AND used_at IS NULL AND expires_at > ?").bind(owner.id, now()),
+      env.DB.prepare("SELECT COUNT(*) AS n FROM device_links WHERE user_id = ? AND used_at IS NULL AND expires_at > ?").bind(owner.id, now()),
       env.DB.prepare("SELECT COUNT(*) AS n FROM sessions WHERE user_id = ? AND expires_at > ?").bind(owner.id, now()),
     ]);
     return html(devicesPage(owner, passkeys, links.results[0].n, sessions.results[0].n));
@@ -44,9 +44,9 @@ export async function handleAdmin(request, env, url, owner, work) {
   const action = /^\/_admin\/devices\/(link|cancel-links|sign-out|delete-passkey)$/.exec(url.pathname)?.[1];
   switch (action) {
     case "link":
-      return json({ link: await createInvite(env, url, owner.id) });
+      return json({ link: await createDeviceLink(env, url, owner.id) });
     case "cancel-links":
-      await env.DB.prepare("DELETE FROM invites WHERE user_id = ? AND used_at IS NULL").bind(owner.id).run();
+      await env.DB.prepare("DELETE FROM device_links WHERE user_id = ? AND used_at IS NULL").bind(owner.id).run();
       return json({ ok: true });
     case "sign-out":
       await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(owner.id).run();
@@ -67,11 +67,11 @@ export async function handleAdmin(request, env, url, owner, work) {
 }
 
 // Only a hash is stored, so the link can be shown once and never again.
-export async function createInvite(env, url, userId, seconds = OWNER_INVITE_SECONDS) {
+export async function createDeviceLink(env, url, userId, seconds = DEVICE_LINK_SECONDS) {
   const token = randomToken();
-  await env.DB.prepare("INSERT INTO invites (token_hash, user_id, expires_at) VALUES (?, ?, ?)")
+  await env.DB.prepare("INSERT INTO device_links (token_hash, user_id, expires_at) VALUES (?, ?, ?)")
     .bind(await sha256(token), userId, now() + seconds).run();
-  return `${url.origin}/_auth/invite/${token}`;
+  return `${url.origin}/_auth/device/${token}`;
 }
 
 function day(ts) {
@@ -101,7 +101,7 @@ ${FAVICON}
 </style>
 </head>
 <body>
-${ownerHeader("people")}
+${ownerHeader("devices")}
 <main>
 <h1>Your devices</h1>
 <p class="meta">Signed in as ${escape(owner.name)}. Each phone or computer you use has its own passkey. To add one, make a

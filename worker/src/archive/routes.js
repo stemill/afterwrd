@@ -53,7 +53,6 @@ const ROUTES = [
   [/^\/friends$/, "friends", friends],
   [/^\/people\/(\d+)$/, "friends", person],
   [/^\/activity$/, null, activity],
-  [/^\/feed$/, null, feed],
   [/^\/friend$/, null, friendsIndex],
   [/^\/friend\/(\d+)$/, null, friendHome],
   [/^\/friend\/(\d+)\/posts$/, null, friendPosts],
@@ -77,8 +76,8 @@ export async function renderArchive(request, env, url, user, work) {
   const sections = [...new Set([...chosen, "posts", "photos"])];
   const ctx = {
     db, url, user, chosen, sections, newComments: await newCount(db, user),
-    requests: user.is_owner ? (await first(db, "SELECT COUNT(*) AS n FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL")).n : 0,
-    updateWaiting: user.is_owner ? await updateWaiting(env, work) : false,
+    requests: (await first(db, "SELECT COUNT(*) AS n FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL")).n,
+    updateWaiting: await updateWaiting(env, work),
     me: me.results[0] ?? { id: -1, name: await ownerName(db), is_me: 1 },
     ownerName: await ownerName(db), // their name here, which can differ from the Facebook one (me.name)
     profile: await profilePictures(db),
@@ -432,17 +431,8 @@ async function activity(ctx, params) {
   return views.activityPage(ctx, { items, paging });
 }
 
-/** Feed became part of Home. */
-async function feed(ctx) {
-  return ctx.user.is_owner ? Response.redirect(`${ctx.url.origin}/`, 302) : null;
-}
-
-/**
- * Home. The owner's: write something, then their own posts written here and their friends' newest, together.
- * Everyone else's: the owner's posts (with their profile at the top), as Posts shows them.
- */
+/** Home: write something, then the owner's own posts written here and their friends' newest, together. */
 async function home(ctx, params) {
-  if (!ctx.user.is_owner) return posts(ctx, params);
   const { db } = ctx;
   const own = await loadPosts(db, await all(db, `${POST_SQL} WHERE p.id >= ? ORDER BY p.timestamp DESC LIMIT 30`, [SITE_ID]));
   const friendsFeed = await loadFeed(db, ctx.url.origin);
@@ -474,7 +464,6 @@ async function photoByHash(ctx, params, hash) {
 
 /** Only the owner reads friends' sites from here; `load` gets the connection and returns the page. */
 async function fromFriend(ctx, id, load) {
-  if (!ctx.user.is_owner) return null;
   const connection = await connectionById(ctx.db, id);
   if (!connection) return null;
   connection.facebook = await facebookSelf(ctx.db, connection);
@@ -490,7 +479,6 @@ async function fromFriend(ctx, id, load) {
  * the Facebook download; then everyone else from that download. Matching names are suggested, never assumed.
  */
 async function friendsIndex(ctx) {
-  if (!ctx.user.is_owner) return null;
   const { db } = ctx;
   const [connections, links, people, requests, invites] = await db.batch([
     db.prepare("SELECT * FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NOT NULL ORDER BY name COLLATE NOCASE"),

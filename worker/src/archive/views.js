@@ -25,31 +25,19 @@ const hasMemories = (ctx) => MEMORIES.some(([s]) => ctx.chosen.includes(s));
 function currentKey(ctx) {
   const top = ctx.url.pathname.split("/")[1];
   if (top === "") return "home";
-  if (top === "posts") return ctx.user.is_owner ? "profile" : "home";
-  if (top === "friend" || (top === "people" && ctx.user.is_owner)) return "connected";
-  if (["memories", "people", ...MEMORIES.map(([s]) => s)].includes(top)) return "memories";
+  if (top === "posts") return "profile";
+  if (top === "friend" || top === "people") return "connected";
+  if (["memories", ...MEMORIES.map(([s]) => s)].includes(top)) return "memories";
   return top;
 }
 
 function header(ctx) {
-  if (ctx.user.is_owner) {
-    const picture = ctx.profile?.profile;
-    return siteHeader({
-      main: ownerMain(ctx.newComments, ctx.requests),
-      menu: ownerMenu({ memories: hasMemories(ctx), updateWaiting: ctx.updateWaiting }),
-      current: currentKey(ctx),
-      face: { initial: initial(ctx.user.name), picture: picture && `/files/${picture.thumb_hash ?? picture.hash}` },
-    });
-  }
+  const picture = ctx.profile?.profile;
   return siteHeader({
-    main: [
-      { key: "home", label: "Home", href: "/" },
-      { key: "photos", label: "Photos", href: "/photos" },
-      { key: "activity", label: "Notifications", href: "/activity", badge: ctx.newComments },
-    ],
-    menu: hasMemories(ctx) ? [{ key: "memories", label: "Memories", href: "/memories" }] : [],
+    main: ownerMain(ctx.newComments, ctx.requests),
+    menu: ownerMenu({ memories: hasMemories(ctx), updateWaiting: ctx.updateWaiting }),
     current: currentKey(ctx),
-    face: { initial: initial(ctx.user.name) },
+    face: { initial: initial(ctx.user.name), picture: picture && `/files/${picture.thumb_hash ?? picture.hash}` },
   });
 }
 
@@ -134,7 +122,6 @@ const initial = (name) => [...String(name).trim()][0]?.toUpperCase() ?? "?";
 /** The comments written here on a post or photo, then a box to add one. Forms work without JavaScript. */
 function thread(ctx, key, comments) {
   const back = ctx.url.pathname + ctx.url.search;
-  const canDelete = (c) => c.author_id === ctx.user.id || Boolean(ctx.user.is_owner);
   return html`<section class="thread" id="t-${key}" aria-label="Comments">
   ${comments.map((c) => html`<div class="comment" id="c${c.id}">
     ${c.author_is_owner ? ownerFace(ctx)
@@ -143,7 +130,7 @@ function thread(ctx, key, comments) {
     <div class="bubble"><strong>${c.name}</strong>${c.origin && c.origin !== "site" && html`<span class="from">${host(c.origin)}</span>`}<span class="said">${linkify(c.text)}</span></div>
     <div class="under">
       <time title="${fmtDatetime(c.created_at)}">${fmtAgo(c.created_at)}</time>
-      ${canDelete(c) && html`<form method="post" action="/_comments/${c.id}/delete" onsubmit="return confirm('Delete this comment?')">
+      ${html`<form method="post" action="/_comments/${c.id}/delete" onsubmit="return confirm('Delete this comment?')">
         <input type="hidden" name="back" value="${back}"><button>Delete</button>
       </form>`}
     </div>
@@ -171,10 +158,10 @@ function postCard(ctx, p) {
     return html`<article class="card social own">
   <header>
     ${ownerFace(ctx)}
-    <span class="what"><strong>${ctx.user.is_owner ? "You" : ctx.ownerName}</strong>${did && html`<span class="meta">${did}</span>`}</span>
+    <span class="what"><strong>You</strong>${did && html`<span class="meta">${did}</span>`}</span>
     ${p.thread ? html`<a class="when" href="/posts/${p.key}" title="${fmtDatetime(p.timestamp)}"><time>${fmtAgo(p.timestamp)}</time></a>`
       : html`<time title="${fmtDatetime(p.timestamp)}">${fmtAgo(p.timestamp)}</time>`}
-    ${ctx.user.is_owner && p.thread && html`<form method="post" action="/_admin/posts/${p.id}/delete"
+    ${p.thread && html`<form method="post" action="/_admin/posts/${p.id}/delete"
       onsubmit="return confirm('Delete this post, its photos and its comments? This can’t be undone.')"><button class="delete">Delete</button></form>`}
   </header>
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
@@ -192,7 +179,7 @@ function postCard(ctx, p) {
     <span class="what">${what}</span>
     ${p.thread ? html`<a class="when" href="/posts/${p.key}" title="Link to this post"><time>${fmtDatetime(p.timestamp)}</time></a>`
       : html`<time>${fmtDatetime(p.timestamp)}</time>`}
-    ${ctx.user.is_owner && p.id >= SITE_ID && p.thread && html`<form method="post" action="/_admin/posts/${p.id}/delete"
+    ${p.id >= SITE_ID && p.thread && html`<form method="post" action="/_admin/posts/${p.id}/delete"
       onsubmit="return confirm('Delete this post, its photos and its comments? This can’t be undone.')"><button class="delete">Delete</button></form>`}
   </header>
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
@@ -353,22 +340,21 @@ function composer() {
 /** The top of Posts, which is the owner's profile: cover, picture and name (with ways to change them, for the owner). */
 function profileHeader(ctx) {
   const { profile, cover } = ctx.profile;
-  const owner = ctx.user.is_owner;
   if (!profile && !cover) {
-    return owner ? html`<p class="card profile-prompt">Make this page yours:
+    return html`<p class="card profile-prompt">Make this page yours:
   <a class="chip" href="/_admin/photos/add?for=profile">Add a profile picture</a>
-  <a class="chip" href="/_admin/photos/add?for=cover">Add a cover photo</a></p>` : "";
+  <a class="chip" href="/_admin/photos/add?for=cover">Add a cover photo</a></p>`;
   }
   return html`<section class="profile">
   <div class="cover-wrap">
     ${cover ? html`<a class="cover" href="/photos/${cover.id}"><img src="/files/${cover.hash}" alt="Cover photo"></a>` : raw('<div class="cover"></div>')}
-    ${owner && html`<a class="chip change-cover" href="/_admin/photos/add?for=cover">${cover ? "Change cover" : "Add a cover"}</a>`}
+    <a class="chip change-cover" href="/_admin/photos/add?for=cover">${cover ? "Change cover" : "Add a cover"}</a>
   </div>
   <div class="identity">
     ${profile ? html`<a class="avatar" href="/photos/${profile.id}"><img src="/files/${profile.thumb_hash ?? profile.hash}" alt="Profile picture"></a>`
-      : owner && html`<a class="avatar empty" href="/_admin/photos/add?for=profile" title="Add a profile picture" aria-label="Add a profile picture">+</a>`}
+      : html`<a class="avatar empty" href="/_admin/photos/add?for=profile" title="Add a profile picture" aria-label="Add a profile picture">+</a>`}
     <div><p class="name">${ctx.me.name}</p>
-      ${owner && profile && html`<a class="meta" href="/_admin/photos/add?for=profile">Change picture</a>`}</div>
+      ${profile && html`<a class="meta" href="/_admin/photos/add?for=profile">Change picture</a>`}</div>
   </div>
 </section>`;
 }
@@ -378,7 +364,7 @@ export function postsPage(ctx, { posts, paging, q, year, kind, years, kinds }) {
   return page(ctx, "Posts", html`
 ${fresh && profileHeader(ctx)}
 <h1>Posts</h1>
-${ctx.user.is_owner && fresh && composer()}
+${fresh && composer()}
 <form class="filters">
   <input type="search" name="q" value="${q}" placeholder="Search posts">
   <select name="kind" onchange="this.form.submit()">
@@ -434,7 +420,7 @@ export function photosPage(ctx, { byYear, collections, tagged }) {
   return page(ctx, "Photos", html`
 <div class="feed-head">
   <h1>Photos &amp; videos</h1>
-  ${ctx.user.is_owner && html`<a class="chip primary" href="/_admin/photos/add">${raw(icon("photos"))}<span>Add photos</span></a>`}
+  <a class="chip primary" href="/_admin/photos/add">${raw(icon("photos"))}<span>Add photos</span></a>
 </div>
 
 <div class="albums">
@@ -471,7 +457,7 @@ ${byYear.map(([year, albums]) => html`
 }
 
 export function albumPage(ctx, { key, title, info, stats, groups, paging }) {
-  const mine = ctx.user.is_owner && Number(key) > SITE_ID; // an album made here, not imported or "Posted on afterwrd"
+  const mine = Number(key) > SITE_ID; // an album made here, not imported or "Posted on afterwrd"
   return page(ctx, title, html`
 <p class="crumbs"><a href="/photos">Photos</a> /</p>
 <header class="album-head">
@@ -543,7 +529,7 @@ export function photoPage(ctx, { m, setKey, setTitle, prev, next, index, total, 
         <dd><a href="https://www.openstreetmap.org/?mlat=${m.latitude}&amp;mlon=${m.longitude}#map=15/${m.latitude}/${m.longitude}" target="_blank" rel="noopener noreferrer">View on map ↗</a></dd>`}
     </dl>
 
-    ${ctx.user.is_owner && m.hash && html`<div class="photo-tools">
+    ${m.hash && html`<div class="photo-tools">
       ${m.kind === "photo" && ["profile", "cover"].map((role) => html`<form method="post" action="/_admin/profile">
         <input type="hidden" name="role" value="${role}"><input type="hidden" name="hash" value="${m.hash}">
         <input type="hidden" name="back" value="${ctx.url.pathname}">
@@ -642,11 +628,10 @@ ${has(ctx, "posts") && html`<p class="crumbs"><a href="/posts">Posts</a> /</p>`}
 }
 
 export function activityPage(ctx, { items, paging }) {
-  const whose = ctx.user.is_owner ? "your" : `${ctx.me.name}'s`;
   return page(ctx, "Notifications", html`
 <h1>Notifications</h1>
-<p class="meta">Comments on ${whose} posts and photos, and on friends' posts and photos you've commented on too.</p>
-${feed(items, (c) => (c.source === "friend" ? friendActivityItem(c) : activityItem(ctx, c, whose)), "Nothing yet. Comments on your posts and photos will show here.")}
+<p class="meta">Comments on your posts and photos, and on friends' posts and photos you've commented on too.</p>
+${feed(items, (c) => (c.source === "friend" ? friendActivityItem(c) : activityItem(ctx, c)), "Nothing yet. Comments on your posts and photos will show here.")}
 ${(paging.page > 1 || paging.hasNext) && pager(ctx, paging)}`);
 }
 
@@ -668,7 +653,7 @@ function friendActivityItem(c) {
 </article>`;
 }
 
-function activityItem(ctx, c, whose) {
+function activityItem(ctx, c) {
   const { photo, post } = c.on ?? {};
   const href = photo ? `/photos/${photo.id}#c${c.id}` : post ? `/posts/${c.target}#c${c.id}` : null;
   const what = photo ? photo.kind : "post";
@@ -678,7 +663,7 @@ function activityItem(ctx, c, whose) {
   <div class="body">
     <header>
       <span class="what"><strong>${c.author_id === ctx.user.id ? "You" : c.name}</strong>
-        ${href ? html`commented on <a href="${href}">${whose} ${what}</a>` : "commented on something that's no longer in the archive"}</span>
+        ${href ? html`commented on <a href="${href}">your ${what}</a>` : "commented on something that's no longer in the archive"}</span>
       ${c.isNew && raw('<span class="badge badge-new">New</span>')}
       <time title="${fmtDatetime(c.created_at)}">${fmtAgo(c.created_at)}</time>
     </header>
@@ -726,7 +711,7 @@ function remoteThread(ctx, c, target, comments) {
 </section>`;
 }
 
-/** A post from a friend's site, in Feed or on their posts page. */
+/** A post from a friend's site, on Home or on their posts page. */
 /** A friend's profile picture, or the first letter of their name. */
 const friendFace = (ctx, c) => faceFor(ctx, c.origin, c.name, c.id, c.avatar?.thumbSrc);
 
@@ -998,6 +983,8 @@ function onThisDayCard(ctx, memories) {
 </section>`;
 }
 
+const SIDE_FRIENDS = 12; // on Home; the rest are on Friends
+
 /** The owner's Home: write something, then your posts and your friends' together, newest first. */
 export function homePage(ctx, { own, feed, onThisDay, friends }) {
   const stream = [
@@ -1009,7 +996,9 @@ export function homePage(ctx, { own, feed, onThisDay, friends }) {
   <section class="stream" aria-label="Posts">
     <h1 class="hidden">Home</h1>
     ${composer()}
-    ${feed.unreachable.map((u) => html`<p class="notice">Couldn't load ${u.connection.name}'s posts: ${u.error}</p>`)}
+    ${feed.unreachable.length > 2
+      ? html`<p class="notice">Couldn't reach ${feed.unreachable.length} friends' sites just now, so their newest posts may be missing.</p>`
+      : feed.unreachable.map((u) => html`<p class="notice">Couldn't load ${u.connection.name}'s posts: ${u.error}</p>`)}
     ${stream.length ? stream.map((s) => s.card) : html`<div class="empty"><p>Nothing here yet. Write your first post above.</p></div>`}
   </section>
   <aside class="side">
@@ -1017,8 +1006,10 @@ export function homePage(ctx, { own, feed, onThisDay, friends }) {
     <section class="card">
       <h2>Friends</h2>
       ${friends.length ? html`<ul class="mini-friends">
-        ${friends.map((c) => html`<li><a href="/friend/${c.id}/posts">${friendFace(ctx, c)}${c.name}</a></li>`)}
-      </ul>` : html`<p class="meta">Connect with friends who have their own afterwrd site to see their posts here.</p>`}
+        ${friends.slice(0, SIDE_FRIENDS).map((c) => html`<li><a href="/friend/${c.id}/posts">${friendFace(ctx, c)}${c.name}</a></li>`)}
+      </ul>
+      ${friends.length > SIDE_FRIENDS && html`<p><a href="/friend">All ${friends.length} friends</a></p>`}`
+        : html`<p class="meta">Connect with friends who have their own afterwrd site to see their posts here.</p>`}
       <p><a class="chip" href="/_admin/connections">${raw(icon("connections"))}<span>Connect with a friend</span></a></p>
     </section>
   </aside>
@@ -1030,7 +1021,7 @@ export function memoriesPage(ctx, { onThisDay }) {
   const available = MEMORIES.filter(([s]) => ctx.chosen.includes(s));
   return page(ctx, "Memories", html`
 <h1>Memories</h1>
-<p class="meta">From ${ctx.user.is_owner ? "your" : `${ctx.me.name}'s`} Facebook download.</p>
+<p class="meta">From your Facebook download.</p>
 ${available.length ? html`<ul class="memory-tiles">
   ${available.map(([s, label, about]) => html`<li><a href="/${s}">${raw(icon(s))}<strong>${label}</strong><span class="meta">${about}</span></a></li>`)}
 </ul>` : html`<p class="empty">Nothing from Facebook has been published here.</p>`}

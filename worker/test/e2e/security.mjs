@@ -14,7 +14,7 @@ const check = (name, ok, extra = "") => { results.push(ok); console.log(`${ok ? 
 const sql = (q) => JSON.parse(execFileSync("./node_modules/.bin/wrangler", ["d1", "execute", "afterwrd", "--local", "--json", "--command", q],
   { cwd: WORKER, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }))[0].results;
 const post = (path, body, cookie, origin = BASE) => fetch(BASE + path, { method: "POST", redirect: "manual",
-  headers: { Origin: origin, "Content-Type": "application/json", ...(cookie ? { Cookie: `__Host-hb_session=${cookie}` } : {}) },
+  headers: { Origin: origin, "Content-Type": "application/json", ...(cookie ? { Cookie: `__Host-session=${cookie}` } : {}) },
   body: JSON.stringify(body ?? {}) });
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
@@ -28,7 +28,7 @@ async function person() {
   page.on("dialog", (d) => d.accept());
   return page;
 }
-const session = async (page) => (await page.cookies()).find((c) => c.name === "__Host-hb_session");
+const session = async (page) => (await page.cookies()).find((c) => c.name === "__Host-session");
 
 // --- setup link ------------------------------------------------------------------
 check("setup with a wrong code is refused", (await fetch(`${BASE}/_auth/setup?code=wrong`)).status === 403);
@@ -38,20 +38,20 @@ const again = await (await post("/_auth/setup", { code: CODE, name: "Owner One" 
 check("an unfinished setup can be resumed (no passkey yet)", Boolean(first.link && again.link && first.link !== again.link)
   && sql("SELECT COUNT(*) AS n FROM users")[0].n === 1);
 check("…and only the newest setup link works", (await fetch(first.link)).status === 404
-  && sql("SELECT COUNT(*) AS n FROM invites WHERE used_at IS NULL")[0].n === 1);
+  && sql("SELECT COUNT(*) AS n FROM device_links WHERE used_at IS NULL")[0].n === 1);
 const spareSetup = await (await post("/_auth/setup", { code: CODE, name: "Owner One" })).json();
 const setupPage = await (await fetch(`${BASE}/_auth/setup?code=${CODE}`)).text();
 check("the setup page takes the code off the address bar", setupPage.includes('history.replaceState(null, "", "/_auth/setup")'));
-const ownerInvite = sql("SELECT MAX(expires_at) - strftime('%s','now') AS left FROM invites")[0].left;
+const ownerInvite = sql("SELECT MAX(expires_at) - strftime('%s','now') AS left FROM device_links")[0].left;
 check("the owner's setup link lasts an hour", ownerInvite > 3500 && ownerInvite <= 3600, `${ownerInvite}s`);
 // A stray unused link (as an older release could leave) is cancelled by the first passkey.
-sql(`INSERT INTO invites (token_hash, user_id, expires_at) VALUES ('${"a".repeat(64)}', (SELECT id FROM users WHERE is_owner = 1), strftime('%s','now') + 3600)`);
+sql(`INSERT INTO device_links (token_hash, user_id, expires_at) VALUES ('${"a".repeat(64)}', (SELECT id FROM users), strftime('%s','now') + 3600)`);
 const owner = await person();
 await owner.goto(spareSetup.link);
 await Promise.all([owner.waitForNavigation(), owner.click("#go")]);
 check("owner registers from the resumed link", ["/", "/posts"].includes(new URL(owner.url()).pathname) || (await owner.content()).includes("Nothing has been published"));
 check("setup is closed once a passkey exists", (await fetch(`${BASE}/_auth/setup?code=${CODE}`)).status === 409);
-check("the first passkey cancels any other setup link", sql("SELECT COUNT(*) AS n FROM invites WHERE used_at IS NULL")[0].n === 0);
+check("the first passkey cancels any other setup link", sql("SELECT COUNT(*) AS n FROM device_links WHERE used_at IS NULL")[0].n === 0);
 
 // --- cookies and headers ---------------------------------------------------------------
 const cookie = await session(owner);
@@ -92,7 +92,7 @@ await owner.setRequestInterception(false);
 check("owner signs back in", Boolean(await session(owner)));
 const replay = await fetch(`${BASE}/_auth/login/verify`, { method: "POST",
   headers: { Origin: BASE, "Content-Type": "application/json", Cookie: captured.cookie }, body: captured.body });
-check("replaying that exact sign-in is refused", replay.status === 400 && !(replay.headers.get("set-cookie") ?? "").includes("hb_session=") , `HTTP ${replay.status}`);
+check("replaying that exact sign-in is refused", replay.status === 400 && !(replay.headers.get("set-cookie") ?? "").includes("__Host-session=") , `HTTP ${replay.status}`);
 const logout = await post("/_auth/logout", null, (await session(owner)).value);
 check("signing out asks the browser to clear cached photos", (logout.headers.get("clear-site-data") ?? "").includes('"cache"'));
 await owner.goto(`${BASE}/_auth/login`);
@@ -100,9 +100,9 @@ await Promise.all([owner.waitForNavigation(), owner.click("#go")]);
 let ownerCookie = (await session(owner)).value;
 
 // --- Your devices: links, sign-out everywhere, passkeys ------------------------------------
-const ownerId = sql("SELECT id FROM users WHERE is_owner = 1")[0].id;
+const ownerId = sql("SELECT id FROM users")[0].id;
 const deviceLink = (await (await post("/_admin/devices/link", {}, ownerCookie)).json()).link;
-const left = sql(`SELECT MAX(expires_at) - strftime('%s','now') AS left FROM invites WHERE user_id = ${ownerId} AND used_at IS NULL`)[0].left;
+const left = sql(`SELECT MAX(expires_at) - strftime('%s','now') AS left FROM device_links WHERE user_id = ${ownerId} AND used_at IS NULL`)[0].left;
 check("a device link lasts an hour", left > 3500 && left <= 3600, `${left}s`);
 const laptop = await person();
 await laptop.goto(deviceLink);
@@ -111,12 +111,12 @@ check("a second device signs in as the owner", Boolean(await session(laptop)));
 const [ownerKey, laptopKey] = sql(`SELECT id FROM credentials WHERE user_id = ${ownerId} ORDER BY created_at, rowid`).map((k) => k.id);
 const spare = (await (await post("/_admin/devices/link", {}, ownerCookie)).json()).link;
 await post("/_admin/devices/cancel-links", {}, ownerCookie);
-check("Cancel unused links removes them", sql(`SELECT COUNT(*) AS n FROM invites WHERE user_id = ${ownerId} AND used_at IS NULL`)[0].n === 0
+check("Cancel unused links removes them", sql(`SELECT COUNT(*) AS n FROM device_links WHERE user_id = ${ownerId} AND used_at IS NULL`)[0].n === 0
   && (await fetch(spare)).status === 404);
 await post("/_admin/devices/sign-out", {}, ownerCookie);
 await laptop.goto(`${BASE}/posts`);
 check("Sign out everywhere ends every session", new URL(laptop.url()).pathname === "/_auth/login"
-  && (await fetch(`${BASE}/_admin`, { redirect: "manual", headers: { Cookie: `__Host-hb_session=${ownerCookie}` } })).status === 302);
+  && (await fetch(`${BASE}/_admin`, { redirect: "manual", headers: { Cookie: `__Host-session=${ownerCookie}` } })).status === 302);
 await owner.goto(`${BASE}/_auth/login`);
 await Promise.all([owner.waitForNavigation(), owner.click("#go")]);
 ownerCookie = (await session(owner)).value;
@@ -139,17 +139,17 @@ check("import accepts a proper row", (await post("/_admin/import/rows", media({ 
 const bytes = Buffer.from("not really a jpeg, but bytes are bytes");
 const hash = createHash("sha256").update(bytes).digest("hex");
 const put = (body) => fetch(`${BASE}/_admin/import/files/${hash}`, { method: "PUT", body,
-  headers: { Origin: BASE, "Content-Type": "image/jpeg", Cookie: `__Host-hb_session=${ownerCookie}` } });
+  headers: { Origin: BASE, "Content-Type": "image/jpeg", Cookie: `__Host-session=${ownerCookie}` } });
 await put(bytes);
 const second = await (await put(Buffer.from("different bytes that would fail the hash check"))).json();
-const served = Buffer.from(await (await fetch(`${BASE}/files/${hash}`, { headers: { Cookie: `__Host-hb_session=${ownerCookie}` } })).arrayBuffer());
+const served = Buffer.from(await (await fetch(`${BASE}/files/${hash}`, { headers: { Cookie: `__Host-session=${ownerCookie}` } })).arrayBuffer());
 check("re-uploading a stored file leaves it intact", second.existing === true && served.equals(bytes));
 
 // --- lookups by name can't reach object internals --------------------------------------------
 sql(`INSERT OR REPLACE INTO settings (key, value) VALUES ('sections', '["overview","timeline","posts","photos","comments","likes","friends"]');
      INSERT OR REPLACE INTO people (id, name, is_me) VALUES (1, 'Me', 1)`);
 for (const path of ["/friends?sort=constructor", "/friends?sort=__proto__", "/people/1?tab=__proto__", "/people/1?tab=constructor"]) {
-  const res = await fetch(BASE + path, { headers: { Cookie: `__Host-hb_session=${ownerCookie}` } });
+  const res = await fetch(BASE + path, { headers: { Cookie: `__Host-session=${ownerCookie}` } });
   check(`${path} is handled, not a crash`, res.status === 200, `HTTP ${res.status}`);
 }
 
@@ -161,7 +161,7 @@ for (const trick of ["/.//evil.example", "/..//evil.example", "/%2e//evil.exampl
 }
 
 // --- update page ------------------------------------------------------------------------------
-const updatePage = await (await fetch(`${BASE}/_admin/update`, { headers: { Cookie: `__Host-hb_session=${ownerCookie}` } })).text();
+const updatePage = await (await fetch(`${BASE}/_admin/update`, { headers: { Cookie: `__Host-session=${ownerCookie}` } })).text();
 check("owner's Update page shows this version", updatePage.includes(`This site is afterwrd ${JSON.parse(execFileSync("cat", [`${WORKER}/package.json`], { encoding: "utf8" })).version}`));
 const update404 = await fetch(`${BASE}/_admin/update/version`, { redirect: "manual" });
 check("Update isn't reachable signed out", update404.status === 302);

@@ -114,7 +114,7 @@ export function loginPage(next) {
 }
 
 // A link to add one of the owner's devices (from Your devices, or setting up a new site).
-export function invitePage(name) {
+export function deviceLinkPage(name) {
   return page("Add this device", `
 <h1>Hello, ${escape(name)}</h1>
 <p>Add this phone or computer to your afterwrd site by creating a passkey on it: it will ask for your face,

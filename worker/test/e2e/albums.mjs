@@ -31,8 +31,8 @@ const owner = await person(async (page) => {
   await Promise.all([page.waitForNavigation(), page.click("#go")]);
   await Promise.all([page.waitForNavigation(), page.click("#go")]);
 });
-const cookie = async () => (await owner.cookies()).find((c) => c.name === "__Host-hb_session").value;
-const fileStatus = async (hash) => (await fetch(`${BASE}/files/${hash}`, { headers: { Cookie: `__Host-hb_session=${await cookie()}` } })).status;
+const cookie = async () => (await owner.cookies()).find((c) => c.name === "__Host-session").value;
+const fileStatus = async (hash) => (await fetch(`${BASE}/files/${hash}`, { headers: { Cookie: `__Host-session=${await cookie()}` } })).status;
 const tiles = () => owner.$$eval(".justified a.tile", (l) => l.length);
 
 await owner.goto(`${BASE}/posts`);

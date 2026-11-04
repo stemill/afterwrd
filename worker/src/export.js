@@ -23,7 +23,7 @@ const TABLES = {
   comments_elsewhere: { columns: "*" },
   connections: { columns: "id, origin, name, connected_at", where: "approved_at IS NOT NULL" },
   friend_links: { columns: "connection_id, person_name" },
-  users: { columns: "id, name, is_owner, revoked_at, site" },
+  users: { columns: "id, name" },
 };
 
 export async function handleExport(request, env, url) {

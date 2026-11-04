@@ -1,4 +1,4 @@
-// The owner's side of connections: Feed (the newest posts from every connected site, fetched when the page opens),
+// The owner's side of connections: friends' newest posts on Home (feed.js picks which sites to ask when it opens),
 // friends' posts and photos read from here (friends.js), and comments sent to their sites, which keep them; a
 // copy is kept here in comments_elsewhere.
 //   POST /_feed/comments                                       connection, target, text, back (a form)
@@ -10,8 +10,13 @@ import { cleanFeed } from "./friends.js";
 import { messagePage } from "./pages.js";
 import { callSite } from "./peers.js";
 import { html, now } from "./util.js";
+import { INBOX_JOIN } from "./notify.js";
 
-const MAX_SITES = 40; // each one is a request; the free plan allows 50 per page
+// Home asks friends' sites for their newest posts when it opens. Each is a request, and the free plan allows 50 per
+// page, so with more friends than SITES it asks those whose notes (notify.js) say they've posted lately, newest
+// first, keeping a few places for the friends asked longest ago, so a quiet friend or a missed note still turns up.
+const SITES = 40;
+const TAKING_TURNS = 5;
 const TARGET_RE = /^(post-\d+-[0-9a-f]{8}|photo-[0-9a-f]{64})$/;
 
 export const connectionById = (db, id) => db.prepare("SELECT * FROM connections WHERE id = ? AND connected_at IS NOT NULL AND approved_at IS NOT NULL")
@@ -39,10 +44,21 @@ export async function markMine(db, connectionId, target, comments, ownOrigin) {
     : c.from === ownOrigin ? [] : [{ ...c, mine: false }]));
 }
 
+/** Which friends' sites Home asks this time (see SITES). */
+async function sitesToAsk(db, connections) {
+  if (connections.length <= SITES) return connections;
+  const { results: lately } = await db.prepare(`SELECT i.connection_id AS id, MAX(i.created_at) AS latest FROM inbox i ${INBOX_JOIN}
+    WHERE i.kind = 'post' GROUP BY i.connection_id ORDER BY latest DESC LIMIT ?`).bind(SITES - TAKING_TURNS).all();
+  const posted = new Set(lately.map((r) => r.id));
+  const turns = connections.filter((c) => !posted.has(c.id)).sort((a, b) => (a.feed_checked_at ?? 0) - (b.feed_checked_at ?? 0));
+  return [...connections.filter((c) => posted.has(c.id)), ...turns.slice(0, SITES - posted.size)];
+}
+
 export async function loadFeed(db, ownOrigin) {
   const { results: connections } = await db.prepare(`SELECT * FROM connections WHERE connected_at IS NOT NULL
-    AND approved_at IS NOT NULL ORDER BY name COLLATE NOCASE LIMIT ?`).bind(MAX_SITES).all();
-  const replies = await Promise.all(connections.map(async (connection) => {
+    AND approved_at IS NOT NULL ORDER BY name COLLATE NOCASE`).all();
+  const asking = await sitesToAsk(db, connections);
+  const replies = await Promise.all(asking.map(async (connection) => {
     try {
       const feed = await callSite(connection.origin, "/_peer/feed", { key: connection.their_key });
       return { connection, feed: cleanFeed(feed, connection.origin) };
@@ -50,6 +66,10 @@ export async function loadFeed(db, ownOrigin) {
       return { connection, error: error.message };
     }
   }));
+  const checked = now();
+  if (asking.length) {
+    await db.batch(asking.map((c) => db.prepare("UPDATE connections SET feed_checked_at = ? WHERE id = ?").bind(checked, c.id)));
+  }
   // Keep names up to date if a friend changes theirs.
   const renamed = replies.filter((r) => r.feed?.name && r.feed.name !== r.connection.name);
   if (renamed.length) {
@@ -75,7 +95,7 @@ export async function handleFeed(request, env, url) {
   if (request.headers.get("Origin") !== url.origin) return new Response("Request from another site", { status: 403 });
 
   const form = await request.formData().catch(() => new FormData());
-  const back = new URL(safeNext(String(form.get("back") ?? "/feed"), url), url.origin);
+  const back = new URL(safeNext(String(form.get("back") ?? "/"), url), url.origin);
   if (url.pathname === "/_feed/comments") {
     const connection = await connectionById(db, form.get("connection"));
     const target = String(form.get("target") ?? "");
@@ -84,7 +104,7 @@ export async function handleFeed(request, env, url) {
     if (!TARGET_RE.test(target)) return problem("That isn't something you can comment on.", back);
     if (!text) return Response.redirect(back, 303);
     if (text.length > MAX_COMMENT) return problem(`Comments can be up to ${MAX_COMMENT} characters.`, back);
-    const owner = await db.prepare("SELECT name FROM users WHERE is_owner = 1 ORDER BY id LIMIT 1").first();
+    const owner = await db.prepare("SELECT name FROM users LIMIT 1").first();
     try {
       const reply = await callSite(connection.origin, "/_peer/comments", {
         key: connection.their_key,
@@ -121,4 +141,4 @@ export async function handleFeed(request, env, url) {
 }
 
 const problem = (message, back = null) =>
-  html(messagePage(message, { href: back ? back.pathname + back.search : "/feed", label: "Go back" }), 400);
+  html(messagePage(message, { href: back ? back.pathname + back.search : "/", label: "Go back" }), 400);

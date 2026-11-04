@@ -11,13 +11,9 @@ const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/M
 
 const [zipPath] = process.argv.slice(2);
 const BASE = "http://localhost:8787";
-const cli = (...a) => execFileSync("node", ["scripts/invite.mjs", ...a, "--local"], { cwd: WORKER, encoding: "utf8" });
-// These suites share one database, so each starts with an owner of its own: the last suite's is revoked first
-// (a site has only one).
-const newOwner = (name) => {
-  for (const line of cli("list").split("\n")) { const id = /^\s*(\d+)\s.*owner$/.exec(line)?.[1]; if (id) cli("revoke", id); }
-  return cli("add", name, "--owner").match(/http\S+\/_auth\/invite\/\S+/)[0];
-};
+const cli = (...a) => execFileSync("node", ["scripts/owner.mjs", ...a, "--local"], { cwd: WORKER, encoding: "utf8" });
+// Each suite starts on a new site (run.sh), and makes its owner from the terminal: the link to add their first device.
+const newOwner = (name) => cli(name).match(/http\S+\/_auth\/device\/\S+/)[0];
 const results = [];
 const check = (name, ok, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? `  (${extra})` : ""}`); };
 const errors = [];
@@ -95,9 +91,9 @@ check("Activity lists both, newest first, linking to the comment", items.length 
   && items[0].href.startsWith(photoHref + "#c") && items[1].href.startsWith(postHref + "#c"), JSON.stringify(items));
 
 // Refused: another site, an unknown target, too long, an off-site redirect, and nobody signed in.
-const cookie = (await owner.cookies()).find((c) => c.name === "__Host-hb_session").value;
+const cookie = (await owner.cookies()).find((c) => c.name === "__Host-session").value;
 const post = (body, origin = BASE) => fetch(`${BASE}/_comments`, { method: "POST", redirect: "manual",
-  headers: { Cookie: `__Host-hb_session=${cookie}`, Origin: origin, "Content-Type": "application/x-www-form-urlencoded" },
+  headers: { Cookie: `__Host-session=${cookie}`, Origin: origin, "Content-Type": "application/x-www-form-urlencoded" },
   body: new URLSearchParams(body) });
 await owner.goto(`${BASE}/posts`);
 const target = await owner.$eval(`${firstCard} .say input[name=target]`, (i) => i.value);
@@ -110,7 +106,7 @@ check("back can't leave the site", new URL(offsite.headers.get("location"), BASE
 check("signed-out comment refused", (await fetch(`${BASE}/_comments`, { method: "POST", redirect: "manual", headers: { Origin: BASE },
   body: new URLSearchParams({ target, text: "x" }) })).status === 401);
 const forgedDelete = await fetch(`${BASE}/_comments/1/delete`, { method: "POST", redirect: "manual",
-  headers: { Cookie: `__Host-hb_session=${cookie}`, Origin: "https://evil.example", "Content-Type": "application/x-www-form-urlencoded" }, body: "back=/posts" });
+  headers: { Cookie: `__Host-session=${cookie}`, Origin: "https://evil.example", "Content-Type": "application/x-www-form-urlencoded" }, body: "back=/posts" });
 check("delete from another site refused", forgedDelete.status === 403);
 
 // A runaway script is stopped after 30 comments in ten minutes (a few have been made already).

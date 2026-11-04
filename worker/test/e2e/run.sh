@@ -3,7 +3,7 @@
 # passkey authenticator. See README.md.
 #   npm run test:e2e                     everything except upgrade
 #   npm run test:e2e -- <suite>…         some: core fresh albums update feed forged
-#   npm run test:e2e -- upgrade v0.12.0  an older release's site, upgraded in place to this code
+#   npm run test:e2e -- upgrade v0.17.0  an older release's site (0.17.0 or later), upgraded in place to this code
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -55,12 +55,11 @@ stop() { pkill -f "wrangler dev --port 8787" 2>/dev/null; sleep 2; }
 fresh() { stop; rm -rf "$WORKER/.wrangler/state"; start "$@"; }
 suite() { echo "== $1"; (cd "$HERE" && node "$@") | grep -v '^PASS' ; [ "${PIPESTATUS[0]}" = 0 ] || FAILED=1; }
 
-run_core() { # these share one database, in this order
-  fresh
-  suite security.mjs
-  suite comments.mjs "$OUT/fake-export.zip"
-  suite posts.mjs "$OUT/fake-export.zip" "$PHOTOS"
-  suite admin.mjs
+run_core() { # each on a new site
+  fresh; suite security.mjs
+  fresh; suite comments.mjs "$OUT/fake-export.zip"
+  fresh; suite posts.mjs "$OUT/fake-export.zip" "$PHOTOS"
+  fresh; suite admin.mjs
   stop
 }
 run_fresh() { fresh; suite fresh.mjs "$OUT/fake-export.zip" "$PHOTOS"; stop; }

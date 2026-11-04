@@ -34,7 +34,7 @@ export async function profilePictures(db) {
   return { profile: pick("profile_hash"), cover: pick("cover_hash") };
 }
 
-export async function handlePhotos(request, env, url, work) {
+export async function handlePhotos(request, env, url) {
   const db = env.DB;
   if (request.method === "GET" && url.pathname === "/_admin/photos/add") {
     const { results: albums } = await db.prepare("SELECT id, name FROM site_albums ORDER BY created_at DESC").all();
@@ -43,7 +43,7 @@ export async function handlePhotos(request, env, url, work) {
   }
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
 
-  if (url.pathname === "/_admin/photos") return add(env, await request.json().catch(() => ({})), url, work);
+  if (url.pathname === "/_admin/photos") return add(env, await request.json().catch(() => ({})), url);
 
   const form = await request.formData().catch(() => new FormData());
   const back = new URL(safeNext(String(form.get("back") ?? "/photos"), url), url.origin);
@@ -108,7 +108,7 @@ export async function handlePhotos(request, env, url, work) {
 const comments = (db, photos) => photos.map((f) => db.prepare(`DELETE FROM site_comments WHERE target = ?
   AND NOT EXISTS (SELECT 1 FROM media WHERE hash = ?)`).bind(photoKey(f), f.hash));
 
-async function add(env, body, url, work) {
+async function add(env, body, url) {
   const db = env.DB;
   const photos = Array.isArray(body.photos) ? body.photos : [];
   if (!photos.length) return json({ error: "Choose some photos first." }, 400);
@@ -135,7 +135,7 @@ async function add(env, body, url, work) {
       .bind(name, clean(body.description, 2000) || null, now()).first()).id;
   }
 
-  // Optionally as a post too, so friends see it in Feed.
+  // Optionally as a post too, so friends see it on their Home.
   const text = clean(body.text, 5000);
   const share = body.share === true;
   const n = photos.length;
@@ -147,7 +147,7 @@ async function add(env, body, url, work) {
     ...(role ? [db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(`${role}_hash`, photos[0].hash)] : []),
     ...mirror(db),
   ]);
-  if (share) await notifyNewPost(env, work, url.origin);
+  if (share) await notifyNewPost(env, url.origin);
   return json({ href: role ? "/posts" : `/photos/album/${SITE_ID + albumId}` });
 }
 
@@ -181,7 +181,7 @@ ${role ? `<p class="meta">Upload one here, or open any of your photos and press 
   <ul class="picked" hidden></ul>
   <label class="chip pick"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg>
     <span>${role ? "Choose a photo" : "Choose photos"}</span><input type="file" accept="image/*" ${role ? "" : "multiple"} class="hidden"></label>
-  <label class="check"><input type="checkbox" name="share" ${role ? "" : "checked"}> <span>Also share it as a post, so friends see it in their Feed</span></label>
+  <label class="check"><input type="checkbox" name="share" ${role ? "" : "checked"}> <span>Also share it as a post, so friends see it on their Home</span></label>
   <textarea name="text" rows="2" maxlength="5000" placeholder="Say something about it (optional)" aria-label="Say something"></textarea>
   <p class="error" role="alert"></p>
   <div class="actions"><span class="status meta" role="status"></span><button class="post">${role ? "Use this photo" : "Add photos"}</button></div>

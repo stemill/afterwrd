@@ -3,7 +3,7 @@
 //   1. keeps a new key for this site to call it with, and sends it to POST /_connect/<token>/accept here;
 //   2. this site proves the key is theirs, and meant for this site, by calling their /_peer/hello?from=<this site>
 //      with it; then keeps it and answers with a key for them to call this site with.
-// Connections are mutual: both owners read each other's posts and photos from their own sites, in Feed and on friend
+// Connections are mutual: both owners read each other's posts and photos from their own sites, on Home and on friend
 // pages, and can comment on them (peers.js, friends.js). A link only asks: the site that made it shares nothing
 // until its owner approves the request on Friends, so a link passed on to someone else gets them nowhere.
 // Links made with "Invite to afterwrd" on Friends (POST …/invite) are for one person in the Facebook download, last
@@ -259,7 +259,7 @@ function connectionsPage(connections) {
 <p class="crumbs"><a href="/friend">Friends</a> /</p>
 <h1>Connected sites</h1>
 <p class="meta">Connect with friends who have their own afterwrd site, and you become friends: you'll each see the
-other's new posts in <a href="/feed">Feed</a>, and can read each other's posts and photos (everything you've published)
+other's new posts on <a href="/">Home</a>, and can read each other's posts and photos (everything you've published)
 on your own site: press their name. Your comments are kept on their site, as part of their archive. Disconnecting
 ends all of it at once.</p>
 
@@ -334,7 +334,7 @@ posts and photos on your own site, and can comment on them. Either of you can di
     error.textContent = "";
     try {
       await post(location.pathname + location.search);
-      location.assign("/feed");
+      location.assign("/");
     } catch (err) {
       error.textContent = err.message;
       e.target.disabled = false;

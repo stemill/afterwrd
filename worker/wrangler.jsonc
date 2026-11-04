@@ -22,11 +22,12 @@
 	},
 	// Migration files are bundled as text: the Worker applies them itself (src/migrate.js).
 	"rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
-	// Photos and videos, stored by hash in SQLite-backed Durable Objects (src/media.js).
+	// Photos and videos, stored by hash in SQLite-backed Durable Objects (src/media.js), and notes waiting to go to
+	// friends' sites (src/outbox.js).
 	"durable_objects": {
-		"bindings": [{ "name": "MEDIA", "class_name": "MediaStore" }]
+		"bindings": [{ "name": "MEDIA", "class_name": "MediaStore" }, { "name": "OUTBOX", "class_name": "Outbox" }]
 	},
-	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["MediaStore"] }],
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["MediaStore", "Outbox"] }],
 	// Found by name, or created on first deploy. (The installer creates its own, named after the Worker.)
 	"d1_databases": [
 		{

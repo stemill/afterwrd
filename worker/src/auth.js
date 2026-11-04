@@ -1,4 +1,4 @@
-// Passkey sign-in, for the owner only. Your devices (or setup, or scripts/invite.mjs) makes a one-time link; opening
+// Passkey sign-in, for the owner only. Your devices (or setup, or scripts/owner.mjs) makes a one-time link; opening
 // it registers a passkey on that device, which then signs in. Nothing here
 // needs a password or email.
 import {
@@ -7,13 +7,13 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
-import { createInvite, OWNER_INVITE_SECONDS } from "./admin.js";
-import { invitePage, loginPage, messagePage, setupPage, signOutPage } from "./pages.js";
+import { createDeviceLink, DEVICE_LINK_SECONDS } from "./admin.js";
+import { deviceLinkPage, loginPage, messagePage, setupPage, signOutPage } from "./pages.js";
 import { fromBase64Url, html, json, now, randomToken, sha256, toBase64Url } from "./util.js";
 
 // __Host- cookies can only be set by this exact site, over HTTPS, for the whole site.
-const SESSION_COOKIE = "__Host-hb_session";
-const CHALLENGE_COOKIE = "__Host-hb_challenge";
+const SESSION_COOKIE = "__Host-session";
+const CHALLENGE_COOKIE = "__Host-challenge";
 const SESSION_SECONDS = 30 * 24 * 3600;
 const CHALLENGE_SECONDS = 5 * 60;
 
@@ -21,9 +21,7 @@ export async function currentUser(request, env) {
   const token = readCookie(request, SESSION_COOKIE);
   if (!token) return null;
   return env.DB.prepare(
-    // Only the owner signs in: friends see each other from their own sites.
-    `SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
-     WHERE s.token_hash = ? AND s.expires_at > ? AND u.revoked_at IS NULL AND u.is_owner = 1`,
+    `SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ?`,
   ).bind(await sha256(token), now()).first();
 }
 
@@ -41,11 +39,11 @@ export async function handleAuth(request, env, url) {
     if (route === "GET /_auth/logout") return html(signOutPage());
     if (route === "POST /_auth/logout") return await logout(request, env);
     if (route === "GET /_auth/setup" || route === "POST /_auth/setup") return await setup(request, env, url, body);
-    if (request.method === "GET" && url.pathname.startsWith("/_auth/invite/")) {
-      const invite = await findInvite(env, url.pathname.slice("/_auth/invite/".length));
-      return invite
-        ? html(invitePage(invite.name))
-        : html(messagePage("This invite has expired or has already been used. Ask for a new one."), 404);
+    if (request.method === "GET" && url.pathname.startsWith("/_auth/device/")) {
+      const link = await findDeviceLink(env, url.pathname.slice("/_auth/device/".length));
+      return link
+        ? html(deviceLinkPage(link.name))
+        : html(messagePage("This link has expired or has already been used. Make a new one from Your devices."), 404);
     }
     // `return await` so a rejected verification lands in the catch below.
     if (route === "POST /_auth/register/options") return await registerOptions(env, url, body);
@@ -64,7 +62,7 @@ export async function handleAuth(request, env, url) {
 // --- first-run setup (from the installer) ------------------------------------
 
 // The installer deploys afterwrd with a one-time SETUP_CODE and sends its owner to /_auth/setup?code=…. Until
-// someone has a passkey, that link makes (or remakes) the owner's invite, so an abandoned setup can be finished
+// someone has a passkey, that link makes (or remakes) the owner's device link, so an abandoned setup can be finished
 // later. Once any passkey exists it does nothing.
 async function setup(request, env, url, body) {
   const code = request.method === "POST" ? String(body.code ?? "") : url.searchParams.get("code") ?? "";
@@ -78,32 +76,32 @@ async function setup(request, env, url, body) {
 
   const name = String(body.name ?? "").trim().slice(0, 100);
   if (!name) return json({ error: "Give your name." }, 400);
-  let owner = await env.DB.prepare("SELECT id FROM users WHERE is_owner = 1 ORDER BY id LIMIT 1").first();
+  let owner = await env.DB.prepare("SELECT id FROM users LIMIT 1").first();
   if (owner) {
     await env.DB.prepare("UPDATE users SET name = ? WHERE id = ?").bind(name, owner.id).run();
   } else {
     // Only creates the owner while there's still no one, so two setups racing can't both succeed.
-    owner = await env.DB.prepare(`INSERT INTO users (name, is_owner, created_at)
-      SELECT ?, 1, ? WHERE NOT EXISTS (SELECT 1 FROM users) RETURNING id`).bind(name, now()).first();
+    owner = await env.DB.prepare(`INSERT INTO users (name, created_at)
+      SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM users) RETURNING id`).bind(name, now()).first();
     if (!owner) return json({ error: "This site is already set up." }, 409);
   }
   // One live setup link at a time, so an earlier one (from a shared or synced link) can't be kept back.
-  await env.DB.prepare("DELETE FROM invites WHERE user_id = ? AND used_at IS NULL").bind(owner.id).run();
-  return json({ link: await createInvite(env, url, owner.id, OWNER_INVITE_SECONDS) });
+  await env.DB.prepare("DELETE FROM device_links WHERE user_id = ? AND used_at IS NULL").bind(owner.id).run();
+  return json({ link: await createDeviceLink(env, url, owner.id, DEVICE_LINK_SECONDS) });
 }
 
-// --- registration (from an invite) -----------------------------------------
+// --- registration (from a device link) -----------------------------------------
 
 async function registerOptions(env, url, { token }) {
-  const invite = await findInvite(env, token);
-  if (!invite) return json({ error: "This invite has expired or has already been used." }, 400);
+  const link = await findDeviceLink(env, token);
+  if (!link) return json({ error: "This link has expired or has already been used." }, 400);
   const { results: existing } = await env.DB.prepare("SELECT id, transports FROM credentials WHERE user_id = ?")
-    .bind(invite.user_id).all();
+    .bind(link.user_id).all();
   const options = await generateRegistrationOptions({
     rpName: "afterwrd",
     rpID: url.hostname,
-    userName: invite.name,
-    userID: new TextEncoder().encode(String(invite.user_id)),
+    userName: link.name,
+    userID: new TextEncoder().encode(String(link.user_id)),
     attestationType: "none",
     excludeCredentials: existing.map((c) => ({ id: c.id, transports: JSON.parse(c.transports) })),
     authenticatorSelection: { residentKey: "required", userVerification: "preferred" },
@@ -112,9 +110,9 @@ async function registerOptions(env, url, { token }) {
 }
 
 async function registerVerify(request, env, url, { token, response }) {
-  const invite = await findInvite(env, token);
+  const link = await findDeviceLink(env, token);
   const challenge = await readChallenge(request, env, "register");
-  if (!invite || !challenge) return json({ error: "This invite has expired or the request timed out." }, 400);
+  if (!link || !challenge) return json({ error: "This link has expired or the request timed out." }, 400);
   const { verified, registrationInfo } = await verifyRegistrationResponse({
     response,
     expectedChallenge: challenge,
@@ -123,23 +121,23 @@ async function registerVerify(request, env, url, { token, response }) {
   });
   if (!verified || !(await spendChallenge(env, challenge))) return json({ error: "The passkey couldn't be verified." }, 400);
 
-  // Spend the invite before storing the passkey, so two registrations racing on one link can't both succeed.
-  const spent = await env.DB.prepare("UPDATE invites SET used_at = ? WHERE token_hash = ? AND used_at IS NULL")
-    .bind(now(), invite.token_hash).run();
-  if (!spent.meta.changes) return json({ error: "This invite has already been used." }, 400);
+  // Spend the link before storing the passkey, so two registrations racing on one link can't both succeed.
+  const spent = await env.DB.prepare("UPDATE device_links SET used_at = ? WHERE token_hash = ? AND used_at IS NULL")
+    .bind(now(), link.token_hash).run();
+  if (!spent.meta.changes) return json({ error: "This link has already been used." }, 400);
 
   const { credential } = registrationInfo;
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO credentials (id, user_id, public_key, counter, transports, created_at, last_used_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(credential.id, invite.user_id, toBase64Url(credential.publicKey), credential.counter,
+    ).bind(credential.id, link.user_id, toBase64Url(credential.publicKey), credential.counter,
       JSON.stringify(credential.transports ?? []), now(), now()),
     // The first passkey ends setup: any other unused link for the owner (setup can be posted more than once) goes.
-    env.DB.prepare(`DELETE FROM invites WHERE user_id = ?1 AND used_at IS NULL
-      AND (SELECT COUNT(*) FROM credentials WHERE user_id = ?1) = 1`).bind(invite.user_id),
+    env.DB.prepare(`DELETE FROM device_links WHERE user_id = ?1 AND used_at IS NULL
+      AND (SELECT COUNT(*) FROM credentials WHERE user_id = ?1) = 1`).bind(link.user_id),
   ]);
-  return startSession(env, invite.user_id, json({ ok: true }), credential.id);
+  return startSession(env, link.user_id, json({ ok: true }), credential.id);
 }
 
 // --- sign-in ---------------------------------------------------------------
@@ -153,7 +151,7 @@ async function loginVerify(request, env, url, { response }) {
   const challenge = await readChallenge(request, env, "login");
   if (!challenge) return json({ error: "The request timed out. Try again." }, 400);
   const stored = await env.DB.prepare(
-    "SELECT c.* FROM credentials c JOIN users u ON u.id = c.user_id WHERE c.id = ? AND u.revoked_at IS NULL AND u.is_owner = 1",
+    "SELECT * FROM credentials WHERE id = ?",
   ).bind(String(response?.id)).first();
   if (!stored) return json({ error: "That passkey isn't recognised here." }, 400);
 
@@ -242,11 +240,11 @@ async function verify(env, text, mac) {
 
 // --- storage ---------------------------------------------------------------
 
-async function findInvite(env, token) {
+async function findDeviceLink(env, token) {
   if (!token) return null;
   return env.DB.prepare(
-    `SELECT i.token_hash, u.id AS user_id, u.name FROM invites i JOIN users u ON u.id = i.user_id
-     WHERE i.token_hash = ? AND i.used_at IS NULL AND i.expires_at > ? AND u.revoked_at IS NULL AND u.is_owner = 1`,
+    `SELECT l.token_hash, u.id AS user_id, u.name FROM device_links l JOIN users u ON u.id = l.user_id
+     WHERE l.token_hash = ? AND l.used_at IS NULL AND l.expires_at > ?`,
   ).bind(await sha256(String(token)), now()).first();
 }
 

@@ -81,15 +81,15 @@ export async function removeUnusedFiles(env, files) {
     mediaStore(env, shard).remove(unused.filter((h) => h[0] === shard))));
 }
 
-export async function handlePosts(request, env, url, work) {
+export async function handlePosts(request, env, url) {
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
-  if (url.pathname === "/_admin/posts") return create(env, await request.json().catch(() => ({})), url, work);
+  if (url.pathname === "/_admin/posts") return create(env, await request.json().catch(() => ({})), url);
   const del = /^\/_admin\/posts\/(\d+)\/delete$/.exec(url.pathname);
   if (del) return remove(env, url, Number(del[1]) - SITE_ID);
   return new Response("Not found", { status: 404 });
 }
 
-async function create(env, body, url, work) {
+async function create(env, body, url) {
   const db = env.DB;
   const text = typeof body.text === "string" ? body.text.replace(/\r\n?/g, "\n").trim() : "";
   const photos = Array.isArray(body.photos) ? body.photos : [];
@@ -103,7 +103,7 @@ async function create(env, body, url, work) {
     ...addPhotos(db, photos, { inPost: true }),
     ...mirror(db),
   ]);
-  await notifyNewPost(env, work, url.origin);
+  await notifyNewPost(env, url.origin);
   return json({ ok: true });
 }
 

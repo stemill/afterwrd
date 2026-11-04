@@ -1,41 +1,11 @@
 // Brings the database up to date on the first request each Worker instance handles, so a site set up from the
 // installer (or updated) never needs wrangler. Uses wrangler's own bookkeeping table, so `wrangler d1
 // migrations apply` and this agree on what's been applied.
-import m0001 from "../migrations/0001_init.sql";
-import m0002 from "../migrations/0002_owner.sql";
-import m0003 from "../migrations/0003_archive.sql";
-import m0004 from "../migrations/0004_media_store.sql";
-import m0005 from "../migrations/0005_stateless_challenges.sql";
-import m0006 from "../migrations/0006_site_comments.sql";
-import m0007 from "../migrations/0007_site_posts.sql";
-import m0008 from "../migrations/0008_connections.sql";
-import m0009 from "../migrations/0009_comments_elsewhere_site.sql";
-import m0010 from "../migrations/0010_friends_visit.sql";
-import m0011 from "../migrations/0011_albums.sql";
-import m0012 from "../migrations/0012_no_friend_visits.sql";
-import m0013 from "../migrations/0013_friend_links.sql";
-import m0014 from "../migrations/0014_friend_pictures.sql";
-import m0015 from "../migrations/0015_owner_only_and_approval.sql";
-import m0016 from "../migrations/0016_inbox.sql";
+import m0001 from "../migrations/0001_schema.sql";
 
 // Every file in migrations/, in order. A new migration needs adding here too.
 const MIGRATIONS = [
-  ["0001_init.sql", m0001],
-  ["0002_owner.sql", m0002],
-  ["0003_archive.sql", m0003],
-  ["0004_media_store.sql", m0004],
-  ["0005_stateless_challenges.sql", m0005],
-  ["0006_site_comments.sql", m0006],
-  ["0007_site_posts.sql", m0007],
-  ["0008_connections.sql", m0008],
-  ["0009_comments_elsewhere_site.sql", m0009],
-  ["0010_friends_visit.sql", m0010],
-  ["0011_albums.sql", m0011],
-  ["0012_no_friend_visits.sql", m0012],
-  ["0013_friend_links.sql", m0013],
-  ["0014_friend_pictures.sql", m0014],
-  ["0015_owner_only_and_approval.sql", m0015],
-  ["0016_inbox.sql", m0016],
+  ["0001_schema.sql", m0001],
 ];
 
 let ready = null;

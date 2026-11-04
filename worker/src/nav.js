@@ -5,7 +5,6 @@ import pkg from "../package.json";
 import { escape, now } from "./util.js";
 
 // Site files are fetched by a versioned address, so a browser holding an old copy fetches each release's afresh.
-// (heybert 0.1 let browsers keep the stylesheet for a week without checking.)
 export const asset = (path) => `${path}?v=${pkg.version}`;
 
 const ICONS = {
@@ -21,7 +20,7 @@ const ICONS = {
   connected: '<circle cx="7" cy="9" r="3"/><circle cx="17" cy="9" r="3"/><path d="M2 20c0-2.8 2.2-5 5-5s5 2.2 5 5"/><path d="M12 20c0-2.8 2.2-5 5-5s5 2.2 5 5"/>',
   profile: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>',
   memories: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>',
-  people: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M19 8v6M16 11h6"/>',
+  devices: '<rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M11 18h2"/>', // a phone
   import: '<path d="M12 15V4M7 9l5-5 5 5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
   update: '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/>',
   connections: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
@@ -90,7 +89,7 @@ export const ownerMain = (newComments = 0, requests = 0) => [
 export const ownerMenu = ({ memories = true, updateWaiting = false } = {}) => [
   { key: "profile", label: "Your profile", href: "/posts" },
   ...(memories ? [{ key: "memories", label: "Memories", href: "/memories" }] : []),
-  { key: "people", label: "Your devices", href: "/_admin" },
+  { key: "devices", label: "Your devices", href: "/_admin" },
   { key: "import", label: "Import", href: "/_admin/import" },
   { key: "export", label: "Download everything", href: "/_admin/export" },
   { key: "update", label: updateWaiting ? "Update available" : "Update", href: "/_admin/update", badge: updateWaiting },

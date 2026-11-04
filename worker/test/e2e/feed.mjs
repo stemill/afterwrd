@@ -71,7 +71,7 @@ await compose(ann, A, "Ann's news from site A");
 await compose(bob, B, "Bob's holiday", [`${fixtures}/photo1.jpg`]);
 
 // Before connecting.
-await ann.goto(`${A}/feed`);
+await ann.goto(`${A}/`);
 check("Home is first in the owner's menu", (await ann.$$eval("header.site nav.main a", (l) => l.map((a) => a.querySelector("span").textContent)))[0] === "Home");
 check("empty Feed explains connecting", (await ann.$eval("main", (m) => m.textContent)).includes("Connect with friends"));
 
@@ -112,8 +112,7 @@ await bob.goto(`${B}/`);
 let bobFeed = await feedCards(bob);
 check("Bob's Feed has Ann's post, and only her afterwrd post", bobFeed.length === 1 && bobFeed[0].who === "Ann Example"
   && bobFeed[0].text === "Ann's news from site A", JSON.stringify(bobFeed));
-await ann.goto(`${A}/feed`);
-check("Feed is now part of Home", new URL(ann.url()).pathname === "/");
+await ann.goto(`${A}/`);
 check("Home shows Ann's own posts and Bob's together", Boolean(await ann.$("article.own")) && Boolean(await ann.$("article.from-friend")));
 let annFeed = await feedCards(ann);
 check("Ann's Feed has Bob's post with its photo", annFeed.length === 1 && annFeed[0].who === "Bob Example" && annFeed[0].photos === 1, JSON.stringify(annFeed));
@@ -128,14 +127,14 @@ await ann.goto(`${A}/`);
 check("Ann's Home shows Bob's picture on his post", await ann.$eval("article.from-friend header img.who", (i) => i.getAttribute("src").startsWith("http://localhost:8788/files/")).catch(() => false));
 await ann.goto(`${A}/friend`);
 check("…and her Friends page remembers it", Boolean(await ann.$(".friend-link img.who")));
-await ann.goto(`${A}/feed`);
+await ann.goto(`${A}/`);
 check("the photo loads straight from Bob's site, by a signed link", await ann.$eval("article.from-friend .collage img", (i, b) => i.naturalWidth > 0
   && i.getAttribute("src").startsWith(`${b}/files/`) && i.getAttribute("src").includes("&sig="), B));
 await ann.goto(`${A}/_admin/connections`);
 check("Ann's Connections lists Bob", (await ann.$eval("table.numbers tbody", (t) => t.textContent)).includes("Bob Example"));
 
 // Ann comments on Bob's post from her Feed; it's stored on Bob's site.
-await ann.goto(`${A}/feed`);
+await ann.goto(`${A}/`);
 await ann.type("article.from-friend .say textarea", "Looks great, Bob!");
 await Promise.all([ann.waitForNavigation(), ann.click("article.from-friend .say button")]);
 annFeed = await feedCards(ann);
@@ -151,7 +150,7 @@ check("Bob's Activity counts it as new", (await bob.$eval('header.site a[href="/
 // Bob replies on his own site; Ann sees the reply in her Feed but can't delete it.
 await bob.type("main article.card:first-of-type .say textarea", "Thanks Ann");
 await Promise.all([bob.waitForNavigation(), bob.click("main article.card:first-of-type .say button")]);
-await ann.goto(`${A}/feed`);
+await ann.goto(`${A}/`);
 annFeed = await feedCards(ann);
 check("Ann sees Bob's reply, not deletable by her", annFeed[0].comments.map((c) => c.text).join("|") === "Looks great, Bob!|Thanks Ann"
   && !annFeed[0].comments[1].canDelete);
@@ -169,7 +168,7 @@ check("…saying who replied, where, and what", note.what === "Bob Example repli
 // Comments from Bob's visitors (and other friends) stay on Bob's site.
 sql(stateB, `INSERT INTO site_comments (target, author_id, author_name, text, created_at, origin)
   SELECT target, NULL, 'Bob''s visitor', 'For Bob''s eyes', strftime('%s','now'), 'site' FROM site_comments LIMIT 1`);
-await ann.goto(`${A}/feed`);
+await ann.goto(`${A}/`);
 check("friends see the whole thread, visitors' comments included (as when visiting)", (await feedCards(ann))[0].comments.some((c) => c.text === "For Bob's eyes"));
 
 // Ann deletes her comment from her Feed.
@@ -198,7 +197,7 @@ check("can't delete Bob's own comments", sql(stateB, `SELECT COUNT(*) AS n FROM 
 check("a used Connect link is refused", (await (await browser.createBrowserContext()).newPage().then(async (p) => (await p.goto(link)).status())) === 404);
 check("Feed actions need the owner's session", (await fetch(`${A}/_feed/comments`, { method: "POST", redirect: "manual", headers: { Origin: A } })).status === 401);
 check("another site can't post Ann's comments", (await fetch(`${A}/_feed/comments`, { method: "POST", redirect: "manual",
-  headers: { Origin: "https://evil.example", Cookie: `__Host-hb_session=${(await ann.cookies()).find((c) => c.name === "__Host-hb_session").value}` } })).status === 403);
+  headers: { Origin: "https://evil.example", Cookie: `__Host-session=${(await ann.cookies()).find((c) => c.name === "__Host-session").value}` } })).status === 403);
 
 // Bob, connected to Ann, can't pass himself off as Ann to a third site using the key Ann gave him.
 const cara = await owner(C, "Cara Example");
@@ -216,9 +215,9 @@ check("hello refuses a finished connection's key", (await fetch(`${A}/_peer/hell
 
 // Ann reads Bob's posts and photos without leaving her own site.
 const bobId = sql(stateA, "SELECT id FROM connections")[0].id;
-await ann.goto(`${A}/feed`);
+await ann.goto(`${A}/`);
 await Promise.all([ann.waitForNavigation(), ann.click("article.from-friend header .what a")]);
-check("Bob's name in Feed opens his page on Ann's site", ann.url() === `${A}/friend/${bobId}/posts`, ann.url());
+check("Bob's name on Home opens his page on Ann's site", ann.url() === `${A}/friend/${bobId}/posts`, ann.url());
 const bobsPosts = await ann.$$eval("main article.card .text", (l) => l.map((t) => t.textContent));
 check("his imported posts are there too", bobsPosts.includes("Hello from the installer test") && bobsPosts.includes("Bob's holiday"),
   bobsPosts.join("|") || (await ann.$eval("main", (m) => m.innerText.slice(0, 300))));
@@ -299,7 +298,7 @@ check("Connections has no Visit button", !(await ann.$('a[href^="/_feed/visit"]'
 check("…and the old Visit link is gone", (await ann.goto(`${A}/_feed/visit?to=${encodeURIComponent(B)}`)).status() === 404);
 
 // Download everything, on both sites: Ann's copy of her comment and Bob's copy share one address.
-await ann.goto(`${A}/feed`);
+await ann.goto(`${A}/`);
 await ann.type("article.from-friend .say textarea", "Kept forever");
 await Promise.all([ann.waitForNavigation(), ann.click("article.from-friend .say button")]);
 async function download(page, site, label) {
@@ -350,7 +349,7 @@ const photo = bobsNote.attachment.find((a) => a.type === "Image");
 const stored = bobZip.read(photo["afterwrd:file"]);
 check("photos are in the zip, matching their fingerprint", createHash("sha256").update(stored).digest("hex") === photo.url.split("/files/")[1]);
 check("photo addresses lead to the photo", (await (await fetch(photo.id, { redirect: "manual",
-  headers: { Cookie: `__Host-hb_session=${(await bob.cookies()).find((c) => c.name === "__Host-hb_session").value}` } })).headers.get("location") ?? "").match(/\/photos\/\d+$/));
+  headers: { Cookie: `__Host-session=${(await bob.cookies()).find((c) => c.name === "__Host-session").value}` } })).headers.get("location") ?? "").match(/\/photos\/\d+$/));
 const everything = annZip.list.filter((f) => f.endsWith(".json")).map((f) => annZip.read(f.split("/").pop()).toString()).join("");
 const annKeys = sql(stateA, "SELECT their_key, key_hash FROM connections")[0];
 check("no keys in the download", !everything.includes(annKeys.their_key) && !everything.includes(annKeys.key_hash) && !everything.includes("key_hash"));
@@ -358,7 +357,7 @@ check("Ann's connections list Bob by address", annZip.json("connections.json").o
 
 // Phone view of the Feed, then disconnect.
 await ann.setViewport({ width: 375, height: 800, isMobile: true });
-await ann.goto(`${A}/feed`);
+await ann.goto(`${A}/`);
 check("no sideways scrolling on a phone", await ann.evaluate(() => document.documentElement.scrollWidth <= 375));
 await ann.screenshot({ path: `${OUT}/feed-phone.png`, fullPage: true });
 await ann.setViewport({ width: 1280, height: 900 });
@@ -432,6 +431,24 @@ await ann.screenshot({ path: `${OUT}/live-bar.png` });
 await Promise.all([ann.waitForNavigation(), ann.click(".live-bar button")]);
 check("Show brings it in", (await feedCards(ann)).some((c) => c.who === "Cara Example" && c.text === "Cara's first post"));
 check("…and friends' new posts don't count as notifications", !(await ann.$('header.site a[href="/activity"] .count')));
+
+// More friends than one page may ask: 45 more connections, to sites that don't exist, ahead of Cara in line.
+sql(stateA, `INSERT INTO connections (id, origin, name, their_key, key_hash, created_at, connected_at, approved_at) VALUES
+  ${Array.from({ length: 45 }, (_, i) => `(${-(i + 1)}, 'https://friend${i + 1}.invalid', 'Made-up friend ${i + 1}', '${"k".repeat(43)}',
+  'hash-${i + 1}', strftime('%s','now'), strftime('%s','now'), strftime('%s','now'))`).join(",")}`);
+const caraPostsBefore = sql(stateC, "SELECT COUNT(*) AS n FROM inbox WHERE kind = 'post'")[0].n;
+await compose(ann, A, "Ann to all 46 friends");
+check("a post reaches a friend 46th in line (the outbox sends in batches)",
+  await waitFor(() => sql(stateC, "SELECT COUNT(*) AS n FROM inbox WHERE kind = 'post'")[0].n === caraPostsBefore + 1, 20_000));
+await ann.goto(`${A}/`);
+check("Home asks at most 40 sites, Cara first as she's posted lately",
+  sql(stateA, "SELECT COUNT(*) AS n FROM connections WHERE feed_checked_at IS NOT NULL")[0].n <= 40
+  && (await feedCards(ann)).some((c) => c.who === "Cara Example"));
+const notices = await ann.$$eval("p.notice", (l) => l.map((p) => p.textContent));
+check("sites that can't be reached are summed up in one line", notices.length === 1 && /Couldn't reach 39 friends' sites/.test(notices[0]), notices.join(" | "));
+check("the friends column shows a dozen, then a link to the rest", (await ann.$$(".mini-friends li")).length === 12
+  && (await ann.$eval('aside.side a[href="/friend"]', (a) => a.textContent).catch(() => "")) === "All 46 friends");
+sql(stateA, "DELETE FROM connections WHERE id < 0");
 
 check("no script errors", errors.length === 0, errors.join(" | "));
 await browser.close();

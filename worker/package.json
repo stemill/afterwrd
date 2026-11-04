@@ -1,12 +1,12 @@
 {
   "name": "afterwrd-worker",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "node scripts/deploy.mjs",
-    "invite": "node scripts/invite.mjs",
+    "owner": "node scripts/owner.mjs",
     "test:ingest": "node --disable-warning=ExperimentalWarning test/compare-ingest.mjs",
     "release": "node scripts/release.mjs",
     "test:e2e": "test/e2e/run.sh"

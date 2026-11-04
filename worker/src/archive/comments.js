@@ -19,7 +19,7 @@ export { postKey };
 export const photoKey = (m) => (m.hash ? `photo-${m.hash}` : null);
 
 const COMMENT_SQL = `
-  SELECT c.*, COALESCE(u.name, c.author_name) AS name, COALESCE(u.is_owner, 0) AS author_is_owner FROM site_comments c
+  SELECT c.*, COALESCE(u.name, c.author_name) AS name, (c.author_id IS NOT NULL) AS author_is_owner FROM site_comments c
   LEFT JOIN users u ON u.id = c.author_id`;
 
 /** Map of target -> its comments, oldest first. */
@@ -75,7 +75,7 @@ export async function findTarget(db, target) {
   return post && { post };
 }
 
-export async function handleComments(request, env, url, user, work) {
+export async function handleComments(request, env, url, user) {
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
   if (request.headers.get("Origin") !== url.origin) return new Response("Request from another site", { status: 403 });
   const form = await request.formData().catch(() => new FormData());
@@ -93,9 +93,9 @@ export async function handleComments(request, env, url, user, work) {
       SELECT ?1, ?2, ?3, ?4, ?5, ?6
       WHERE (SELECT COUNT(*) FROM site_comments WHERE author_id = ?2 AND created_at > ?5 - ?7) < ?8
         AND (SELECT COUNT(*) FROM site_comments WHERE author_id = ?2 AND created_at > ?5 - 86400) < ?9
-      RETURNING id`).bind(target, user.id, user.name, text, now(), user.site ?? "site", RATE.seconds, RATE.count, DAILY).first();
+      RETURNING id`).bind(target, user.id, user.name, text, now(), "site", RATE.seconds, RATE.count, DAILY).first();
     if (!row) return message("That's a lot of comments for now. Try again later.", back, 429);
-    await notifyComment(env, work, url.origin, target, { name: user.name, text });
+    await notifyComment(env, url.origin, target, { name: user.name, text });
     back.hash = `c${row.id}`;
     return Response.redirect(back, 303);
   }
@@ -103,7 +103,7 @@ export async function handleComments(request, env, url, user, work) {
   const del = /^\/_comments\/(\d+)\/delete$/.exec(url.pathname);
   if (del) {
     const comment = await db.prepare("SELECT * FROM site_comments WHERE id = ?").bind(Number(del[1])).first();
-    if (comment && (comment.author_id === user.id || user.is_owner)) {
+    if (comment) {
       await db.prepare("DELETE FROM site_comments WHERE id = ?").bind(comment.id).run();
       back.hash = `t-${comment.target}`;
     }

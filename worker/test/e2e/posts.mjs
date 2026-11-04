@@ -11,13 +11,9 @@ const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/M
 
 const [zipPath, fixtures] = process.argv.slice(2);
 const BASE = "http://localhost:8787";
-const cli = (...a) => execFileSync("node", ["scripts/invite.mjs", ...a, "--local"], { cwd: WORKER, encoding: "utf8" });
-// These suites share one database, so each starts with an owner of its own: the last suite's is revoked first
-// (a site has only one).
-const newOwner = (name) => {
-  for (const line of cli("list").split("\n")) { const id = /^\s*(\d+)\s.*owner$/.exec(line)?.[1]; if (id) cli("revoke", id); }
-  return cli("add", name, "--owner").match(/http\S+\/_auth\/invite\/\S+/)[0];
-};
+const cli = (...a) => execFileSync("node", ["scripts/owner.mjs", ...a, "--local"], { cwd: WORKER, encoding: "utf8" });
+// Each suite starts on a new site (run.sh), and makes its owner from the terminal: the link to add their first device.
+const newOwner = (name) => cli(name).match(/http\S+\/_auth\/device\/\S+/)[0];
 const sql = (q) => JSON.parse(execFileSync("./node_modules/.bin/wrangler", ["d1", "execute", "afterwrd", "--local", "--json", "--command", q],
   { cwd: WORKER, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }))[0].results;
 const results = [];
@@ -50,7 +46,7 @@ async function importZip(page) {
     || document.getElementById("error").textContent, { timeout: 180_000, polling: 500 });
   return page.$eval("#error", (e) => e.textContent);
 }
-const cookieOf = async (page) => (await page.cookies()).find((c) => c.name === "__Host-hb_session").value;
+const cookieOf = async (page) => (await page.cookies()).find((c) => c.name === "__Host-session").value;
 const cards = (page) => page.$$eval("main article.card", (l) => l.map((a) => ({
   badge: a.querySelector(".badge")?.textContent, what: a.querySelector(".what")?.textContent.trim(),
   text: a.querySelector(".text")?.textContent, photos: a.querySelectorAll(".collage .tile").length,
@@ -83,7 +79,7 @@ first = (await cards(owner))[0];
 check("photo post appears first with both photos", first.text === "Two photos" && first.what === "You" && first.photos === 2, JSON.stringify(first));
 const stored = sql("SELECT id, hash, thumb_hash, width, height FROM media WHERE id >= 1000000000 ORDER BY id");
 const cookie = await cookieOf(owner);
-const get = (hash, c = cookie) => fetch(`${BASE}/files/${hash}`, { headers: { Cookie: `__Host-hb_session=${c}` } });
+const get = (hash, c = cookie) => fetch(`${BASE}/files/${hash}`, { headers: { Cookie: `__Host-session=${c}` } });
 const big = Buffer.from(await (await get(stored[0].hash)).arrayBuffer());
 check("the original really had a hidden detail", readFileSync(`${fixtures}/big-secret.jpg`).includes("SECRET-LOCATION"));
 check("stored photo is shrunk to 2560 and stripped of hidden details", stored[0].width === 2560 && stored[0].height === 1920
@@ -116,7 +112,7 @@ check("comments on them survive too", sql("SELECT COUNT(*) AS n FROM site_commen
 
 // Who may do what.
 const api = (path, body, c, origin = BASE) => fetch(BASE + path, { method: "POST", redirect: "manual",
-  headers: { Cookie: `__Host-hb_session=${c}`, Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  headers: { Cookie: `__Host-session=${c}`, Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify(body) });
 check("signed out, nobody can post", ![200, 201].includes((await api("/_admin/posts", { text: "sneaky" }, "nobody")).status));
 check("…or delete", ![200, 201, 303].includes((await api(`/_admin/posts/${1000000000 + 1}/delete`, {}, "nobody")).status));
 check("another site can't post as the owner", (await api("/_admin/posts", { text: "csrf" }, cookie, "https://evil.example")).status === 403);

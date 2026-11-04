@@ -25,13 +25,16 @@ const TOKEN_URL = "https://dash.cloudflare.com/profile/api-tokens?permissionGrou
   + encodeURIComponent(JSON.stringify(PERMISSIONS)) + "&accountId=*&zoneId=all&name=afterwrd%20installer";
 const TOKENS_PAGE = "https://dash.cloudflare.com/profile/api-tokens";
 
-// Pasted over an existing afterwrd, this Worker still has afterwrd's photo store attached; Cloudflare only accepts
-// the paste if the class is still exported. This stand-in is replaced by the real one as soon as installing
-// finishes, and the photos it holds are untouched in between.
+// Pasted over an existing afterwrd, this Worker still has afterwrd's photo store and outbox attached; Cloudflare only
+// accepts the paste if their classes are still exported. These stand-ins are replaced by the real ones as soon as
+// installing finishes, and what they hold is untouched in between.
 export class MediaStore {
   fetch() {
     return new Response("afterwrd is being updated; try again in a minute.", { status: 503 });
   }
+}
+export class Outbox {
+  async alarm() {} // notes wait until the real outbox is back
 }
 
 export default {
