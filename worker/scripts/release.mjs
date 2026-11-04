@@ -139,6 +139,12 @@ writeFileSync(join(site, "index.html"), readFileSync(join(worker, "installer", "
   .replaceAll("__MANIFEST_SHORT__", sha256(manifestBytes).slice(0, 12))
   .replaceAll("__RELEASE_PAGE__", repo ? `https://github.com/${repo}/releases/tag/v${version}` : base)
   .replaceAll("__REPO_PAGE__", repo ? `https://github.com/${repo}` : base));
+// "How it works", beside it at /how-it-works/.
+mkdirSync(join(site, "how-it-works"), { recursive: true });
+writeFileSync(join(site, "how-it-works", "index.html"), readFileSync(join(worker, "installer", "how-it-works.html"), "utf8")
+  .replaceAll("__VERSION__", version)
+  .replaceAll("__RELEASE_PAGE__", repo ? `https://github.com/${repo}/releases/tag/v${version}` : base)
+  .replaceAll("__REPO_PAGE__", repo ? `https://github.com/${repo}` : base));
 // GitHub Pages keeps a custom domain in a CNAME file beside the page; the release replaces the whole branch, so
 // it's written here every time or the domain would be dropped.
 if (project?.site) writeFileSync(join(site, "CNAME"), `${project.site}\n`);

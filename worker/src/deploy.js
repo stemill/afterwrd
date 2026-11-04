@@ -16,10 +16,23 @@ export async function api(token, path, init = {}) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.success === false) {
     const message = data.errors?.map((e) => e.message).join("; ") || `HTTP ${response.status}`;
-    throw new Error(`Cloudflare said: ${message}`);
+    throw Object.assign(new Error(`Cloudflare said: ${message}`), { status: response.status });
   }
   return data.result;
 }
+
+/** A Worker's settings, or null only when Cloudflare says there's no such Worker (any other failure is thrown). */
+export async function workerSettings(token, account, script) {
+  try {
+    return await api(token, `/accounts/${account}/workers/scripts/${script}/settings`);
+  } catch (error) {
+    if (error.status === 404) return null;
+    throw error;
+  }
+}
+
+/** The accounts a token can see; the installer warns before remembering a token that spans more than one. */
+export const accountIds = async (token) => (await api(token, "/accounts")).map((a) => a.id);
 
 /** The account (of those the token can see) that has a Worker called `script`, and that Worker's settings. */
 export async function findWorker(token, script) {

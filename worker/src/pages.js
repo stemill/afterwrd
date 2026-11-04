@@ -141,6 +141,8 @@ this device, then you can import your Facebook download and invite friends.</p>
 <button id="go">Continue</button>
 <p id="error" role="alert"></p>`, `
   const code = new URLSearchParams(location.search).get("code");
+  // Off the address bar and out of history, so an abandoned setup doesn't leave the code lying around.
+  history.replaceState(null, "", "/_auth/setup");
   run(document.getElementById("go"), async () => {
     const name = document.getElementById("name").value.trim();
     if (!name) throw new Error("Give your name.");

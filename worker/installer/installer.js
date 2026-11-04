@@ -15,7 +15,7 @@
 //      installer a name with a random ending, so the address is chosen here instead)
 // If you tick "Remember it", the token is kept as the site's encrypted secret UPDATE_TOKEN, so the Update page can
 // install later releases in one click (the site can forget it there). Otherwise it isn't stored: delete it afterwards.
-import { api, deployVersion, existingDatabase, findOrCreateDatabase, findWorker, loadRelease, uploadAssets } from "../src/deploy.js";
+import { accountIds, api, deployVersion, existingDatabase, findOrCreateDatabase, findWorker, loadRelease, uploadAssets, workerSettings } from "../src/deploy.js";
 
 const RELEASE = "__RELEASE_BASE__";
 const MANIFEST_SHA256 = "__MANIFEST_SHA256__";
@@ -37,9 +37,11 @@ export class MediaStore {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    // The token is typed into this page, so it's only ever served over https.
+    if (url.protocol === "http:") return Response.redirect(`https://${url.host}${url.pathname}${url.search}`, 301);
     if (request.method === "GET" && url.pathname === "/") {
       // Pasted over an existing afterwrd, the Worker still has its database: that's an update, at the same address.
-      return new Response(page(url, Boolean(env?.DB)), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+      return new Response(page(url, Boolean(env?.DB)), { headers: { ...HEADERS, "Content-Type": "text/html; charset=utf-8" } });
     }
     const step = url.pathname.slice("/install/".length);
     if (request.method === "POST" && url.pathname.startsWith("/install/") && Object.hasOwn(STEPS, step)) {
@@ -50,9 +52,23 @@ export default {
         return Response.json({ error: error.message }, { status: 400 });
       }
     }
-    return new Response("afterwrd is being installed.", { status: 404 });
+    return new Response("afterwrd is being installed.", { status: 404, headers: HEADERS });
   },
 };
+
+const HEADERS = {
+  "Cache-Control": "no-store",
+  "Content-Security-Policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; form-action 'self'",
+  "Strict-Transport-Security": "max-age=31536000",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "same-origin",
+};
+
+// Cloudflare account ids are 32 hex characters; anything else is refused before it reaches an API path.
+function accountId(id) {
+  if (!/^[0-9a-f]{32}$/.test(String(id ?? ""))) throw new Error("That isn't a Cloudflare account id.");
+  return id;
+}
 
 // The Worker's address is <script>.<your-subdomain>.workers.dev.
 function scriptName(url) {
@@ -64,6 +80,14 @@ const accountDomain = (url) => url.hostname.split(".").slice(1).join("."); // <y
 // The address to suggest: "afterwrd" when this is the Deploy page's installer, otherwise this Worker's own name.
 const suggestedName = (script) => (/^afterwrd-installer(-|$)/.test(script) ? "afterwrd" : script);
 
+// Refuses a name another Worker has. Only "no such Worker" counts as free: an API hiccup is an error, not a yes.
+async function assertFree(token, account, name) {
+  if (await workerSettings(token, account, name)) {
+    throw new Error(`There's already a Worker called "${name}" in this Cloudflare account. Choose another address, or if `
+      + "it's left from an earlier try, delete it in Cloudflare (Workers & Pages) and press Install again.");
+  }
+}
+
 // A Worker name, which is also the first part of the site's address.
 function siteName(name) {
   const clean = String(name ?? "").trim().toLowerCase();
@@ -73,33 +97,31 @@ function siteName(name) {
   return clean;
 }
 
-async function workerSettings(token, account, script) {
-  return api(token, `/accounts/${account}/workers/scripts/${script}/settings`).catch(() => null);
-}
 
 const STEPS = {
   // Which of the token's accounts this Worker is in, whether it's already afterwrd, which release goes in, and the
   // Worker afterwrd goes into: this one for an update, or the chosen name (which mustn't be taken) for a new site.
   async check({ token, name }, script) {
+    if (!String(token ?? "").trim()) throw new Error("Paste your API token first.");
+    const { account, settings } = await findWorker(token, script); // the token is checked before anything is fetched
     const { manifest } = await loadRelease(RELEASE, MANIFEST_SHA256);
-    const { account, settings } = await findWorker(token, script);
     const upgrade = Boolean(existingDatabase(settings));
     const target = upgrade ? script : siteName(name ?? script);
-    if (target !== script && await workerSettings(token, account, target)) {
-      throw new Error(`There's already a Worker called "${target}" in this Cloudflare account. Choose another address, or if `
-        + "it's left from an earlier try, delete it in Cloudflare (Workers & Pages) and press Install again.");
-    }
-    return { account, version: manifest.version, upgrade, target };
+    if (target !== script) await assertFree(token, account, target);
+    // A token that spans several accounts can change all of them, so the page unticks Remember and says why.
+    const accounts = (await accountIds(token)).length;
+    return { account, version: manifest.version, upgrade, target, severalAccounts: accounts > 1 };
   },
 
   // The site's own files (stylesheet, import page).
   async assets({ token, account, target }, script) {
-    return { jwt: await uploadAssets(token, account, siteName(target ?? script), await loadRelease(RELEASE, MANIFEST_SHA256)) };
+    return { jwt: await uploadAssets(token, accountId(account), siteName(target ?? script), await loadRelease(RELEASE, MANIFEST_SHA256)) };
   },
 
   // The database and the code, as a new version of this Worker, or as a new Worker at the chosen address.
   // With `remember`, the token is kept as the secret UPDATE_TOKEN for one-click updates.
   async deploy({ token, account, jwt, remember, target }, script, url) {
+    accountId(account);
     const release = await loadRelease(RELEASE, MANIFEST_SHA256);
     const settings = await api(token, `/accounts/${account}/workers/scripts/${script}/settings`);
     const existing = existingDatabase(settings);
@@ -115,6 +137,7 @@ const STEPS = {
     }
     const name = siteName(target ?? script);
     const moved = name !== script;
+    if (moved) await assertFree(token, account, name); // checked again here, so a new Worker never lands on another
     const database = await findOrCreateDatabase(token, account, name);
     const setupCode = [...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, "0")).join("");
     const secrets = { SETUP_CODE: setupCode, ...(remember && { UPDATE_TOKEN: token }) };
@@ -132,6 +155,7 @@ const STEPS = {
   // Once afterwrd answers at its own address, this installer is removed. Only ever this Worker, only while it isn't
   // afterwrd itself, and only once the new site has its database.
   async cleanup({ token, account, target }, script) {
+    accountId(account);
     const name = siteName(target);
     if (name === script) return { ok: true };
     const [mine, theirs] = await Promise.all([workerSettings(token, account, script), workerSettings(token, account, name)]);
@@ -203,11 +227,11 @@ function page(url, isUpdate) {
   #log li::before { content: ""; position: absolute; left: 4px; top: 0.55em; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
   #log li.done { color: var(--text); }
   #log li.done::before { content: "✓"; background: none; color: var(--moss); top: 0; left: 2px; width: auto; height: auto; font-weight: 800; }
-  #error { color: #ff8070; }
+  #error, .warn { color: #ff8070; }
   #error:empty { display: none; }
 
   #done { border-top: 1px solid var(--border); margin-top: 20px; padding-top: 16px; }
-  #done[hidden], #done [hidden], #form[hidden] { display: none; }
+  #done[hidden], #done [hidden], #form[hidden], #several[hidden] { display: none; }
   #done h2 { font-size: 1.2rem; }
   #done .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
   .foot { margin: 22px 0 0; }
@@ -234,7 +258,9 @@ function page(url, isUpdate) {
     <label class="remember"><input type="checkbox" id="remember" checked><span>Remember it, so updates are one click</span>
     <span class="meta">It's kept as an encrypted secret of your site, which no one can read back, not even you. It can
     change the Workers in this Cloudflare account, so untick this if the account is used for anything else. You can
-    forget it from afterwrd's Update page at any time.</span></label>`)}
+    forget it from afterwrd's Update page at any time.</span></label>
+    <p id="several" class="meta warn" hidden>This token can see more than one Cloudflare account, so it won't be
+    remembered. For one-click updates, make a token in an account that's just for afterwrd.</p>`)}
   ${step(`<button id="go">${isUpdate ? "Update afterwrd" : "Install afterwrd"}</button>`, "go")}
 </ol>
 </section>
@@ -283,7 +309,12 @@ function page(url, isUpdate) {
     try {
       const name = document.getElementById("name")?.value;
       log("Checking the token and the release…");
-      const { account, version, upgrade, target } = await step("check", { token, name });
+      const { account, version, upgrade, target, severalAccounts } = await step("check", { token, name });
+      const rememberBox = document.getElementById("remember");
+      if (severalAccounts && rememberBox.checked) {
+        rememberBox.checked = false;
+        document.getElementById("several").hidden = false;
+      }
       log("Uploading afterwrd " + version + "'s site files…");
       const { jwt } = await step("assets", { token, account, target });
       log(upgrade ? "Updating afterwrd to " + version + "…" : "Creating the database and installing afterwrd…");

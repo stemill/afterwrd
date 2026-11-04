@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How afterwrd works</title>
+<meta name="description" content="Where an afterwrd site runs, what it talks to, how signing in works, how it's locked down, and how to check all of this for yourself.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Crect%20width%3D%2224%22%20height%3D%2224%22%20rx%3D%226%22%20fill%3D%22%23ff8a3d%22%2F%3E%3Cpath%20d%3D%22M12%204a8%208%200%201%201-4.7%2014.5L3.8%2020l1.2-3.6A8%208%200%200%201%2012%204z%22%20transform%3D%22translate(2.4%202.2)%20scale(0.8)%22%20fill%3D%22none%22%20stroke%3D%22%2316201b%22%20stroke-width%3D%223.6%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E">
+<style>
+  /* Campfire, as on the install page and the sites themselves (the fonts are the device's own here). */
+  :root { --bg: #16201b; --surface: #1f2b25; --raised: #263329; --sunken: #121a16; --text: #ede6da; --muted: #a9a092; --border: #2e3d35;
+          --accent: #ff8a3d; --accent-strong: #ffab73; --accent-soft: #2b2118; --on-accent: #16201b; --moss: #8fbf7f; color-scheme: dark;
+          --round: ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font: 900 2.5rem/1.12 var(--round); margin: 0 0 12px; letter-spacing: -0.02em; }
+  .brand { display: inline-flex; align-items: center; font: 900 1.7rem/1 var(--round); margin: 0 0 26px; letter-spacing: -0.02em; color: inherit; text-decoration: none; }
+  .brand .o { width: 0.82em; height: 0.82em; margin: 0.08em 0.01em 0; color: var(--accent); }
+  .lede { color: var(--muted); margin: 0 0 24px; font-size: 1.08rem; }
+  nav.contents { background: var(--surface); border-radius: 22px; padding: 16px 20px; margin: 0 0 28px; }
+  nav.contents ol { margin: 6px 0 0; padding-left: 1.3rem; }
+  @media (min-width: 560px) { nav.contents ol { columns: 2; gap: 24px; } }
+  nav.contents li { margin: 3px 0; break-inside: avoid; }
+  section { margin: 34px 0 0; }
+  h2 { font: 900 1.45rem/1.2 var(--round); margin: 0 0 10px; letter-spacing: -0.01em; }
+  h3 { font: 800 1.05rem/1.3 var(--round); margin: 20px 0 6px; }
+  p, li { margin: 8px 0; }
+  ul { padding-left: 1.2rem; }
+  a { color: var(--accent-strong); }
+  code { font: 0.88em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--sunken); padding: 0.1em 0.4em; border-radius: 6px; }
+  .meta { color: var(--muted); font-size: 0.9rem; }
+  .boxes { display: grid; gap: 12px; margin: 14px 0; }
+  @media (min-width: 560px) { .boxes { grid-template-columns: 1fr 1fr; } }
+  .box { background: var(--surface); border-radius: 18px; padding: 14px 16px; }
+  .box strong { display: block; font: 800 1rem var(--round); margin-bottom: 4px; }
+  .box p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+  .flow { list-style: none; padding: 0; margin: 14px 0; display: grid; gap: 8px; }
+  .flow li { background: var(--surface); border-radius: 14px; padding: 10px 14px 10px 44px; position: relative; }
+  .flow li::before { content: counter(flow); counter-increment: flow; position: absolute; left: 12px; top: 10px; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent); color: var(--on-accent); font: 800 0.8rem/22px var(--round); text-align: center; }
+  .flow { counter-reset: flow; }
+  .never { background: var(--accent-soft); border-radius: 22px; padding: 18px 20px; margin: 18px 0; }
+  .never h3 { margin-top: 0; color: var(--accent-strong); }
+  .never ul { margin: 0; }
+  .yes { color: var(--moss); font-weight: 800; }
+  .no { color: var(--accent-strong); font-weight: 800; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.95rem; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  footer { margin-top: 36px; color: var(--muted); font-size: 0.85rem; }
+  .back { display: inline-block; margin-top: 28px; padding: 11px 20px; border-radius: 999px; background: var(--raised); color: var(--text);
+    font: 800 1rem var(--round); text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+<a class="brand" href="/" aria-label="afterwrd, install page">afterw<svg class="o" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 1-4.7 14.5L3.8 20l1.2-3.6A8 8 0 0 1 12 4z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>rd</a>
+<h1>How it works</h1>
+<p class="lede">afterwrd is a social network with no company in the middle. Each person's site runs in their own
+Cloudflare account, holds only their own data, and talks to nothing but Cloudflare, the place it gets updates from,
+and the friends they've chosen. This page explains how, and how to check it for yourself.</p>
+
+<nav class="contents" aria-label="Contents">
+  <strong>On this page</strong>
+  <ol>
+    <li><a href="#code">The code is public</a></li>
+    <li><a href="#where">Where your site lives</a></li>
+    <li><a href="#talks">What it talks to</a></li>
+    <li><a href="#signin">Signing in</a></li>
+    <li><a href="#locked">How it's locked down</a></li>
+    <li><a href="#friends">Friends between sites</a></li>
+    <li><a href="#facebook">The Facebook import</a></li>
+    <li><a href="#install">Installing and updating</a></li>
+    <li><a href="#yours">Your data stays yours</a></li>
+    <li><a href="#limits">What it can't protect against</a></li>
+  </ol>
+</nav>
+
+<section id="code">
+  <h2>The code is public</h2>
+  <p>Everything afterwrd runs is in one public repository on GitHub: <a href="__REPO_PAGE__">__REPO_PAGE__</a>.
+  That's the code that runs on your site, the code that installs and updates it, this install page, and the
+  end-to-end tests. Anyone can read it, and the people who wrote it would rather you did than took their word for it.</p>
+  <p>Two ways to check what the code talks to, without reading all of it:</p>
+  <ul>
+    <li><b>Search it for <code>fetch(</code>.</b> That's the only way a Cloudflare Worker or a web page can call out to the
+    internet. Every call in afterwrd goes to one of three places: Cloudflare's own API (installing and updating, with the
+    token you make), GitHub (downloading releases and checking for new ones), or a site you've connected with. There are
+    no analytics, no error-reporting services, no embedded scripts from anyone else, and no fonts fetched from elsewhere.</li>
+    <li><b>Compare the installer with the release.</b> The installer this page offers is the file
+    <code>installer.js</code> from the <a href="__RELEASE_PAGE__">published release __VERSION__</a>, which GitHub builds
+    from a tagged commit. The installer carries a fingerprint (a SHA-256 hash) of that release's manifest, and refuses
+    any file that doesn't match it.</li>
+  </ul>
+  <p>Once installed, the code running on your site is visible in your own Cloudflare dashboard (<i>Workers &amp; Pages →
+  your Worker → Edit code</i>). What you see there is what runs; there's no other server involved.</p>
+</section>
+
+<section id="where">
+  <h2>Where your site lives</h2>
+  <p>An afterwrd site is a Cloudflare Worker plus two kinds of storage, all inside your Cloudflare account and all on
+  the free plan:</p>
+  <div class="boxes">
+    <div class="box"><strong>The Worker</strong><p>Small JavaScript that answers every request to your address: it checks
+    who's asking, reads the database, and builds the pages. It runs in Cloudflare's data centres, near whoever is looking.</p></div>
+    <div class="box"><strong>D1: the database</strong><p>An SQLite database holding your posts, comments, albums, the
+    people named in your Facebook download, your connections, and the site's own keys.</p></div>
+    <div class="box"><strong>Durable Objects: the photos</strong><p>Photos and videos, stored by the fingerprint of their
+    contents in Cloudflare's SQLite-backed objects, which the free plan includes. They're only ever served through the Worker.</p></div>
+    <div class="box"><strong>Static files</strong><p>The stylesheet, fonts and the browser-side scripts (import,
+    posting, download), published with each release and checked against its fingerprint.</p></div>
+  </div>
+  <p>There is no afterwrd server. The address <code>afterwrd.app</code> hosts only this install page, as plain files on
+  GitHub Pages; it never hears from your site. Nobody who works on afterwrd can see your site, reset your password (there
+  isn't one), or sign in as you. The flip side is that nobody can recover your site for you either: your Cloudflare
+  account is the only key, which is why the install page asks you to turn on two-factor authentication there.</p>
+  <p class="meta">Costs: Cloudflare's free plan covers a personal site comfortably, including the 5 GB of photos and videos the
+  free Durable Objects storage allows. Cloudflare may change its plans; afterwrd deliberately uses nothing that needs a card.</p>
+</section>
+
+<section id="talks">
+  <h2>What it talks to</h2>
+  <table>
+    <thead><tr><th>Your site calls</th><th>When</th><th>What's sent</th></tr></thead>
+    <tbody>
+      <tr><td>Cloudflare's API</td><td>Installing and updating</td><td>The release's files, and the API token you made (over HTTPS, to Cloudflare only)</td></tr>
+      <tr><td>GitHub (afterwrd's releases)</td><td>Installing, updating, and a check for a newer version at most every six hours</td><td>Nothing about you: it's a download</td></tr>
+      <tr><td>A friend's afterwrd site</td><td>Only once you've both connected, when you open Home or their page, or comment</td><td>The key for that connection, and your comments on their posts</td></tr>
+    </tbody>
+  </table>
+  <div class="never">
+    <h3>What it never talks to</h3>
+    <ul>
+      <li><b>Facebook.</b> afterwrd never signs in to Facebook, never fetches anything from it, and never sends anything to it.
+      It only reads the download file Facebook gives you, on your own computer.</li>
+      <li><b>afterwrd.app, or anyone who makes afterwrd.</b> There's no registration, no licence check, no usage report.</li>
+      <li><b>Analytics, advertising or error-reporting services.</b> None are included.</li>
+    </ul>
+  </div>
+  <p>Browsers help you check this: open your site, open the browser's developer tools (<i>Network</i>), and watch. Every
+  request goes to your own address, except photos from friends' sites, which come from <i>their</i> addresses.</p>
+</section>
+
+<section id="signin">
+  <h2>Signing in</h2>
+  <p>Only one person signs in to an afterwrd site: its owner. There's no password and no email address to steal, reuse or
+  reset. Instead, each phone or computer you use has a <b>passkey</b>: a key pair made by the device itself, unlocked by its
+  own face, fingerprint or PIN. Passkeys are the WebAuthn standard, the same thing banks and Apple, Google and Microsoft
+  accounts use.</p>
+  <ul>
+    <li>The private half of a passkey never leaves your device; your site stores only the public half, which can verify a
+    signature but can't make one.</li>
+    <li>A passkey is tied to your site's exact address. A look-alike site can't use it, so there's nothing to phish.</li>
+    <li>Signing in signs a one-off challenge from your site, so a sign-in can't be recorded and replayed.</li>
+    <li>Your first passkey is made during setup, from a link the installer gives you that holds a random 192-bit code known
+    only to your site. Adding another device makes a one-time link that works for an hour; <i>Your devices</i> can cancel
+    links, remove a passkey (which signs that device out) or sign out everywhere.</li>
+    <li>A signed-in session is a random token in a cookie the browser won't share with scripts or other sites
+    (<code>HttpOnly</code>, <code>Secure</code>, <code>SameSite</code>, <code>__Host-</code>), valid for 30 days.</li>
+  </ul>
+  <p>Friends don't sign in to your site at all. They see your posts from their own site, through a connection you approved
+  (below).</p>
+</section>
+
+<section id="locked">
+  <h2>How it's locked down</h2>
+  <p>The Worker checks every request before it does anything else. Without the owner's session, the only things it will
+  serve are the sign-in and setup pages, the fonts, and photo links that carry a valid signature. Everything else
+  redirects to sign-in or is refused.</p>
+  <ul>
+    <li><b>Photos and videos are never public files.</b> Each is served by the Worker, which checks the session first. The
+    only exception is a signed link: a link your site makes for a friend's browser, signed with a key unique to your site,
+    that expires after an hour or two. Without a valid signature, a photo address is useless.</li>
+    <li><b>Every change needs to come from your own site.</b> Each form and request that changes anything is checked
+    against the browser's <code>Origin</code> header, so another website open in the same browser can't post, delete or
+    connect on your behalf.</li>
+    <li><b>Pages can't be framed or embedded</b> elsewhere, and your site tells browsers not to pass its address on as a
+    referrer, not to index it, and not to guess at file types.</li>
+    <li><b>Everything shown is escaped.</b> Names and comments, including ones from friends' sites, are treated as text,
+    never as HTML or script.</li>
+    <li><b>Keys are made on your site and stay there.</b> The signing key for photo links, the key for sign-in challenges,
+    and the key for each connection are random bytes generated by your site on first use. They're never in a download,
+    never shown on a page, and never sent anywhere.</li>
+    <li><b>Limits on the free plan are limits on abuse.</b> Comments and other writes are rate-limited in the same
+    database statement that stores them, so a runaway script can't slip past by sending everything at once.</li>
+  </ul>
+  <p>The code has had independent read-only security reviews before each major release, and the fixes are in the public
+  history. The end-to-end tests in the repository drive real copies of the site with a browser and a virtual passkey, and
+  include tests that try to break in: forged sign-ins, cross-site posts, impersonating a friend's site, and hostile data
+  from a connected site.</p>
+</section>
+
+<section id="friends">
+  <h2>Friends between sites</h2>
+  <p>Two afterwrd sites connect directly to each other. There's no directory, no central account, and no third site
+  involved.</p>
+  <ol class="flow">
+    <li>You make a one-time Connect link on your site and send it to a friend however you like.</li>
+    <li>Your friend opens it, says where their site is, and confirms on their own site. Their site makes a random key for
+    yours and hands it over; your site checks, by calling their site back, that the key is really theirs and meant for you,
+    then gives them a key in return.</li>
+    <li>Nothing is shared yet. The request appears on your <i>Friends</i> page with their site's address; you approve or
+    decline. A link that was passed on to a stranger gets them no further than this.</li>
+    <li>Once approved, each site can ask the other, using its key, for posts and photos written on afterwrd, and can leave
+    comments. Each key works for one connection only, and disconnecting from either side ends it at once.</li>
+  </ol>
+  <ul>
+    <li><b>Only what you wrote on afterwrd is shared</b>: your posts, albums and photos made here, and the comments on
+    them. Your imported Facebook archive is never shared with anyone.</li>
+    <li><b>Your site decides what to believe.</b> Data from a friend's site is treated as untrusted: names are cut to size
+    and escaped, photo links must be exactly the signed form from that site, and only your own copy of a comment is used to
+    decide which comments are yours.</li>
+    <li><b>Photos load straight from your friend's site</b> into your browser, by those short-lived signed links. They
+    don't pass through yours.</li>
+    <li>Posts and comments travel between sites as <a href="https://www.w3.org/TR/activitystreams-core/">ActivityStreams</a>,
+    the open format the fediverse uses, with a permanent address for every post, photo and comment.</li>
+  </ul>
+</section>
+
+<section id="facebook">
+  <h2>The Facebook import</h2>
+  <p>Facebook will give you a copy of everything you've put on it (<i>Download your information</i>). afterwrd reads that
+  file, and nothing else, and it does the reading <b>in your browser, on your computer</b>: the zip file is never uploaded
+  as a whole.</p>
+  <ol class="flow">
+    <li>You pick the zip file(s) on the Import page. The browser opens them locally and works out your posts, photos,
+    comments, likes and friends from the JSON inside.</li>
+    <li>You tick which sections to publish. The default is posts and photos; likes, the friends list and the rest stay on
+    your computer unless you tick them. Only what the ticked sections need is sent to your site.</li>
+    <li>Each photo and video is fingerprinted and a thumbnail made, in the browser. Only files your site doesn't already
+    have are uploaded, so importing a newer download sends almost nothing.</li>
+    <li>The new import replaces the old one in a single step, so your site never shows a half-finished archive.</li>
+  </ol>
+  <ul>
+    <li><b>Photo locations are left out by default.</b> Facebook's download includes where some photos were taken; afterwrd
+    only keeps that if you tick <i>Photo locations</i>.</li>
+    <li><b>Photos you post on afterwrd itself</b> are resized in your browser before upload, which also strips the hidden
+    details phones put in them (location, device, time).</li>
+    <li>Nothing in this process contacts Facebook or any third party. The only place the data goes is your own site.</li>
+  </ul>
+</section>
+
+<section id="install">
+  <h2>Installing and updating</h2>
+  <p>The installer is a small Worker you deploy first. It asks for a Cloudflare API token so it can create your site's
+  database and upload afterwrd into your account; the token goes only to Cloudflare's API, over HTTPS, and is never
+  shown, logged or sent anywhere else. The installer downloads the release from GitHub and checks every file against the
+  fingerprint built into it, so what's installed is exactly the published release and can't be swapped on the way. Then it
+  removes itself.</p>
+  <p>Updates work the same way, from your site's <i>Update</i> page: your site fetches the newer release, checks it, and
+  installs it over itself, keeping your passkeys, connections, photos and database. If you let the site remember the token,
+  it's stored as an encrypted Worker secret that nothing can read back, not even you, and later updates are one click.
+  Updates only ever go forward: an older release can't be installed over a newer one.</p>
+  <p class="meta">Trust, stated plainly: an installed site trusts the GitHub repository it updates from. If you'd rather not, don't
+  remember the token, and read each release's notes and changes before updating.</p>
+</section>
+
+<section id="yours">
+  <h2>Your data stays yours</h2>
+  <ul>
+    <li><b>Download everything</b> gives you the whole site as one zip, built in your browser: posts, photos and videos,
+    albums, comments (yours and friends'), likes, friends and connections, as ActivityStreams JSON with every photo. The
+    README inside explains the files. Keys and sign-in details are never included.</li>
+    <li><b>Leaving is deleting the Worker and its database</b> in your Cloudflare dashboard. There's no account with
+    afterwrd to close, because there isn't one.</li>
+    <li><b>Moving</b> is installing afterwrd elsewhere and importing your download. The permanent addresses in it
+    (<code>https://&lt;your site&gt;/posts/&lt;key&gt;</code> and so on) are how two friends' downloads agree on which
+    comment replied to which post.</li>
+  </ul>
+</section>
+
+<section id="limits">
+  <h2>What it can't protect against</h2>
+  <p>Being honest about the edges:</p>
+  <ul>
+    <li><b>Your Cloudflare account.</b> Anyone who gets into it can read your database and change your Worker. Use a
+    strong password and two-factor authentication there, and ideally an account used for nothing else.</li>
+    <li><b>Your devices.</b> A passkey is as safe as the phone or computer it's on. If one is lost, remove its passkey from
+    <i>Your devices</i>, which signs it out.</li>
+    <li><b>Your friends.</b> Anything you share with a connected site is on that site, under its owner's control, the same
+    as telling a friend something. Choose who you approve.</li>
+    <li><b>Cloudflare itself.</b> Your site runs on Cloudflare's computers, under Cloudflare's terms. afterwrd doesn't
+    encrypt the database against Cloudflare; it keeps your data away from everyone else.</li>
+  </ul>
+</section>
+
+<a class="back" href="/">← Back to installing</a>
+
+<footer>
+  <p>afterwrd __VERSION__. Source code and releases: <a href="__REPO_PAGE__">GitHub</a>. afterwrd isn't affiliated with or
+  endorsed by Meta or Cloudflare.</p>
+</footer>
+</main>
+</body>
+</html>

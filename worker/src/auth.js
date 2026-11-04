@@ -53,7 +53,10 @@ export async function handleAuth(request, env, url) {
     if (route === "POST /_auth/login/options") return await loginOptions(env, url);
     if (route === "POST /_auth/login/verify") return await loginVerify(request, env, url, body);
   } catch (error) {
-    return json({ error: error.message }, 400);
+    // The browser gets a plain message; the details stay in the log, as some come from the database or the passkey
+    // library and would tell a stranger more than they need.
+    console.error(`${route}: ${error.message}`);
+    return json({ error: "That didn't work. Try again." }, 400);
   }
   return new Response("Not found", { status: 404 });
 }
@@ -84,6 +87,8 @@ async function setup(request, env, url, body) {
       SELECT ?, 1, ? WHERE NOT EXISTS (SELECT 1 FROM users) RETURNING id`).bind(name, now()).first();
     if (!owner) return json({ error: "This site is already set up." }, 409);
   }
+  // One live setup link at a time, so an earlier one (from a shared or synced link) can't be kept back.
+  await env.DB.prepare("DELETE FROM invites WHERE user_id = ? AND used_at IS NULL").bind(owner.id).run();
   return json({ link: await createInvite(env, url, owner.id, OWNER_INVITE_SECONDS) });
 }
 
@@ -124,11 +129,16 @@ async function registerVerify(request, env, url, { token, response }) {
   if (!spent.meta.changes) return json({ error: "This invite has already been used." }, 400);
 
   const { credential } = registrationInfo;
-  await env.DB.prepare(
-    `INSERT INTO credentials (id, user_id, public_key, counter, transports, created_at, last_used_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(credential.id, invite.user_id, toBase64Url(credential.publicKey), credential.counter,
-    JSON.stringify(credential.transports ?? []), now(), now()).run();
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO credentials (id, user_id, public_key, counter, transports, created_at, last_used_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(credential.id, invite.user_id, toBase64Url(credential.publicKey), credential.counter,
+      JSON.stringify(credential.transports ?? []), now(), now()),
+    // The first passkey ends setup: any other unused link for the owner (setup can be posted more than once) goes.
+    env.DB.prepare(`DELETE FROM invites WHERE user_id = ?1 AND used_at IS NULL
+      AND (SELECT COUNT(*) FROM credentials WHERE user_id = ?1) = 1`).bind(invite.user_id),
+  ]);
   return startSession(env, invite.user_id, json({ ok: true }), credential.id);
 }
 

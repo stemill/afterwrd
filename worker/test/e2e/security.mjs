@@ -37,13 +37,21 @@ const first = await (await post("/_auth/setup", { code: CODE, name: "Owner One" 
 const again = await (await post("/_auth/setup", { code: CODE, name: "Owner One" })).json();
 check("an unfinished setup can be resumed (no passkey yet)", Boolean(first.link && again.link && first.link !== again.link)
   && sql("SELECT COUNT(*) AS n FROM users")[0].n === 1);
+check("…and only the newest setup link works", (await fetch(first.link)).status === 404
+  && sql("SELECT COUNT(*) AS n FROM invites WHERE used_at IS NULL")[0].n === 1);
+const spareSetup = await (await post("/_auth/setup", { code: CODE, name: "Owner One" })).json();
+const setupPage = await (await fetch(`${BASE}/_auth/setup?code=${CODE}`)).text();
+check("the setup page takes the code off the address bar", setupPage.includes('history.replaceState(null, "", "/_auth/setup")'));
 const ownerInvite = sql("SELECT MAX(expires_at) - strftime('%s','now') AS left FROM invites")[0].left;
 check("the owner's setup link lasts an hour", ownerInvite > 3500 && ownerInvite <= 3600, `${ownerInvite}s`);
+// A stray unused link (as an older release could leave) is cancelled by the first passkey.
+sql(`INSERT INTO invites (token_hash, user_id, expires_at) VALUES ('${"a".repeat(64)}', (SELECT id FROM users WHERE is_owner = 1), strftime('%s','now') + 3600)`);
 const owner = await person();
-await owner.goto(again.link);
+await owner.goto(spareSetup.link);
 await Promise.all([owner.waitForNavigation(), owner.click("#go")]);
 check("owner registers from the resumed link", ["/", "/posts"].includes(new URL(owner.url()).pathname) || (await owner.content()).includes("Nothing has been published"));
 check("setup is closed once a passkey exists", (await fetch(`${BASE}/_auth/setup?code=${CODE}`)).status === 409);
+check("the first passkey cancels any other setup link", sql("SELECT COUNT(*) AS n FROM invites WHERE used_at IS NULL")[0].n === 0);
 
 // --- cookies and headers ---------------------------------------------------------------
 const cookie = await session(owner);
