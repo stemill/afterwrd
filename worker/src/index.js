@@ -13,6 +13,7 @@ import { HASH_RE, mediaStore } from "./media.js";
 import { ensureSchema } from "./migrate.js";
 import { handlePeer } from "./peers.js";
 import { signedFor } from "./share.js";
+import { handleLive } from "./live.js";
 
 export { MediaStore } from "./media.js";
 const HEADERS = {
@@ -41,7 +42,7 @@ async function route(request, env, work) {
   if (url.pathname.startsWith("/_auth/")) return handleAuth(request, env, url);
   // A friend's Connect link, and their site's calls once connected, which carry a key instead of a session.
   if (url.pathname.startsWith("/_connect/")) return handleConnectLink(request, env, url);
-  if (url.pathname.startsWith("/_peer/")) return handlePeer(request, env, url);
+  if (url.pathname.startsWith("/_peer/")) return handlePeer(request, env, url, work);
   const reading = request.method === "GET" || request.method === "HEAD";
   const [, top, rest] = url.pathname.split("/");
   // The fonts are public, so the sign-in pages can use them too; they're open-licensed and say nothing about the site.
@@ -59,9 +60,10 @@ async function route(request, env, work) {
     return Response.redirect(`${url.origin}/_auth/login?next=${encodeURIComponent(url.pathname + url.search)}`, 302);
   }
   if (url.pathname === "/_admin" || url.pathname.startsWith("/_admin/")) {
-    return user.is_owner ? handleAdmin(request, env, url, user) : new Response("Not found", { status: 404 });
+    return user.is_owner ? handleAdmin(request, env, url, user, work) : new Response("Not found", { status: 404 });
   }
-  if (url.pathname === "/_comments" || url.pathname.startsWith("/_comments/")) return handleComments(request, env, url, user);
+  if (url.pathname === "/_comments" || url.pathname.startsWith("/_comments/")) return handleComments(request, env, url, user, work);
+  if (url.pathname === "/_live") return handleLive(request, env, url, user);
   if (url.pathname.startsWith("/_feed/")) {
     return user.is_owner ? handleFeed(request, env, url) : new Response("Not found", { status: 404 });
   }

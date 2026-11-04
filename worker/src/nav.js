@@ -2,7 +2,7 @@
 // and the person's picture, behind which sits everything else (profile, Memories, the owner's tools, Sign out).
 // Icons are inline SVG so nothing is fetched.
 import pkg from "../package.json";
-import { escape } from "./util.js";
+import { escape, now } from "./util.js";
 
 // Site files are fetched by a versioned address, so a browser holding an old copy fetches each release's afresh.
 // (heybert 0.1 let browsers keep the stylesheet for a week without checking.)
@@ -55,7 +55,8 @@ export function siteHeader({ main, menu, current, face = {} }) {
   const picture = face.picture
     ? `<img src="${escape(face.picture)}" alt="">`
     : face.initial ? escape(face.initial) : icon("profile");
-  return `<header class="site"><div class="bar">
+  // data-now is when the page was made, so live.js can ask what's new since (see live.js).
+  return `<header class="site" data-now="${now()}"><div class="bar">
   <a class="brand" href="/" aria-label="afterwrd, home">${LOGO}</a>
   <nav class="main" aria-label="Main">${main.map(link).join("")}</nav>
   <details class="me">
@@ -67,6 +68,7 @@ export function siteHeader({ main, menu, current, face = {} }) {
     </div>
   </details>
 </div></header>
+<script src="${asset("/static/live.js")}" defer></script>
 <script>
   // Close the menu when clicking anywhere else.
   document.addEventListener("click", (e) => {

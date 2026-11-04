@@ -643,11 +643,29 @@ ${has(ctx, "posts") && html`<p class="crumbs"><a href="/posts">Posts</a> /</p>`}
 
 export function activityPage(ctx, { items, paging }) {
   const whose = ctx.user.is_owner ? "your" : `${ctx.me.name}'s`;
-  return page(ctx, "Activity", html`
-<h1>Activity</h1>
-<p class="meta">The latest comments on ${whose} posts and photos, from everyone who can see this site.</p>
-${feed(items, (c) => activityItem(ctx, c, whose), "No comments yet. Write one under any post or photo.")}
+  return page(ctx, "Notifications", html`
+<h1>Notifications</h1>
+<p class="meta">Comments on ${whose} posts and photos, and on friends' posts and photos you've commented on too.</p>
+${feed(items, (c) => (c.source === "friend" ? friendActivityItem(c) : activityItem(ctx, c, whose)), "Nothing yet. Comments on your posts and photos will show here.")}
 ${(paging.page > 1 || paging.hasNext) && pager(ctx, paging)}`);
+}
+
+/** A comment on a friend's post or photo that the owner commented on too, as the friend's site told us. */
+function friendActivityItem(c) {
+  const isPhoto = c.target.startsWith("photo-");
+  const href = isPhoto ? `/friend/${c.connection_id}/photos/${c.target.slice(6)}` : `/friend/${c.connection_id}/posts#f${c.connection_id}-${c.target}`;
+  const thing = isPhoto ? "photo" : "post";
+  return html`<article class="card activity${c.isNew ? " new" : ""}">
+  <div class="body">
+    <header>
+      <span class="what"><strong>${c.name}</strong>
+        ${c.name === c.friend ? html`replied on <a href="${href}">their ${thing}</a>` : html`also commented on <a href="${href}">${c.friend}'s ${thing}</a>`}</span>
+      ${c.isNew && raw('<span class="badge badge-new">New</span>')}
+      <time title="${fmtDatetime(c.created_at)}">${fmtAgo(c.created_at)}</time>
+    </header>
+    ${c.text && html`<div class="text">${c.text}</div>`}
+  </div>
+</article>`;
 }
 
 function activityItem(ctx, c, whose) {
@@ -722,7 +740,7 @@ function faceFor(ctx, origin, name, n, fresh = null) {
 function remoteCard(ctx, c, p, { thread = true } = {}) {
   const n = p.photos.length;
   const what = p.title && p.title !== "Posted on afterwrd." ? summary(p.title, c.name) : "";
-  return html`<article class="card social from-friend">
+  return html`<article class="card social from-friend" id="f${c.id}-${p.key}">
   <header>
     ${friendFace(ctx, c)}
     <span class="what"><a href="${friendBase(c)}/posts"><strong>${c.name}</strong></a>

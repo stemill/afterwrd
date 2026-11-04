@@ -7,6 +7,7 @@
 //   GET  /_peer/photos/<sha256>
 //   POST /_peer/comments                a Note inReplyTo a post or photo here: their owner comments on it
 //   POST /_peer/comments/<n>/delete     their owner deletes a comment they made
+//   POST /_peer/notify                  a note: something new on their site (notify.js)
 //   POST /_peer/disconnect              they've disconnected
 // The feed and comments are ActivityStreams (public/static/activity.js). Only posts written on afterwrd are
 // shared, never the imported archive. Plus the helpers for calling other sites.
@@ -15,6 +16,7 @@ import { findTarget, MAX_COMMENT } from "./archive/comments.js";
 import { SITE_ID } from "./posts.js";
 import { notes, ownerActor, shareAlbum, shareAlbums, sharePhoto, sharePosts } from "./share.js";
 import { json, now, sha256 } from "./util.js";
+import { notifyComment, receiveNote } from "./notify.js";
 
 const FEED_POSTS = 30;
 const TIMEOUT_MS = 8000;
@@ -89,7 +91,7 @@ async function peerFrom(request, env) {
   return env.DB.prepare("SELECT * FROM connections WHERE key_hash = ?").bind(await sha256(match[1])).first();
 }
 
-export async function handlePeer(request, env, url) {
+export async function handlePeer(request, env, url, work) {
   const route = `${request.method} ${url.pathname}`;
   const peer = await peerFrom(request, env);
   const db = env.DB;
@@ -142,7 +144,13 @@ export async function handlePeer(request, env, url) {
         AND (SELECT COUNT(*) FROM site_comments WHERE origin = ?5 AND created_at > ?4 - 86400) < ?8
       RETURNING id`).bind(target, peer.name, text, now(), peer.origin, RATE.seconds, RATE.count, DAILY).first();
     if (!row) return json({ error: "That's a lot of comments for now. Try again later." }, 429);
+    await notifyComment(env, work, url.origin, target, { name: peer.name, text, from: peer.origin });
     return json({ id: commentId(url.origin, target, row.id) });
+  }
+
+  if (route === "POST /_peer/notify") {
+    const [body, status] = await receiveNote(db, peer, await request.json().catch(() => ({})));
+    return json(body, status);
   }
 
   const del = /^POST \/_peer\/comments\/(\d+)\/delete$/.exec(route);

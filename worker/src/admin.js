@@ -14,7 +14,7 @@ import { escape, html, json, now, randomToken, sha256 } from "./util.js";
 // A device link grants owner access to whoever opens it, so it's short-lived.
 export const OWNER_INVITE_SECONDS = 3600;
 
-export async function handleAdmin(request, env, url, owner) {
+export async function handleAdmin(request, env, url, owner, work) {
   if (request.method !== "GET" && request.method !== "HEAD" && request.headers.get("Origin") !== url.origin) {
     return json({ error: "Request from another site" }, 403);
   }
@@ -24,8 +24,8 @@ export async function handleAdmin(request, env, url, owner) {
   if (url.pathname === "/_admin/update" || url.pathname.startsWith("/_admin/update/")) {
     return handleUpdate(request, env, url, owner);
   }
-  if (url.pathname === "/_admin/posts" || url.pathname.startsWith("/_admin/posts/")) return handlePosts(request, env, url);
-  if (/^\/_admin\/(photos|albums|profile)(\/|$)/.test(url.pathname)) return handlePhotos(request, env, url);
+  if (url.pathname === "/_admin/posts" || url.pathname.startsWith("/_admin/posts/")) return handlePosts(request, env, url, work);
+  if (/^\/_admin\/(photos|albums|profile)(\/|$)/.test(url.pathname)) return handlePhotos(request, env, url, work);
   if (url.pathname === "/_admin/export" || url.pathname.startsWith("/_admin/export/")) return handleExport(request, env, url);
   if (url.pathname === "/_admin/connections" || url.pathname.startsWith("/_admin/connections/")) {
     return handleConnections(request, env, url);

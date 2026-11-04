@@ -7,6 +7,7 @@
 import { photoKey, postKey } from "./archive/comments.js";
 import { HASH_RE, mediaStore } from "./media.js";
 import { json, now } from "./util.js";
+import { notifyNewPost } from "./notify.js";
 
 // Copies take ids from here up, far beyond any an import gives out.
 export const SITE_ID = 1_000_000_000;
@@ -80,15 +81,15 @@ export async function removeUnusedFiles(env, files) {
     mediaStore(env, shard).remove(unused.filter((h) => h[0] === shard))));
 }
 
-export async function handlePosts(request, env, url) {
+export async function handlePosts(request, env, url, work) {
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
-  if (url.pathname === "/_admin/posts") return create(env, await request.json().catch(() => ({})));
+  if (url.pathname === "/_admin/posts") return create(env, await request.json().catch(() => ({})), url, work);
   const del = /^\/_admin\/posts\/(\d+)\/delete$/.exec(url.pathname);
   if (del) return remove(env, url, Number(del[1]) - SITE_ID);
   return new Response("Not found", { status: 404 });
 }
 
-async function create(env, body) {
+async function create(env, body, url, work) {
   const db = env.DB;
   const text = typeof body.text === "string" ? body.text.replace(/\r\n?/g, "\n").trim() : "";
   const photos = Array.isArray(body.photos) ? body.photos : [];
@@ -102,6 +103,7 @@ async function create(env, body) {
     ...addPhotos(db, photos, { inPost: true }),
     ...mirror(db),
   ]);
+  await notifyNewPost(env, work, url.origin);
   return json({ ok: true });
 }
 

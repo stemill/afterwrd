@@ -7,6 +7,7 @@ import { postKey } from "../../public/static/activity.js";
 import { safeNext } from "../auth.js";
 import { messagePage } from "../pages.js";
 import { html, now } from "../util.js";
+import { INBOX_JOIN, notifyComment } from "../notify.js";
 
 export const MAX_COMMENT = 2000;
 // Plenty for a conversation, too few for a runaway script.
@@ -32,20 +33,32 @@ export async function loadThreads(db, keys) {
   return threads;
 }
 
-/** The newest comments across the site, for Activity. */
+// Notifications: comments here (site_comments), and comments on friends' posts and photos the owner has commented on
+// too, which their sites send (inbox, see notify.js). One list, newest first.
+const NOTIFICATIONS_SQL = `
+  SELECT 'here' AS source, c.id, c.target, c.text, c.created_at, COALESCE(u.name, c.author_name) AS name, c.author_id,
+    NULL AS connection_id, NULL AS friend
+  FROM site_comments c LEFT JOIN users u ON u.id = c.author_id
+  UNION ALL
+  SELECT 'friend', i.id, i.target, i.text, i.created_at, i.actor, NULL, i.connection_id, co.name
+  FROM inbox i ${INBOX_JOIN} WHERE i.kind = 'comment'`;
+
+/** The newest notifications, for the Notifications page. */
 export async function latestComments(db, page, size) {
   const [count, rows] = await db.batch([
-    db.prepare("SELECT COUNT(*) AS n FROM site_comments"),
-    db.prepare(`${COMMENT_SQL} ORDER BY c.created_at DESC, c.id DESC LIMIT ? OFFSET ?`).bind(size, (page - 1) * size),
+    db.prepare(`SELECT COUNT(*) AS n FROM (${NOTIFICATIONS_SQL})`),
+    db.prepare(`SELECT * FROM (${NOTIFICATIONS_SQL}) ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`).bind(size, (page - 1) * size),
   ]);
   const total = count.results[0].n;
   return { rows: rows.results, paging: { page, total, hasNext: page * size < total } };
 }
 
-/** How many comments by other people arrived since this person last opened Activity. */
+/** How many notifications arrived since this person last opened Notifications (their own comments aren't news). */
 export async function newCount(db, user) {
-  const row = await db.prepare(`SELECT COUNT(*) AS n FROM site_comments
-    WHERE created_at > ? AND (author_id IS NULL OR author_id != ?)`).bind(user.activity_seen_at ?? 0, user.id).first();
+  const row = await db.prepare(`SELECT
+    (SELECT COUNT(*) FROM site_comments WHERE created_at > ?1 AND (author_id IS NULL OR author_id != ?2))
+    + (SELECT COUNT(*) FROM inbox i ${INBOX_JOIN} WHERE i.kind = 'comment' AND i.created_at > ?1) AS n`)
+    .bind(user.activity_seen_at ?? 0, user.id).first();
   return row.n;
 }
 
@@ -62,7 +75,7 @@ export async function findTarget(db, target) {
   return post && { post };
 }
 
-export async function handleComments(request, env, url, user) {
+export async function handleComments(request, env, url, user, work) {
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
   if (request.headers.get("Origin") !== url.origin) return new Response("Request from another site", { status: 403 });
   const form = await request.formData().catch(() => new FormData());
@@ -82,6 +95,7 @@ export async function handleComments(request, env, url, user) {
         AND (SELECT COUNT(*) FROM site_comments WHERE author_id = ?2 AND created_at > ?5 - 86400) < ?9
       RETURNING id`).bind(target, user.id, user.name, text, now(), user.site ?? "site", RATE.seconds, RATE.count, DAILY).first();
     if (!row) return message("That's a lot of comments for now. Try again later.", back, 429);
+    await notifyComment(env, work, url.origin, target, { name: user.name, text });
     back.hash = `c${row.id}`;
     return Response.redirect(back, 303);
   }

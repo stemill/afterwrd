@@ -421,13 +421,14 @@ async function activity(ctx, params) {
   const { db, user } = ctx;
   const { rows, paging } = await latestComments(db, pageNumber(params), PAGE_SIZE);
   const targets = new Map();
-  for (const key of new Set(rows.map((c) => c.target))) targets.set(key, await findTarget(db, key));
+  for (const key of new Set(rows.filter((c) => c.source === "here").map((c) => c.target))) targets.set(key, await findTarget(db, key));
   const seen = user.activity_seen_at ?? 0;
   if (paging.page === 1) {
     await db.prepare("UPDATE users SET activity_seen_at = ? WHERE id = ?").bind(now(), user.id).run();
     ctx.newComments = 0;
   }
-  const items = rows.map((c) => ({ ...c, on: targets.get(c.target), isNew: c.created_at > seen && c.author_id !== user.id }));
+  const items = rows.map((c) => ({ ...c, on: c.source === "here" ? targets.get(c.target) : null,
+    isNew: c.created_at > seen && (c.source === "friend" || c.author_id !== user.id) }));
   return views.activityPage(ctx, { items, paging });
 }
 

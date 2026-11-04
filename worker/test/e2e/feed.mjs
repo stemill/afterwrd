@@ -21,6 +21,10 @@ const sql = (state, q) => JSON.parse(execFileSync("./node_modules/.bin/wrangler"
 const results = [];
 const check = (name, ok, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? `  (${extra})` : ""}`); };
 const errors = [];
+const waitFor = async (test, ms = 10_000) => {
+  for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 300))) if (await test()) return true;
+  return false;
+};
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
 async function owner(site, name) {
@@ -152,6 +156,16 @@ annFeed = await feedCards(ann);
 check("Ann sees Bob's reply, not deletable by her", annFeed[0].comments.map((c) => c.text).join("|") === "Looks great, Bob!|Thanks Ann"
   && !annFeed[0].comments[1].canDelete);
 
+// Bob's site tells Ann's about the reply, because she commented there too: it's on her Notifications.
+check("Bob's site sends Ann a note about his reply", await waitFor(() => sql(stateA, "SELECT COUNT(*) AS n FROM inbox WHERE kind = 'comment'")[0].n === 1));
+await ann.goto(`${A}/posts`);
+check("…which counts on her Notifications", (await ann.$eval('header.site a[href="/activity"] .count', (c) => c.firstChild.textContent).catch(() => "")) === "1");
+await ann.goto(`${A}/activity`);
+const note = await ann.$eval(".activity.new", (a) => ({ what: a.querySelector(".what").textContent.replace(/\s+/g, " ").trim(),
+  text: a.querySelector(".text")?.textContent, href: a.querySelector(".what a").getAttribute("href") })).catch(() => ({}));
+check("…saying who replied, where, and what", note.what === "Bob Example replied on their post" && note.text === "Thanks Ann"
+  && /^\/friend\/\d+\/posts#f\d+-post-/.test(note.href ?? ""), JSON.stringify(note));
+
 // Comments from Bob's visitors (and other friends) stay on Bob's site.
 sql(stateB, `INSERT INTO site_comments (target, author_id, author_name, text, created_at, origin)
   SELECT target, NULL, 'Bob''s visitor', 'For Bob''s eyes', strftime('%s','now'), 'site' FROM site_comments LIMIT 1`);
@@ -168,6 +182,13 @@ const keyForB = sql(stateA, "SELECT their_key FROM connections")[0].their_key;
 const peer = (path, key, body) => fetch(B + path, { method: body ? "POST" : "GET", redirect: "manual",
   headers: { ...(key && { Authorization: `Bearer ${key}` }), "Content-Type": "application/json" }, body: body && JSON.stringify(body) });
 check("no key, no feed", (await peer("/_peer/feed")).status === 401);
+check("no key, no notes", (await peer("/_peer/notify", null, { type: "Create", object: { type: "Note", id: `${A}/posts/post-1-deadbeef` } })).status === 401);
+check("a note about another site's post is refused", (await peer("/_peer/notify", keyForB,
+  { type: "Create", object: { type: "Note", id: `${C}/posts/post-1-deadbeef` } })).status === 400);
+const notesOnBob = () => sql(stateB, "SELECT COUNT(*) AS n FROM inbox")[0].n;
+const notesBefore = notesOnBob();
+await peer("/_peer/notify", keyForB, { type: "Create", object: { type: "Note", inReplyTo: `${A}/posts/post-1-deadbeef`, content: "spam" } });
+check("a note about a comment Bob had no part in isn't kept", notesOnBob() === notesBefore);
 check("wrong key, no feed", (await peer("/_peer/feed", "x".repeat(43))).status === 401);
 const bobsImportedPost = sql(stateB, "SELECT timestamp FROM posts WHERE id < 1000000000 LIMIT 1")[0];
 check("can't comment on an imported post", (await peer("/_peer/comments", keyForB, { type: "Note", inReplyTo: `${B}/posts/post-${bobsImportedPost.timestamp}-00000000`, content: "x" })).status === 404);
@@ -399,6 +420,18 @@ check("approving links her to her Facebook self", (await fbRow("Cara Example")) 
 await cara.goto(`${C}/`);
 check("Cara's Home now has Ann's post", (await feedCards(cara)).some((c) => c.who === "Ann Example"));
 await ann.screenshot({ path: `${OUT}/friends-invited.png`, fullPage: true });
+
+// Ann has Home open when Cara posts: Cara's site sends a note, and Ann's page offers it without moving anything.
+await ann.goto(`${A}/`);
+await compose(cara, C, "Cara's first post");
+check("Cara's site tells Ann about the post", await waitFor(() => sql(stateA, "SELECT COUNT(*) AS n FROM inbox WHERE kind = 'post'")[0].n === 1));
+check("…but nothing on Ann's page has moved yet", !(await ann.$(".live-bar")) && !(await feedCards(ann)).some((c) => c.text === "Cara's first post"));
+await ann.evaluate(() => window.afterwrdLive.check());
+check("Ann's open Home quietly offers it", (await ann.$eval(".live-bar span", (s) => s.textContent).catch(() => "")) === "1 new post from friends");
+await ann.screenshot({ path: `${OUT}/live-bar.png` });
+await Promise.all([ann.waitForNavigation(), ann.click(".live-bar button")]);
+check("Show brings it in", (await feedCards(ann)).some((c) => c.who === "Cara Example" && c.text === "Cara's first post"));
+check("…and friends' new posts don't count as notifications", !(await ann.$('header.site a[href="/activity"] .count')));
 
 check("no script errors", errors.length === 0, errors.join(" | "));
 await browser.close();

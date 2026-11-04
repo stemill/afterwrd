@@ -16,6 +16,7 @@ import m0012 from "../migrations/0012_no_friend_visits.sql";
 import m0013 from "../migrations/0013_friend_links.sql";
 import m0014 from "../migrations/0014_friend_pictures.sql";
 import m0015 from "../migrations/0015_owner_only_and_approval.sql";
+import m0016 from "../migrations/0016_inbox.sql";
 
 // Every file in migrations/, in order. A new migration needs adding here too.
 const MIGRATIONS = [
@@ -34,6 +35,7 @@ const MIGRATIONS = [
   ["0013_friend_links.sql", m0013],
   ["0014_friend_pictures.sql", m0014],
   ["0015_owner_only_and_approval.sql", m0015],
+  ["0016_inbox.sql", m0016],
 ];
 
 let ready = null;

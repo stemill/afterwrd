@@ -11,6 +11,7 @@ import { safeNext } from "./auth.js";
 import { asset, FAVICON, ownerHeader } from "./nav.js";
 import { addPhotos, checkPhotos, mirror, removeUnusedFiles, SITE_ID } from "./posts.js";
 import { escape, html, json, now } from "./util.js";
+import { notifyNewPost } from "./notify.js";
 
 const MAX_BATCH = 50;
 const ROLES = { profile: "Profile pictures", cover: "Cover photos" };
@@ -33,7 +34,7 @@ export async function profilePictures(db) {
   return { profile: pick("profile_hash"), cover: pick("cover_hash") };
 }
 
-export async function handlePhotos(request, env, url) {
+export async function handlePhotos(request, env, url, work) {
   const db = env.DB;
   if (request.method === "GET" && url.pathname === "/_admin/photos/add") {
     const { results: albums } = await db.prepare("SELECT id, name FROM site_albums ORDER BY created_at DESC").all();
@@ -42,7 +43,7 @@ export async function handlePhotos(request, env, url) {
   }
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
 
-  if (url.pathname === "/_admin/photos") return add(env, await request.json().catch(() => ({})));
+  if (url.pathname === "/_admin/photos") return add(env, await request.json().catch(() => ({})), url, work);
 
   const form = await request.formData().catch(() => new FormData());
   const back = new URL(safeNext(String(form.get("back") ?? "/photos"), url), url.origin);
@@ -107,7 +108,7 @@ export async function handlePhotos(request, env, url) {
 const comments = (db, photos) => photos.map((f) => db.prepare(`DELETE FROM site_comments WHERE target = ?
   AND NOT EXISTS (SELECT 1 FROM media WHERE hash = ?)`).bind(photoKey(f), f.hash));
 
-async function add(env, body) {
+async function add(env, body, url, work) {
   const db = env.DB;
   const photos = Array.isArray(body.photos) ? body.photos : [];
   if (!photos.length) return json({ error: "Choose some photos first." }, 400);
@@ -146,6 +147,7 @@ async function add(env, body) {
     ...(role ? [db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(`${role}_hash`, photos[0].hash)] : []),
     ...mirror(db),
   ]);
+  if (share) await notifyNewPost(env, work, url.origin);
   return json({ href: role ? "/posts" : `/photos/album/${SITE_ID + albumId}` });
 }
 

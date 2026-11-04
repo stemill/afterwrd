@@ -148,9 +148,14 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   afterwrd are shared, never an imported archive. Either side can disconnect. Two sites in the same Cloudflare
   account can connect too.
 - **Comments.** You and your friends (from their own sites) can comment under a post or photo; comments show
-  straight away. Friends can delete their own, and you can delete any. *Notifications* lists the latest, with a
-  count in the menu of those that are new to you. Comments are kept when you import again, and stay if you
-  disconnect, until you delete them.
+  straight away. Friends can delete their own, and you can delete any. *Notifications* lists comments on your
+  posts and photos, and comments on friends' posts and photos you've commented on too, with a count in the menu
+  of those that are new to you. Comments are kept when you import again, and stay if you disconnect, until you
+  delete them.
+- **Keeping up, quietly.** When you post or comment, your site sends your friends' sites a short note (a new post
+  to all of them; a comment only to those who commented on the same thing). While a page is open and in view, it
+  checks your own site every 30 seconds: the counts in the menu update, and a small bar offers to show new posts
+  or comments. Nothing moves until you choose, and nothing is pushed to your phone.
 
 `npm run deploy` is only for new versions of afterwrd's code; it never touches your archive.
 `npm run invite` still has `list`, `again` (a new device link) and `revoke` for use from the terminal.

@@ -126,7 +126,7 @@ and the friends they've chosen. This page explains how, and how to check it for 
     <tbody>
       <tr><td>Cloudflare's API</td><td>Installing and updating</td><td>The release's files, and the API token you made (over HTTPS, to Cloudflare only)</td></tr>
       <tr><td>GitHub (afterwrd's releases)</td><td>Installing, updating, and a check for a newer version at most every six hours</td><td>Nothing about you: it's a download</td></tr>
-      <tr><td>A friend's afterwrd site</td><td>Only once you've both connected, when you open Home or their page, or comment</td><td>The key for that connection, and your comments on their posts</td></tr>
+      <tr><td>A friend's afterwrd site</td><td>Only once you've both connected: when you open Home or their page, when you comment, and when you post or reply</td><td>The key for that connection, your comments on their posts, and a short note when there's something new (the start of a new post, or of a comment on something they've commented on too)</td></tr>
     </tbody>
   </table>
   <div class="never">
@@ -213,6 +213,11 @@ and the friends they've chosen. This page explains how, and how to check it for 
     decide which comments are yours.</li>
     <li><b>Photos load straight from your friend's site</b> into your browser, by those short-lived signed links. They
     don't pass through yours.</li>
+    <li><b>Something new is passed on as a short note</b>, so friends' pages can say so: a new post goes to your friends,
+    and a comment goes only to friends who commented on the same post or photo. A friend's site keeps a note only if it's
+    about your own post or photo, cuts it to size, and limits how many it takes. While a page is open, it checks your own
+    site for news every 30 seconds and offers to show it; nothing is fetched while the tab is hidden, and nothing
+    is pushed to your phone.</li>
     <li>Posts and comments travel between sites as <a href="https://www.w3.org/TR/activitystreams-core/">ActivityStreams</a>,
     the open format the fediverse uses, with a permanent address for every post, photo and comment.</li>
   </ul>
