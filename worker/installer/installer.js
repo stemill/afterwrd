@@ -44,7 +44,11 @@ export default {
     if (url.protocol === "http:") return Response.redirect(`https://${url.host}${url.pathname}${url.search}`, 301);
     if (request.method === "GET" && url.pathname === "/") {
       // Pasted over an existing afterwrd, the Worker still has its database: that's an update, at the same address.
-      return new Response(page(url, Boolean(env?.DB)), { headers: { ...HEADERS, "Content-Type": "text/html; charset=utf-8" } });
+      // The page checks when afterwrd answers at its new address, so it may also reach this account's other sites.
+      const csp = HEADERS["Content-Security-Policy"].replace("default-src 'self'", `default-src 'self'; connect-src 'self' https://*.${accountDomain(url)}`);
+      return new Response(page(url, Boolean(env?.DB)), {
+        headers: { ...HEADERS, "Content-Security-Policy": csp, "Content-Type": "text/html; charset=utf-8" },
+      });
     }
     const step = url.pathname.slice("/install/".length);
     if (request.method === "POST" && url.pathname.startsWith("/install/") && Object.hasOwn(STEPS, step)) {
