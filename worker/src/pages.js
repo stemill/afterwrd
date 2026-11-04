@@ -186,3 +186,28 @@ posts and photos on your own site, and can comment on them. Where is your afterw
     }
   });`);
 }
+
+// Opened from a group's invite link (groups.js). Sends them on to their own site to confirm, carrying the link.
+export function groupLinkPage(group, owner) {
+  return page("Join a group", `
+<h1>Join ${escape(group)}</h1>
+<p>${escape(owner)} has invited you to ${escape(group)}, a group on afterwrd. Its members read it from their own
+afterwrd sites, and can post and comment there. Where is your afterwrd site?</p>
+<form id="site">
+  <input name="site" placeholder="e.g. jo.example.workers.dev" required autocomplete="url" inputmode="url" aria-label="Your site's address">
+  <p id="error" role="alert"></p>
+  <button>Continue on my site</button>
+</form>
+<p style="margin-top: 20px">No afterwrd site yet? <a href="https://afterwrd.app/">Set one up</a>, then open this link again.</p>`, `
+  document.getElementById("site").addEventListener("submit", (e) => {
+    e.preventDefault();
+    let site = e.target.site.value.trim();
+    if (!/^https?:\\/\\//.test(site)) site = "https://" + site;
+    try {
+      const origin = new URL(site).origin;
+      location.assign(origin + "/groups/join?link=" + encodeURIComponent(location.href));
+    } catch {
+      document.getElementById("error").textContent = "That doesn't look like a web address.";
+    }
+  });`);
+}

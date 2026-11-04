@@ -5,6 +5,8 @@
 //   a post             <site>/posts/<post key>        Note; the key survives re-imports (postKey)
 //   a photo or video   <site>/photos/sha256/<hash>    Image or Video; the file itself is <site>/files/<hash>
 //   a comment          <post or photo address>#c<n>   Note, inReplyTo the post or photo
+//   a group            <site>/groups/<n>              Group, on the site of the owner who made it
+//   a post in a group  <site>/groups/<n>/posts/<m>    Note, attributedTo whoever wrote it (on their own site)
 // Text is plain (mediaType text/plain), not HTML. afterwrd's own extra terms are under https://afterwrd.app/ns#.
 
 export const CONTEXT = ["https://www.w3.org/ns/activitystreams", { afterwrd: "https://afterwrd.app/ns#" }];
@@ -32,6 +34,8 @@ export const actorId = (site) => `${site}/`;
 export const postId = (site, key) => `${site}/posts/${key}`;
 export const mediaId = (site, hash) => `${site}/photos/sha256/${hash}`;
 export const fileUrl = (site, hash) => `${site}/files/${hash}`;
+export const groupId = (site, n) => `${site}/groups/${n}`;
+export const groupPostId = (site, n, m) => `${site}/groups/${n}/posts/${m}`;
 /** A comment target ("post-…" or "photo-<hash>", as stored with comments) as an address. */
 export const targetId = (site, target) => (target.startsWith("photo-") ? mediaId(site, target.slice(6)) : postId(site, target));
 export const commentId = (site, target, n) => `${targetId(site, target)}#c${n}`;

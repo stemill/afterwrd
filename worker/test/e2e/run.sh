@@ -2,7 +2,7 @@
 # afterwrd's end-to-end tests: real local copies of the site (wrangler dev) driven by Chrome, with a virtual
 # passkey authenticator. See README.md.
 #   npm run test:e2e                     everything except upgrade
-#   npm run test:e2e -- <suite>…         some: core fresh albums update feed forged
+#   npm run test:e2e -- <suite>…         some: core fresh albums update feed groups forged
 #   npm run test:e2e -- upgrade v0.17.0  an older release's site (0.17.0 or later), upgraded in place to this code
 set -uo pipefail
 
@@ -13,7 +13,7 @@ WRANGLER="$WORKER/node_modules/.bin/wrangler"
 FAILED=0
 mkdir -p "$OUT"
 
-for port in 8787 8788 8789; do
+for port in 8787 8788 8789 8790; do
   if lsof -iTCP:$port -sTCP:LISTEN >/dev/null 2>&1; then
     echo "Port $port is in use (is \`npm run dev\` running?). Stop it and try again." >&2
     exit 1
@@ -72,18 +72,23 @@ run_update() {
   fresh --var UPDATE_TOKEN:test-token-not-real; suite update-ui.mjs remembered; stop
   cp "$OUT/package.json.saved" "$WORKER/package.json"
 }
-run_feed() { # three sites, each with its own database
+three_sites() { # $1: the suite, run against three sites, each with its own database; $2: also a group's Worker (G, 8790)
   stop
-  for site in 8787:A 8788:B 8789:C; do
-    local port="${site%%:*}" name="${site##*:}"
+  local sites="8787:A 8788:B 8789:C"
+  if [ "${2:-}" = group ]; then sites="$sites 8790:G"; fi
+  for site in $sites; do
+    local port="${site%%:*}" name="${site##*:}" mode="--var SETUP_CODE:local-test-setup-code"
+    if [ "$name" = G ]; then mode="--var GROUP_KEY:local-test-group-key"; fi
     rm -rf "$OUT/state$name"
     (cd "$WORKER" && "$WRANGLER" dev --name "afterwrd-$port" --port "$port" --ip 127.0.0.1 --inspector-port $((port + 500)) \
-      --persist-to "$OUT/state$name" --var SETUP_CODE:local-test-setup-code --var ALLOW_LOCAL_SITES:1 > "$OUT/dev$port.log" 2>&1 &)
+      --persist-to "$OUT/state$name" $mode --var ALLOW_LOCAL_SITES:1 > "$OUT/dev$port.log" 2>&1 &)
   done
-  wait_for 8787 && wait_for 8788 && wait_for 8789
-  suite feed.mjs "$OUT/fake-export.zip" "$PHOTOS" "$OUT/stateA" "$OUT/stateB" "$OUT/stateC"
+  wait_for 8787 && wait_for 8788 && wait_for 8789 && { [ "${2:-}" != group ] || wait_for 8790; }
+  suite "$1" "$OUT/fake-export.zip" "$PHOTOS" "$OUT/stateA" "$OUT/stateB" "$OUT/stateC" "$OUT/stateG"
   pkill -f "wrangler dev --name afterwrd-87" 2>/dev/null; sleep 2
 }
+run_feed() { three_sites feed.mjs; }
+run_groups() { three_sites groups.mjs group; }
 run_forged() {
   echo "== forged"
   "$WORKER/node_modules/.bin/esbuild" "$HERE/unit-entry.js" --bundle --format=esm --platform=node --loader:.json=json \
@@ -103,10 +108,10 @@ run_upgrade() { # $1: an older release tag
   git -C "$WORKER" worktree remove --force "$OUT/old"
 }
 
-if [ $# -eq 0 ]; then set -- core fresh albums update feed forged; fi
+if [ $# -eq 0 ]; then set -- core fresh albums update feed groups forged; fi
 while [ $# -gt 0 ]; do
   case "$1" in
-    core|fresh|albums|update|feed|forged) "run_$1" ;;
+    core|fresh|albums|update|feed|groups|forged) "run_$1" ;;
     upgrade) shift; run_upgrade "${1:?give an older release tag, e.g. v0.12.0}" ;;
     *) echo "Unknown suite: $1" >&2; FAILED=1 ;;
   esac

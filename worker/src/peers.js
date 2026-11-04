@@ -30,7 +30,8 @@ export function siteOrigin(text, env) {
   try {
     const url = new URL(String(text));
     const local = env?.ALLOW_LOCAL_SITES === "1" && url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname);
-    if ((url.protocol === "https:" || local) && !url.username && !url.password) return url.origin;
+    // No trailing dot: "https://you.example." is the same site as "https://you.example", but wouldn't compare equal.
+    if ((url.protocol === "https:" || local) && !url.username && !url.password && !url.hostname.endsWith(".")) return url.origin;
   } catch {}
   return null;
 }
@@ -60,6 +61,8 @@ export async function callSite(origin, path, { key, body, timeout = TIMEOUT_MS }
   try {
     data = JSON.parse(await readLimited(response, MAX_REPLY));
   } catch {}
+  // Whatever else a site answers (null, a list, a number) counts as saying nothing.
+  if (!data || typeof data !== "object" || Array.isArray(data)) data = {};
   if (!response.ok) {
     throw new Error(typeof data.error === "string" ? data.error.slice(0, 300) : `${host(origin)} answered ${response.status}.`);
   }

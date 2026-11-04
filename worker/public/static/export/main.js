@@ -3,7 +3,7 @@
 // the browser allows it (Chrome, Edge) and in memory otherwise.
 /* global zip */
 import {
-  actorId, commentAuthor, commentId, commentNote, CONTEXT, iso, mediaObject, postId, postKey, targetId, tidy,
+  actorId, commentAuthor, commentId, commentNote, CONTEXT, groupId, groupPostId, iso, mediaObject, postId, postKey, targetId, tidy,
 } from "../activity.js";
 
 const SITE_POSTS_FROM = 1_000_000_000; // posts written on afterwrd (src/posts.js)
@@ -12,7 +12,8 @@ const EXTENSIONS = {
   "video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm",
 };
 const TABLES = ["settings", "people", "albums", "posts", "post_tags", "comments", "reactions", "media", "tagged_photos",
-  "site_comments", "comments_elsewhere", "connections", "friend_links", "users"];
+  "site_comments", "comments_elsewhere", "connections", "friend_links", "users",
+  "groups", "group_mine"];
 
 const form = document.getElementById("export");
 const status = document.getElementById("status");
@@ -174,6 +175,18 @@ function documents(t) {
       // Who they are in the Facebook download, if linked on Friends.
       "afterwrd:facebookName": t.friend_links.find((l) => l.connection_id === c.id)?.person_name || undefined,
     })), { name: "Friends' afterwrd sites you're connected with" }),
+    "groups.json": collection(t.groups.map((g) => ({
+      type: "Group", id: groupId(g.origin, g.remote_id), name: g.name, summary: g.about || undefined,
+      "afterwrd:owner": { type: "Person", name: g.host_name }, "afterwrd:role": g.role || undefined, "afterwrd:joinedAt": iso(g.joined_at),
+    })), { name: "Groups you're in (each is its own site, which keeps everything in it)" }),
+    "groups-elsewhere.json": collection([...t.group_mine].sort((a, b) => b.created_at - a.created_at).map((m) => {
+      const post = groupPostId(m.site, m.remote_group, m.post_id);
+      return {
+        type: "Note", id: m.kind === "post" ? post : `${post}#c${m.remote_id}`, attributedTo: actorId(site),
+        inReplyTo: m.kind === "post" ? undefined : post, context: groupId(m.site, m.remote_group),
+        published: iso(m.created_at), mediaType: "text/plain", content: m.text ?? "",
+      };
+    }), { name: "What you've posted and said in groups (the originals are kept on each group's site)" }),
     "comments-elsewhere.json": collection([...t.comments_elsewhere].filter((c) => c.site).sort((a, b) => b.created_at - a.created_at)
       .map((c) => ({
         type: "Note",
@@ -198,6 +211,8 @@ fediverse uses. afterwrd's own extra terms start "afterwrd:" (https://afterwrd.a
   albums.json                albums, listing their photos by address
   comments-elsewhere.json    comments you've written on friends' afterwrd sites (the originals live there)
   connections.json           friends' afterwrd sites you're connected with
+  groups.json                the groups you're in (each is its own site, which keeps everything in it)
+  groups-elsewhere.json      what you've posted and said in groups (the originals live on the group's site)
   facebook-comments.json     your comments on Facebook
   facebook-likes.json        your likes and reactions on Facebook
   facebook-tagged.json       photos of you on Facebook (links only: Facebook doesn't include the images)
@@ -208,6 +223,8 @@ Addresses. Everything has a permanent address on the site it belongs to:
   a post               https://<site>/posts/<post key>
   a photo or video     https://<site>/photos/sha256/<fingerprint>   (the file itself: https://<site>/files/<fingerprint>)
   a comment            <the post's or photo's address>#c<number>
+  a group              https://<group's site>/groups/1
+  a post in a group    https://<group's site>/groups/1/posts/<number>
 A comment you wrote on a friend's post has the same address in your download (comments-elsewhere.json) as in
 theirs (in the post's "replies"), and its "inReplyTo" is the address of their post. So two friends' downloads
 can be matched up, and your conversations put back together, by address alone.

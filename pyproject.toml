@@ -3,6 +3,7 @@ name = "afterwrd"
 version = "0.1.0"
 description = "Browse a Facebook data export: friends, posts, photos, comments and likes."
 readme = "README.md"
+license = "AGPL-3.0-or-later"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.115",

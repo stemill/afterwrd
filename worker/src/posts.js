@@ -72,7 +72,8 @@ export async function removeUnusedFiles(env, files) {
   const marks = files.map(() => "?").join(",");
   // …including by an import under way, whose photos are waiting in media_next.
   const importing = await env.DB.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'media_next'").first();
-  const tables = importing ? ["media", "media_next"] : ["media"];
+  // …or, in a group's own Worker, by a post in the group (group_photos).
+  const tables = importing ? ["media", "media_next", "group_photos"] : ["media", "group_photos"];
   const { results: used } = await env.DB.prepare(tables.map((t) => `SELECT hash FROM ${t} WHERE hash IN (${marks})
     UNION SELECT thumb_hash FROM ${t} WHERE thumb_hash IN (${marks})`).join(" UNION "))
     .bind(...tables.flatMap(() => [...files, ...files])).all();

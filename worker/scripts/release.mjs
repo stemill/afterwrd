@@ -13,8 +13,9 @@ import { createHash } from "node:crypto";
 import { build as bundle } from "esbuild";
 import lz from "lz-string";
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { extname, join, relative } from "node:path";
+import { extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { NOTICES_PATH, notices, runtimePackages } from "./notices.mjs";
 
 const worker = fileURLToPath(new URL("..", import.meta.url));
 const args = process.argv.slice(2);
@@ -36,6 +37,27 @@ mkdirSync(out, { recursive: true });
 const build = spawnSync("npx", ["wrangler", "deploy", "--dry-run", "--outdir", dist], { cwd: worker, encoding: "utf8" });
 if (build.status !== 0) {
   console.error(build.stderr || build.stdout);
+  process.exit(1);
+}
+
+// Every copy must carry the licences of the code inside it (see scripts/notices.mjs): stop if licenses.txt is
+// stale, or if the built Worker contains a package it doesn't list.
+if (readFileSync(NOTICES_PATH, "utf8") !== notices()) {
+  console.error("public/static/licenses.txt is out of date: run npm run notices, check the result and commit it.");
+  process.exit(1);
+}
+const covered = new Set(runtimePackages().map((p) => p.dir));
+const PACKAGE_DIR = /^(node_modules\/(?:@[^/]+\/)?[^/]+(?:\/node_modules\/(?:@[^/]+\/)?[^/]+)*)\//;
+const bundledPackages = new Set(JSON.parse(readFileSync(join(dist, "index.js.map"), "utf8")).sources
+  .map((source) => PACKAGE_DIR.exec(relative(worker, resolve(dist, source)).split(sep).join("/"))?.[1])
+  .filter(Boolean));
+const uncovered = [...bundledPackages].filter((dir) => !covered.has(dir));
+if (!bundledPackages.has("node_modules/@simplewebauthn/server")) {
+  console.error("Couldn't read which packages the Worker contains from its source map, so can't check licenses.txt.");
+  process.exit(1);
+}
+if (uncovered.length) {
+  console.error(`The Worker contains packages licenses.txt doesn't cover: ${uncovered.join(", ")}`);
   process.exit(1);
 }
 

@@ -8,11 +8,11 @@ download for "Test Person", a friends list, and plain test photos.
 ```sh
 cd worker
 npm run test:e2e                      # everything (about 15 minutes)
-npm run test:e2e -- feed              # one or more suites: core fresh albums update feed forged
+npm run test:e2e -- feed              # one or more suites: core fresh albums update feed groups forged
 npm run test:e2e -- upgrade v0.17.0   # an older release's site (0.17.0 or later), upgraded in place to this code
 ```
 
-You need Google Chrome (set `CHROME` to its path if it isn't in /Applications), `zip`, and ports 8787–8789 free, so
+You need Google Chrome (set `CHROME` to its path if it isn't in /Applications), `zip`, and ports 8787–8790 free, so
 stop `npm run dev` first. The update tests read the latest release from GitHub, so they need the internet. Your
 own local database (`.wrangler/state`) is set aside while the tests run and put back afterwards. Logs, screenshots
 and downloads go to `out/`, which git ignores.
@@ -27,6 +27,7 @@ and downloads go to `out/`, which git ignores.
 | `albums.mjs` | albums, adding and deleting photos, profile picture and cover |
 | `update-ui.mjs` | the Update page with an update waiting, a remembered token, and up to date; no downgrades |
 | `feed.mjs` | three sites: connecting and approving (or declining) requests, inviting a Facebook friend, Feed, friend pages, comments across sites, signed photo links, the Friends list, Download everything matching up, disconnecting, and attempts to impersonate a site |
+| `groups.mjs` | three sites and a group's own Worker (group mode, on 8790): claiming the group, invite links and letting people in, admins, reading and posting from members' own sites (photos copied to the group's Worker), comments reaching only those who wrote or commented on the post, live updates, the group unable to speak for a member, keys that open nothing else, a group Worker serving nothing else, moderating, renaming, leaving, removing, and deleting the group. (Making the Worker in Cloudflare can't run locally: the test starts one and claims it.) |
 | `forged.mjs` | the code that reads friends' sites, fed what a hostile site might send |
 | `upgrade.mjs` | posts, photos and comments made on an older release survive the upgrade |
 

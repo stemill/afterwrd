@@ -17,7 +17,7 @@ const results = [];
 const check = (name, ok, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? `  (${extra})` : ""}`); };
 const errors = [];
 // The main menu, then what's behind the person's picture.
-const navLabels = (page) => page.$$eval("header.site nav.main a, header.site .menu a", (a) => a.map((x) => x.querySelector("span").textContent.trim()).join(","));
+const navLabels = (page) => page.$$eval("header.site nav.main a, header.site .menu > a", (a) => a.map((x) => x.querySelector("span").textContent.trim()).join(","));
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
 
@@ -46,7 +46,7 @@ await register(phone, newOwner(ownerName));
 let second = "";
 try { cli(`Second ${Date.now()}`); } catch (e) { second = String(e.stderr); }
 check("the terminal won't make a second owner", second.includes("already has an owner"), second.trim());
-check("the menu has Your devices", (await navLabels(phone)) === "Home,Photos,Friends,Notifications,Your profile,Your devices,Import,Download everything,Update", await navLabels(phone));
+check("the menu has Your devices", (await navLabels(phone)) === "Home,Photos,Friends,Groups,Notifications,Your profile,Your devices,Import,Download everything,Update", await navLabels(phone));
 await phone.goto(`${BASE}/_admin`);
 check("Your devices lists one passkey, which can't be removed", (await phone.$eval("h1", (h) => h.textContent)) === "Your devices"
   && JSON.stringify((await passkeys(phone)).map((k) => k.disabled)) === "[true]");

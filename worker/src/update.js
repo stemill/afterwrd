@@ -9,18 +9,23 @@
 //   POST /_admin/update/deploy     {token?, account, tag, jwt} -> the new version
 //   POST /_admin/update/remember   {token}: keep it as the secret UPDATE_TOKEN (after an update, or any time)
 //   POST /_admin/update/forget     delete the remembered token from the Worker
-// Without a token in the request, the remembered one is used.
+//   POST /_admin/update/group-assets  {token?, group} -> upload this version's site files for a group this site made
+//   POST /_admin/update/group-deploy  {token?, group, jwt} -> bring that group's Worker up to this site's version
+// Without a token in the request, the remembered one is used. Groups (groupsites.js) follow their owner's site: once
+// it's updated, this page offers to bring its groups up to the same version.
 // Releases come from the GitHub repository in package.json (afterwrd.releases). Every file is checked against
 // the release's manifest; as with installing, trust rests on that repository.
 import { asset, FAVICON, ownerHeader } from "./nav.js";
 import pkg from "../package.json";
 import { api, deployVersion, existingDatabase, findWorker, loadRelease, uploadAssets } from "./deploy.js";
+import { GROUP_RELEASE, isGroupWorker } from "./groupsites.js";
 import { escape, html, json, now } from "./util.js";
 
 const VERSION = pkg.version;
 const REPO = pkg.afterwrd.releases;
 const TAG_RE = /^v\d+\.\d+\.\d+$/;
-const PERMISSIONS = [{ key: "workers_scripts", type: "edit" }, { key: "account_settings", type: "read" }];
+// D1 too, so the same token can start and delete groups (each has its own database; groupsites.js).
+const PERMISSIONS = [{ key: "workers_scripts", type: "edit" }, { key: "d1", type: "edit" }, { key: "account_settings", type: "read" }];
 const TOKEN_URL = "https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys="
   + encodeURIComponent(JSON.stringify(PERMISSIONS)) + "&accountId=*&zoneId=all&name=afterwrd%20update";
 const TOKENS_PAGE = "https://dash.cloudflare.com/profile/api-tokens";
@@ -28,11 +33,14 @@ const CHECK_SECONDS = 6 * 3600;
 
 export async function handleUpdate(request, env, url, owner) {
   const path = url.pathname.slice("/_admin/update".length);
-  if (request.method === "GET" && path === "") return html(updatePage(owner, await latestRelease(), Boolean(env.UPDATE_TOKEN)));
+  if (request.method === "GET" && path === "") {
+    return html(updatePage(owner, await latestRelease(), Boolean(env.UPDATE_TOKEN), await groupsBehind(env.DB)));
+  }
   if (request.method === "GET" && path === "/version") return json({ version: VERSION });
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
 
   const body = await request.json().catch(() => ({}));
+  if (path === "/group-assets" || path === "/group-deploy") return updateGroup(env, path, body);
   try {
     if (!["/remember", "/forget"].includes(path)) {
       if (!TAG_RE.test(body.tag ?? "")) throw new Error("Unknown release.");
@@ -75,6 +83,38 @@ export async function handleUpdate(request, env, url, owner) {
   return new Response("Not found", { status: 404 });
 }
 
+/** The groups this site made, with the version each is running (null if it couldn't be reached). */
+async function madeGroups(db) {
+  const { results } = await db.prepare(`SELECT id, name, origin, script, account, database FROM groups
+    WHERE joined_at IS NOT NULL AND role = 'owner' AND script IS NOT NULL AND script != '' ORDER BY name COLLATE NOCASE`).all();
+  return Promise.all(results.map(async (g) => {
+    const ping = await fetch(`${g.origin}/_group/ping`, { redirect: "manual", signal: AbortSignal.timeout(5000) })
+      .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    return { ...g, version: typeof ping?.version === "string" && /^\d+\.\d+\.\d+$/.test(ping.version) ? ping.version : null };
+  }));
+}
+
+/** Those of them running an older version than this site. */
+const groupsBehind = async (db) => (await madeGroups(db)).filter((g) => g.version && newer(VERSION, g.version));
+
+/** Brings a group this site made up to this site's version: its files, then its code (keeping its database and secrets). */
+async function updateGroup(env, path, body) {
+  try {
+    const token = (typeof body.token === "string" && body.token.trim()) || env.UPDATE_TOKEN;
+    if (!token) throw new Error("Paste your API token first.");
+    const group = (await groupsBehind(env.DB)).find((g) => g.id === Number(body.group));
+    if (!group || !/^[0-9a-f]{32}$/.test(group.account)) throw new Error("That group is already up to date, or couldn't be reached.");
+    const release = await loadRelease(GROUP_RELEASE);
+    if (path === "/group-assets") return json({ jwt: await uploadAssets(token, group.account, group.script, release) });
+    const settings = await api(token, `/accounts/${group.account}/workers/scripts/${group.script}/settings`);
+    if (!isGroupWorker(settings, group)) throw new Error("That Worker isn't the group's any more, so it wasn't updated.");
+    await deployVersion(token, group.account, group.script, release, { jwt: body.jwt, databaseId: group.database, settings });
+    return json({ ok: true });
+  } catch (error) {
+    return json({ error: error.message }, 400);
+  }
+}
+
 // The latest release's manifest names its version. It's fetched from GitHub's download links rather than its API:
 // the API allows 60 anonymous requests an hour per address, and Workers share their addresses with many others.
 // (Only the version is read here; updating downloads the release by tag and checks every file.)
@@ -115,8 +155,20 @@ function newer(a, b) {
   return false;
 }
 
-function updatePage(owner, latest, remembered) {
+function updatePage(owner, latest, remembered, groups) {
   const available = latest.version && newer(latest.version, VERSION);
+  // Groups this site made that are behind it: brought up to this version, with the same token.
+  const groupsPart = groups.length && !available ? `
+<section class="card" id="groups">
+  <h2>Your groups</h2>
+  <p>${groups.map((g) => `${escape(g.name)} (${escape(g.version)})`).join(", ")} ${groups.length === 1 ? "is" : "are"} behind your
+  site. Bring ${groups.length === 1 ? "it" : "them"} up to ${escape(VERSION)}:</p>
+  ${remembered ? "" : `<p class="meta">This needs a Cloudflare API token that can edit Workers and D1, as above.</p>
+  <input id="group-token" type="text" autocomplete="off" spellcheck="false" placeholder="Your API token">`}
+  <p><button id="groups-go" data-groups="${escape(JSON.stringify(groups.map((g) => ({ id: g.id, name: g.name }))))}">Update ${groups.length === 1 ? "the group" : "the groups"}</button></p>
+  <ol id="group-log"></ol>
+  <p id="group-error" role="alert"></p>
+</section>` : "";
   const forget = remembered ? `
 <p class="meta remembered">Your update token is remembered, so updating is one click.
   <button class="link" id="forget">Forget it</button></p>` : "";
@@ -194,6 +246,7 @@ ${ownerHeader("update")}
 <h1>Update afterwrd</h1>
 <p class="meta">Signed in as ${escape(owner.name)}. This site is afterwrd ${escape(VERSION)}.</p>
 ${body}
+${groupsPart}
 </main>
 <script>
   const go = document.getElementById("go");
@@ -212,6 +265,25 @@ ${body}
       location.assign("${TOKENS_PAGE}");
     } catch (err) {
       alert("Couldn't forget it: " + err.message + " You can also delete the secret UPDATE_TOKEN in the Worker's settings in Cloudflare.");
+    }
+  });
+  const groupsGo = document.getElementById("groups-go");
+  if (groupsGo) groupsGo.addEventListener("click", async () => {
+    const error = document.getElementById("group-error");
+    const log = (text) => { const li = document.createElement("li"); li.textContent = text; document.getElementById("group-log").append(li); };
+    const token = document.getElementById("group-token")?.value.trim() || "";
+    error.textContent = "";
+    groupsGo.disabled = true;
+    try {
+      for (const group of JSON.parse(groupsGo.dataset.groups)) {
+        log("Updating " + group.name + "…");
+        const { jwt } = await post("group-assets", { token, group: group.id });
+        await post("group-deploy", { token, group: group.id, jwt });
+      }
+      log("Done.");
+    } catch (err) {
+      error.textContent = err.message;
+      groupsGo.disabled = false;
     }
   });
   const keep = document.getElementById("keep");

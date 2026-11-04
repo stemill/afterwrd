@@ -3,6 +3,9 @@
 import { findTarget, latestComments, loadThreads, newCount, photoKey, postKey } from "./comments.js";
 import { connectionById, loadFeed, markMine, rememberPicture } from "../feed.js";
 import * as friend from "../friends.js";
+import { MAX_GROUP_PHOTOS, MAX_MEMBERS } from "../groups.js";
+import { whereAmI } from "../groupsites.js";
+import * as groups from "../membership.js";
 import { ownerName } from "../peers.js";
 import { SITE_ID } from "../posts.js";
 import { profilePictures } from "../photos.js";
@@ -59,6 +62,12 @@ const ROUTES = [
   [/^\/friend\/(\d+)\/photos$/, null, friendPhotos],
   [/^\/friend\/(\d+)\/photos\/album\/(\d+|other|videos)$/, null, friendAlbum],
   [/^\/friend\/(\d+)\/photos\/([0-9a-f]{64})$/, null, friendPhoto],
+  [/^\/groups$/, null, groupsIndex],
+  [/^\/groups\/new$/, null, groupNew],
+  [/^\/groups\/join$/, null, groupJoin],
+  [/^\/groups\/(\d{1,15})$/, null, groupHome],
+  [/^\/groups\/(\d{1,15})\/posts\/(\d{1,15})$/, null, groupPost],
+  [/^\/groups\/(\d{1,15})\/members$/, null, groupMembers],
 ];
 
 export async function renderArchive(request, env, url, user, work) {
@@ -75,7 +84,7 @@ export async function renderArchive(request, env, url, user, work) {
   const chosen = settings.results[0] ? JSON.parse(settings.results[0].value) : [];
   const sections = [...new Set([...chosen, "posts", "photos"])];
   const ctx = {
-    db, url, user, chosen, sections, newComments: await newCount(db, user),
+    env, db, url, user, chosen, sections, newComments: await newCount(db, user),
     requests: (await first(db, "SELECT COUNT(*) AS n FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL")).n,
     updateWaiting: await updateWaiting(env, work),
     me: me.results[0] ?? { id: -1, name: await ownerName(db), is_me: 1 },
@@ -544,6 +553,67 @@ async function friendPhoto(ctx, params, id, hash) {
     m.comments = await markMine(ctx.db, c.id, `photo-${m.hash}`, m.comments, ctx.url.origin);
     return views.friendPhotoPage(ctx, c, m);
   });
+}
+
+// --- groups, each its own Worker, read from there (membership.js) ------------------------------------------------------
+
+/** The owner's groups, with comments waiting in each. */
+async function groupsIndex(ctx) {
+  const list = await all(ctx.db, `SELECT g.*, (SELECT COUNT(*) FROM group_inbox i WHERE i.group_id = g.id AND i.created_at > ?) AS notes
+    FROM groups g WHERE g.joined_at IS NOT NULL ORDER BY g.name COLLATE NOCASE`, [ctx.user.activity_seen_at ?? 0]);
+  // Groups whose Worker this site made, but which it didn't finish claiming.
+  const unfinished = await all(ctx.db, "SELECT id, name, origin FROM groups WHERE joined_at IS NULL AND script != '' ORDER BY created_at");
+  return views.groupsIndexPage(ctx, { groups: list, unfinished, remembered: Boolean(ctx.env.UPDATE_TOKEN) });
+}
+
+/** Starting a group: its own Worker, made in the owner's Cloudflare account (groupsites.js). */
+async function groupNew(ctx) {
+  let address = null;
+  try {
+    address = whereAmI(ctx.url);
+  } catch {}
+  return views.groupNewPage(ctx, { remembered: Boolean(ctx.env.UPDATE_TOKEN), domain: address?.domain ?? null, maxPhotos: MAX_GROUP_PHOTOS });
+}
+
+/** Opened from a group's invite link: join it? */
+async function groupJoin(ctx, params) {
+  const link = params.get("link") ?? "";
+  try {
+    const info = await groups.linkInfo(ctx.env, ctx.url, link);
+    if (info.joined) return Response.redirect(`${ctx.url.origin}/groups/${info.joined}`, 302);
+    return views.groupJoinPage(ctx, { info, link });
+  } catch (error) {
+    return views.groupJoinPage(ctx, { error: error.message });
+  }
+}
+
+/** Only the owner reads a group from here; `load` gets the group and returns the page. */
+async function fromGroup(ctx, id, load) {
+  const group = await first(ctx.db, "SELECT * FROM groups WHERE id = ? AND joined_at IS NOT NULL", [Number(id)]);
+  if (!group) return null;
+  try {
+    return await load(group);
+  } catch (error) {
+    return views.groupProblem(ctx, group, error.message);
+  }
+}
+
+async function groupHome(ctx, params, id) {
+  return fromGroup(ctx, id, async (g) => views.groupPage(ctx, g,
+    await groups.loadGroup(ctx.env, ctx.url.origin, g, pageNumber(params)), { maxPhotos: MAX_GROUP_PHOTOS }));
+}
+
+async function groupPost(ctx, params, id, postId) {
+  return fromGroup(ctx, id, async (g) => {
+    const found = await groups.loadGroupPost(ctx.env, ctx.url.origin, g, postId);
+    return found?.post ? views.groupPostPage(ctx, g, found) : views.groupProblem(ctx, g, "That post isn't there any more.");
+  });
+}
+
+/** Who's in a group; for its admins, also requests to join, the invite link, and running it. */
+async function groupMembers(ctx, params, id) {
+  return fromGroup(ctx, id, async (g) => views.groupMembersPage(ctx, g, await groups.loadMembers(ctx.env, g),
+    { max: MAX_MEMBERS, remembered: Boolean(ctx.env.UPDATE_TOKEN) }));
 }
 
 /** Friends' profile pictures by site, where the link their site gave is still good. */

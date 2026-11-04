@@ -9,7 +9,7 @@ afterwrd isn't affiliated with or endorsed by Meta. It only reads the "Download 
 gives you; it never signs in to Facebook or fetches anything from it.
 
 **Finding your way round.** *Home* is your posts and your friends' together, with a box to write in; *Photos*,
-*Friends* and *Notifications* sit beside it. Your picture (top right) opens your profile, *Memories* (everything from
+*Friends*, *Groups* and *Notifications* sit beside it. Your picture (top right) opens your profile, *Memories* (everything from
 Facebook, with "On this day"), and your tools: *Your devices*, *Import*, *Download everything* and *Update*.
 
 ## Install your own
@@ -147,6 +147,18 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   an hour or two. Disconnecting ends it all at once. Sites exchange posts and comments as ActivityStreams too. Only posts written on
   afterwrd are shared, never an imported archive. Either side can disconnect. Two sites in the same Cloudflare
   account can connect too.
+- **Groups.** Each group is its own small site: *Groups → Start a group* makes it a Worker of its own, with its own
+  database, in your Cloudflare account (with the token remembered for updates, or one you paste; it needs to edit
+  Workers and D1). It runs afterwrd in group mode: it holds the group and nothing else, and no one signs in to it.
+  You and its members use it from your own sites, so being in a group isn't being friends, and a group's keys open
+  nothing on anyone's site. Make an invite link on its *Members* page and send it round: anyone with an afterwrd site
+  can use it for 14 days, but each use is only a request, and the group's admins let people in (up to 40 besides its
+  owner). The owner can make members admins, and admins can remove people and delete anything in the group.
+  Members read the group from their own sites when they open it, and can post (with up to 8 photos, which are copied
+  to the group) and comment; a copy of their own words stays on their site. Nothing is sent round when someone posts:
+  a comment sends a quiet note only to the people who wrote that post or commented on it, which shows in their
+  *Notifications*. The *Update* page brings your groups up to your site's version, and deleting a group removes its
+  Worker and database. A free Cloudflare account holds about 9 groups besides your site (10 databases in all).
 - **Comments.** You and your friends (from their own sites) can comment under a post or photo; comments show
   straight away. Friends can delete their own, and you can delete any. *Notifications* lists comments on your
   posts and photos, and comments on friends' posts and photos you've commented on too, with a count in the menu
@@ -178,6 +190,10 @@ git tag -a v<version> -m "afterwrd <version>" && git push origin v<version>
 A GitHub Action (`.github/workflows/release.yml`) builds the release from the tagged code and publishes it with
 every file attached, including `installer.js`. To build one locally instead:
 `npm run release -- --base https://github.com/stemill/afterwrd/releases/download/v<version>` in `worker/`.
+
+**Licences.** After adding, removing or upgrading a dependency, run `npm run notices` in `worker/` and commit the
+updated `public/static/licenses.txt`, which carries the licences of everything installed with afterwrd. The release
+won't build while it's out of date, or if the Worker bundles a package it doesn't cover.
 
 **Testing.** `npm run test:ingest -- <export folder>` checks the browser importer against
 `uv run afterwrd-ingest` row by row. To try the site locally: `npx wrangler d1 migrations apply afterwrd --local`,
@@ -228,3 +244,13 @@ and `target_kind` narrow the search.
 - 74 comments have no text in the export, just the summary line; they're shown
   with a note.
 - Photos you're tagged in are links back to Facebook, not images.
+
+## Licence
+
+afterwrd is free software, licensed under the [GNU Affero General Public License v3.0 or later](LICENSE).
+Anyone can use it, change it and share it, free. If you change it and let other people use your version over a
+network, you must offer them its source code under the same licence, so it can't be taken private.
+
+afterwrd includes other open-source projects under their own licences (MIT, BSD, Apache 2.0 and the SIL Open Font
+Licence), listed with their full texts in [worker/public/static/licenses.txt](worker/public/static/licenses.txt),
+which every afterwrd site also serves at `/static/licenses.txt`.

@@ -2,10 +2,12 @@
 // installer (or updated) never needs wrangler. Uses wrangler's own bookkeeping table, so `wrangler d1
 // migrations apply` and this agree on what's been applied.
 import m0001 from "../migrations/0001_schema.sql";
+import m0002 from "../migrations/0002_groups.sql";
 
 // Every file in migrations/, in order. A new migration needs adding here too.
 const MIGRATIONS = [
   ["0001_schema.sql", m0001],
+  ["0002_groups.sql", m0002],
 ];
 
 let ready = null;

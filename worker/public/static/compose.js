@@ -1,9 +1,10 @@
-// The owner's composer on Posts: text and up to 20 photos (prepared and uploaded by upload.js), then the post is
-// saved (src/posts.js).
+// The owner's composer on Home and Posts: text and up to 20 photos (prepared and uploaded by upload.js), then the post
+// is saved (src/posts.js). In a group, the form says where it goes and how many photos it takes (src/groups.js).
 import { call, picker, uploadPhotos } from "./upload.js";
 
-const MAX_PHOTOS = 20;
 const form = document.getElementById("composer");
+const MAX_PHOTOS = Number(form.dataset.max) || 20;
+const ACTION = form.dataset.action || "/_admin/posts";
 const input = form.querySelector("input[type=file]");
 const status = form.querySelector(".status");
 const error = form.querySelector(".error");
@@ -32,7 +33,7 @@ form.addEventListener("submit", async (event) => {
   try {
     const photos = await uploadPhotos(picked.map((p) => p.file), (message) => { status.textContent = message; });
     status.textContent = "Posting…";
-    await call("/_admin/posts", { text, photos });
+    await call(ACTION, { text, photos });
     location.href = location.pathname; // back to the page it was written on (Home or Posts), showing the new post
   } catch (err) {
     error.textContent = err.message;

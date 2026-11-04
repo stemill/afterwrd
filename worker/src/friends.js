@@ -15,16 +15,16 @@ const count = (n) => (Number.isSafeInteger(n) && n > 0 ? n : null);
 const own = (site, url, prefix) => (typeof url === "string" && url.startsWith(site + prefix) ? url.slice(site.length + prefix.length) : null);
 
 /** Their signed link for a file, if it's exactly that and nothing more (it ends up in pages, even in style="…"). */
-const fetchable = (site, link, hash) => (typeof link === "string" && link.startsWith(`${site}/files/${hash}?`)
+export const signedLink = (site, link, hash) => (typeof link === "string" && link.startsWith(`${site}/files/${hash}?`)
   && /^\?exp=\d{1,12}&sig=[\w-]{43}$/.test(link.slice(`${site}/files/${hash}`.length)) ? link : null);
 
 export function parseMedia(m, site) {
   const hash = own(site, m?.url, "/files/");
   if (!["Image", "Video"].includes(m?.type) || !HASH_RE.test(hash ?? "")) return null;
-  const src = fetchable(site, m["afterwrd:fetch"], hash);
+  const src = signedLink(site, m["afterwrd:fetch"], hash);
   if (!src) return null;
   const thumb = own(site, m.preview?.url, "/files/");
-  const thumbSrc = HASH_RE.test(thumb ?? "") ? fetchable(site, m.preview["afterwrd:fetch"], thumb) : null;
+  const thumbSrc = HASH_RE.test(thumb ?? "") ? signedLink(site, m.preview["afterwrd:fetch"], thumb) : null;
   return {
     hash, kind: m.type === "Video" ? "video" : "photo", src, thumbSrc: thumbSrc ?? src,
     width: count(m.width), height: count(m.height), description: text(m.name, 5000), timestamp: seconds(m.published),

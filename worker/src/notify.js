@@ -8,7 +8,12 @@
 // Received (receiveNote, from peers.js): kept in `inbox` only if it's about the sender's own post or photo and, for a
 // comment, only if the owner here has commented on it too. Cut to size, rate-limited, pruned after 60 days, and
 // shown as text: Notifications lists the comments, and open pages count the posts (live.js).
-import { CONTEXT, POST_KEY_RE, postId, postKey, targetId } from "../public/static/activity.js";
+//
+// Groups work the same way, through POST /_member/notify: a group's Worker sends a comment on one of its posts to the
+// members' sites whose owners wrote that post or commented on it (notifyGroupComment). New posts in a group aren't sent
+// anywhere: members' sites read the group when they open it. A member's site keeps a note in `group_inbox` only if its
+// owner wrote or commented on that post there (receiveGroupNote).
+import { CONTEXT, groupPostId, POST_KEY_RE, postId, postKey, targetId } from "../public/static/activity.js";
 import { outbox } from "./outbox.js";
 import { SITE_ID } from "./posts.js";
 import { now } from "./util.js";
@@ -79,6 +84,42 @@ export async function receiveNote(db, peer, note) {
     .bind(at - KEEP_SECONDS).run();
   if (!row && isComment) return [{ error: "That's a lot of notes for now." }, 429];
   return [{ ok: true }, 202];
+}
+
+/**
+ * In a group's Worker: tells the members' sites that will want to know about a new comment (`id`) on `post`:
+ * its writer's and those of everyone else who's commented on it, apart from the comment's own writer (`from`).
+ */
+export async function notifyGroupComment(env, site, group, post, { id, name, text, from }) {
+  const { results } = await env.DB.prepare(`SELECT id FROM group_members WHERE group_id = ?1 AND approved_at IS NOT NULL AND origin != ?2
+    AND (origin = ?3 OR origin IN (SELECT origin FROM group_comments WHERE post_id = ?4 AND origin IS NOT NULL)) ORDER BY id`)
+    .bind(group.id, from, post.origin, post.id).all();
+  if (!results.length) return;
+  const address = groupPostId(site, group.id, post.id);
+  await outbox(env).sendToMembers(results.map((r) => r.id), { "@context": CONTEXT, type: "Create", object: { type: "Note",
+    id: `${address}#c${id}`, inReplyTo: address, content: snippet(text), attributedTo: { type: "Person", name: snippet(name, 100) } } });
+}
+
+/** A note from a group the owner here is in: kept, ignored, or refused. Returns [body, status]. */
+export async function receiveGroupNote(db, group, note) {
+  const object = note?.type === "Create" && note.object?.type === "Note" ? note.object : null;
+  const prefix = groupPostId(group.origin, group.remote_id, "");
+  const post = typeof object?.inReplyTo === "string" && object.inReplyTo.startsWith(prefix) ? object.inReplyTo.slice(prefix.length) : "";
+  if (!/^\d{1,15}$/.test(post)) return [{ error: "That isn't about a post in this group." }, 400];
+  // Only news if the owner here wrote that post or commented on it.
+  if (!(await db.prepare("SELECT 1 FROM group_mine WHERE site = ? AND remote_group = ? AND post_id = ? LIMIT 1")
+    .bind(group.origin, group.remote_id, Number(post)).first())) {
+    return [{ ok: true }, 202];
+  }
+  const at = now();
+  const row = await db.prepare(`INSERT INTO group_inbox (group_id, post_id, actor, text, created_at)
+    SELECT ?1, ?2, ?3, ?4, ?5
+    WHERE (SELECT COUNT(*) FROM group_inbox WHERE group_id = ?1 AND created_at > ?5 - ?6) < ?7
+      AND (SELECT COUNT(*) FROM group_inbox WHERE group_id = ?1 AND created_at > ?5 - 86400) < ?8
+    RETURNING id`).bind(group.id, Number(post), snippet(object.attributedTo?.name, 100) || "Someone", snippet(object.content) || null,
+    at, RATE.seconds, RATE.count, DAILY).first();
+  await db.prepare("DELETE FROM group_inbox WHERE created_at < ? OR group_id NOT IN (SELECT id FROM groups)").bind(at - KEEP_SECONDS).run();
+  return row ? [{ ok: true }, 202] : [{ error: "That's a lot of notes for now." }, 429];
 }
 
 /** Notes from a current, approved connection: the join every read of `inbox` uses. */

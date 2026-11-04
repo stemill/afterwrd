@@ -33,15 +33,24 @@ export async function loadThreads(db, keys) {
   return threads;
 }
 
-// Notifications: comments here (site_comments), and comments on friends' posts and photos the owner has commented on
-// too, which their sites send (inbox, see notify.js). One list, newest first.
+// In a group: what it said (group_inbox, see notify.js), while the owner's still in it.
+const GROUP_THERE = "FROM group_inbox i JOIN groups g ON g.id = i.group_id AND g.joined_at IS NOT NULL";
+
+// Notifications: comments here (site_comments), comments on friends' posts and photos the owner has commented on
+// too, which their sites send (inbox, see notify.js), and comments in groups. One list, newest first. For a group,
+// `connection_id` is the group, `friend` its name, `target` the post, and `own_post` whether the owner wrote it.
 const NOTIFICATIONS_SQL = `
   SELECT 'here' AS source, c.id, c.target, c.text, c.created_at, COALESCE(u.name, c.author_name) AS name, c.author_id,
-    NULL AS connection_id, NULL AS friend
+    NULL AS connection_id, NULL AS friend, NULL AS own_post
   FROM site_comments c LEFT JOIN users u ON u.id = c.author_id
   UNION ALL
-  SELECT 'friend', i.id, i.target, i.text, i.created_at, i.actor, NULL, i.connection_id, co.name
-  FROM inbox i ${INBOX_JOIN} WHERE i.kind = 'comment'`;
+  SELECT 'friend', i.id, i.target, i.text, i.created_at, i.actor, NULL, i.connection_id, co.name, NULL
+  FROM inbox i ${INBOX_JOIN} WHERE i.kind = 'comment'
+
+  UNION ALL
+  SELECT 'group', i.id, CAST(i.post_id AS TEXT), i.text, i.created_at, i.actor, NULL, g.id, g.name,
+    EXISTS (SELECT 1 FROM group_mine m WHERE m.site = g.origin AND m.remote_group = g.remote_id AND m.kind = 'post' AND m.post_id = i.post_id)
+  ${GROUP_THERE}`;
 
 /** The newest notifications, for the Notifications page. */
 export async function latestComments(db, page, size) {
@@ -57,7 +66,8 @@ export async function latestComments(db, page, size) {
 export async function newCount(db, user) {
   const row = await db.prepare(`SELECT
     (SELECT COUNT(*) FROM site_comments WHERE created_at > ?1 AND (author_id IS NULL OR author_id != ?2))
-    + (SELECT COUNT(*) FROM inbox i ${INBOX_JOIN} WHERE i.kind = 'comment' AND i.created_at > ?1) AS n`)
+    + (SELECT COUNT(*) FROM inbox i ${INBOX_JOIN} WHERE i.kind = 'comment' AND i.created_at > ?1)
+    + (SELECT COUNT(*) ${GROUP_THERE} WHERE i.created_at > ?1) AS n`)
     .bind(user.activity_seen_at ?? 0, user.id).first();
   return row.n;
 }

@@ -99,6 +99,9 @@ details.me .menu .icon { color: var(--muted); }
 details.me .menu .dot { margin-left: auto; }
 details.me .menu hr { width: 100%; border: 0; border-top: 1px solid var(--border); margin: 0.3rem 0; }
 details.me .menu form { display: contents; }
+details.me .menu .about { margin: 0.3rem 0.8rem 0.2rem; color: var(--muted); font: 0.75rem var(--sans); }
+details.me .menu .about a { display: inline; width: auto; padding: 0; border-radius: 0; color: inherit; font: inherit; text-decoration: underline; }
+details.me .menu .about a:hover { background: none; color: var(--text); }
 @media (max-width: 640px) {
   header.site .bar { gap: 0.5rem 0.75rem; padding-block: 0.55rem; }
   .brand { font-size: 1.35rem; }
@@ -313,6 +316,29 @@ img.who { object-fit: cover; padding: 0; }
 .connections #error:empty { display: none; }
 .connections table.numbers th, .connections table.numbers td { text-align: left; }
 .connections table.numbers td:last-child { text-align: right; }
+
+/* Groups */
+.group-list, .member-list { list-style: none; margin: 0 0 1.5rem; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+.group-list a.card { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.9rem; color: var(--text); }
+.group-list a.card:hover { text-decoration: none; box-shadow: inset 0 0 0 1.5px var(--accent); }
+.group-list .what, .member-list .what { flex: 1 1 12rem; display: flex; flex-direction: column; }
+.group-list strong, .member-list strong { font: 900 1.1rem var(--round); }
+.icon-tile { display: grid; place-items: center; width: 3rem; height: 3rem; border-radius: 14px; background: var(--raised); color: var(--accent-strong); }
+.icon-tile .icon { width: 1.5rem; height: 1.5rem; }
+.member-list .member { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.9rem; padding: 0.8rem 1.1rem; }
+.member-list .actions-row, main .actions-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.75rem 0 0; }
+.member-list .actions-row { margin: 0; }
+form.stack { display: flex; flex-direction: column; gap: 0.6rem; }
+form.stack input, form.stack textarea, #invite input { width: 100%; font: inherit; padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 16px; background: var(--sunken); color: var(--text); }
+form.stack textarea { resize: vertical; }
+form.stack p { margin: 0; }
+#invite { margin-bottom: 1.5rem; }
+#invite #link { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.75rem; }
+#invite #link[hidden] { display: none; }
+#invite #error, main > #error { color: var(--danger); font-weight: 700; }
+#invite #error:empty { display: none; }
+.requests h2 { margin-top: 0; }
+main > form:last-child { margin-top: 1.5rem; }
 
 /* Notifications */
 .activity { display: flex; gap: 1rem; }

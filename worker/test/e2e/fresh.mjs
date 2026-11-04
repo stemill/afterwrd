@@ -43,7 +43,7 @@ async function importZip(sections) {
 // Nothing imported yet.
 await page.goto(BASE);
 check("a new site opens on Home", new URL(page.url()).pathname === "/", page.url());
-check("menu has Home, Photos, Friends and Notifications before any import", (await nav()) === "Home,Photos,Friends,Notifications", await nav());
+check("menu has Home, Photos, Friends, Groups and Notifications before any import", (await nav()) === "Home,Photos,Friends,Groups,Notifications", await nav());
 check("composer is there", Boolean(await page.$("#composer")));
 check("empty Home says so kindly", (await page.$eval("main .empty", (e) => e.textContent.trim())) === "Nothing here yet. Write your first post above.");
 await page.type("#composer textarea", "My very first post");

@@ -1,4 +1,6 @@
 // afterwrd installer, version __VERSION__.
+// Copyright (C) 2026 Ste Millington. Free software under the GNU Affero General Public License, version 3 or later;
+// source code and licence at https://github.com/stemill/afterwrd
 //
 // Deploy this as a Cloudflare Worker (the install page's "Install on Cloudflare" button does it, or paste this whole
 // file into a Worker by hand), then open the Worker's address:

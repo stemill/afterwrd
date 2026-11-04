@@ -1,7 +1,8 @@
 {
   "name": "afterwrd-worker",
-  "version": "0.17.1",
+  "version": "0.18.0",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
@@ -9,6 +10,7 @@
     "owner": "node scripts/owner.mjs",
     "test:ingest": "node --disable-warning=ExperimentalWarning test/compare-ingest.mjs",
     "release": "node scripts/release.mjs",
+    "notices": "node scripts/notices.mjs",
     "test:e2e": "test/e2e/run.sh"
   },
   "dependencies": {

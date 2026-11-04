@@ -2,17 +2,23 @@
 // come from the media store (/files/<sha256>), and the stylesheet and import scripts from public/static.
 // Everything the owner imports arrives through /_admin/import, and comments through /_comments. Every request
 // comes through here first (run_worker_first), so nothing is reachable without a session, apart from sign-in, a
-// Connect link, and connected friends' sites, which carry a key (connect.js, peers.js).
+// Connect link, and connected friends' sites and groups the owner's in, which carry a key (connect.js, peers.js,
+// membership.js). A group's own Worker (with the secret GROUP_KEY) is afterwrd in group mode: it answers only its
+// members' sites and invite links (groups.js), and serves nothing else at all.
 import { handleAdmin } from "./admin.js";
 import { handleComments } from "./archive/comments.js";
 import { renderArchive } from "./archive/routes.js";
 import { currentUser, handleAuth } from "./auth.js";
 import { handleConnectLink } from "./connect.js";
 import { handleFeed } from "./feed.js";
+import { handleGroupApi, handleJoinLink } from "./groups.js";
 import { HASH_RE, mediaStore } from "./media.js";
+import { handleGroupActions, handleMember } from "./membership.js";
 import { ensureSchema } from "./migrate.js";
 import { handlePeer } from "./peers.js";
+import { messagePage } from "./pages.js";
 import { signedFor } from "./share.js";
+import { html } from "./util.js";
 import { handleLive } from "./live.js";
 
 export { MediaStore } from "./media.js";
@@ -40,20 +46,19 @@ export default {
 async function route(request, env, work) {
   await ensureSchema(env);
   const url = new URL(request.url);
+  if (env.GROUP_KEY) return routeGroup(request, env, url);
   if (url.pathname.startsWith("/_auth/")) return handleAuth(request, env, url);
   // A friend's Connect link, and their site's calls once connected, which carry a key instead of a session.
   if (url.pathname.startsWith("/_connect/")) return handleConnectLink(request, env, url);
   if (url.pathname.startsWith("/_peer/")) return handlePeer(request, env, url);
+  // A group the owner's in, calling with the key this site gave it.
+  if (url.pathname.startsWith("/_member/")) return handleMember(request, env, url);
   const reading = request.method === "GET" || request.method === "HEAD";
   const [, top, rest] = url.pathname.split("/");
   // The fonts are public, so the sign-in pages can use them too; they're open-licensed and say nothing about the site.
   if (reading && /^\/static\/fonts\/[\w-]+\.woff2$/.test(url.pathname)) return serveStatic(request, env);
-  // A photo or video a connected friend's site was given a signed link to (share.js): no session needed until it
-  // expires, and only that one file.
-  if (reading && top === "files" && HASH_RE.test(rest ?? "") && url.searchParams.has("sig")) {
-    const left = await signedFor(env, rest, url.searchParams);
-    return left ? serveFile(request, env, rest, `private, max-age=${left}`) : new Response("This link has expired", { status: 403 });
-  }
+  const signed = await signedFile(request, env, url);
+  if (signed) return signed;
 
   const user = await currentUser(request, env);
   if (!user) {
@@ -64,11 +69,32 @@ async function route(request, env, work) {
   if (url.pathname === "/_comments" || url.pathname.startsWith("/_comments/")) return handleComments(request, env, url, user);
   if (url.pathname === "/_live") return handleLive(request, env, url, user);
   if (url.pathname.startsWith("/_feed/")) return handleFeed(request, env, url);
+  if (url.pathname.startsWith("/_groups/")) return handleGroupActions(request, env, url);
   if (!reading) return new Response("Method not allowed", { status: 405 });
 
   if (top === "files" && HASH_RE.test(rest ?? "")) return serveFile(request, env, rest);
   if (top === "static") return serveStatic(request, env);
   return renderArchive(request, env, url, user, work);
+}
+
+// A photo or video a connected friend's site (or a group's member) was given a signed link to (share.js): no session
+// needed until it expires, and only that one file. Null if the request isn't for one.
+async function signedFile(request, env, url) {
+  const [, top, rest] = url.pathname.split("/");
+  if (!["GET", "HEAD"].includes(request.method) || top !== "files" || !HASH_RE.test(rest ?? "") || !url.searchParams.has("sig")) return null;
+  const left = await signedFor(env, rest, url.searchParams);
+  return left ? serveFile(request, env, rest, `private, max-age=${left}`) : new Response("This link has expired", { status: 403 });
+}
+
+// A group's own Worker: invite links, its members' sites, and its photos by signed link. Nothing else.
+async function routeGroup(request, env, url) {
+  if (url.pathname.startsWith("/_join/")) return handleJoinLink(request, env, url);
+  if (url.pathname.startsWith("/_group/")) return handleGroupApi(request, env, url);
+  const signed = await signedFile(request, env, url);
+  if (signed) return signed;
+  if (request.method === "GET" && /^\/static\/fonts\/[\w-]+\.woff2$/.test(url.pathname)) return serveStatic(request, env);
+  return html(messagePage("This is an afterwrd group. Its members open it from their own afterwrd sites.",
+    { href: "https://afterwrd.app/", label: "About afterwrd" }), 404);
 }
 
 async function serveStatic(request, env) {

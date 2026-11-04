@@ -22,6 +22,9 @@ const TABLES = {
   site_comments: { columns: "*" },
   comments_elsewhere: { columns: "*" },
   connections: { columns: "id, origin, name, connected_at", where: "approved_at IS NOT NULL" },
+  // Groups: which, and what the owner posted and said in them. No keys.
+  groups: { columns: "id, name, about, origin, remote_id, host_name, joined_at, role", where: "joined_at IS NOT NULL" },
+  group_mine: { columns: "*" },
   friend_links: { columns: "connection_id, person_name" },
   users: { columns: "id, name" },
 };
@@ -56,7 +59,8 @@ ${ownerHeader("export")}
 <main class="export">
 <h1>Download everything</h1>
 <p>Everything on this site in one zip file: your posts, photos and videos, albums, comments (including the
-ones people have written here, and the ones you've written on friends' sites), likes, friends and connections.
+ones people have written here, and the ones you've written on friends' sites), likes, friends and connections, and
+the groups you're in, with what you've posted and said there.
 It's yours to keep, move or read with other tools.</p>
 <p class="meta">The data is in <a href="https://www.w3.org/TR/activitystreams-core/" target="_blank" rel="noopener noreferrer">ActivityStreams</a>,
 the open format the fediverse uses, and everything has a permanent address. So when two friends both download,

@@ -15,6 +15,8 @@
   const targets = () => unique([...document.querySelectorAll('form[action="/_comments"] input[name=target]')].map((i) => i.value));
   const remote = () => unique([...document.querySelectorAll('form[action="/_feed/comments"]')]
     .map((f) => `${f.elements.connection?.value}:${f.elements.target?.value}`));
+  // …and in groups.
+  const groups = () => unique([...document.querySelectorAll("form[data-group][data-post]")].map((f) => `${f.dataset.group}:${f.dataset.post}`));
 
   function setCount(link, n) {
     if (!link) return;
@@ -54,7 +56,7 @@
   async function check() {
     if (stopped || document.hidden) return;
     last = Date.now();
-    const query = new URLSearchParams({ since, targets: targets(), remote: remote() });
+    const query = new URLSearchParams({ since, targets: targets(), remote: remote(), groups: groups() });
     let news;
     try {
       const res = await fetch(`/_live?${query}`, { cache: "no-store" });
