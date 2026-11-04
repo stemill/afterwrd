@@ -1,7 +1,7 @@
 // What a hostile friend's site might send, through the real parsing code.
 // The real friends.js and feed.js, bundled by run.sh (with a stand-in for Cloudflare's runtime) into $OUT/bundle.mjs.
 import { pathToFileURL } from "node:url";
-const { callSite, cleanFeed, markMine, markMineInGroup, parseGroupPage, parseMedia, siteOrigin } = await import(pathToFileURL(`${process.env.OUT}/bundle.mjs`).href);
+const { callSite, cleanFeed, icsFile, markMine, markMineInGroup, parseEvent, parseGroupPage, parseMedia, readEventForm, siteOrigin } = await import(pathToFileURL(`${process.env.OUT}/bundle.mjs`).href);
 const B = "https://bob.example";
 const A = "https://ann.example";
 const hash = "a".repeat(64);
@@ -77,4 +77,24 @@ check("a site answering null counts as saying nothing", JSON.stringify(await cal
 globalThis.fetch = async () => new Response("[1]", { status: 500 });
 check("…and an error answer that isn't an object doesn't crash", await callSite(B, "/x").then(() => false, (e) => /answered 500/.test(e.message)));
 globalThis.fetch = realFetch;
+
+// Events, as a group (or a member's site) might send them.
+const event = { type: "Event", name: "Quiz", startTime: "2027-06-12T19:00:00Z", "afterwrd:timeZone": "Europe/London" };
+check("an event is read", parseEvent(event)?.title === "Quiz");
+check("a time zone that isn't one is refused", parseEvent({ ...event, "afterwrd:timeZone": "../../etc/passwd" }) === null
+  && parseEvent({ ...event, "afterwrd:timeZone": { toString: () => "Europe/London" } }) === null);
+check("an end before the start, or weeks later, is refused", parseEvent({ ...event, endTime: "2027-06-12T18:00:00Z" }) === null
+  && parseEvent({ ...event, endTime: "2027-09-12T18:00:00Z" }) === null);
+check("an end that isn't a time is refused, not dropped", parseEvent({ ...event, endTime: "soon" }) === null);
+check("a date in another age is refused", parseEvent({ ...event, startTime: "1066-10-14T09:00:00Z" }) === null);
+check("a long title is cut, and line breaks flattened", parseEvent({ ...event, name: `a\nb${"x".repeat(500)}` })?.title.length === 200
+  && !parseEvent({ ...event, name: "a\nb" }).title.includes("\n"));
+const sneaky = parseEvent({ ...event, name: "Quiz\r\nATTENDEE:mailto:evil@example.com", location: { name: "Pub;\r\nBEGIN:VALARM" } });
+const file = icsFile({ ...sneaky, about: "" }, { uid: "x\r\nX-EVIL:1", url: "https://a.example/", about: "Hi\r\nEND:VEVENT\u2028BEGIN:VEVENT" });
+const lines = file.split("\r\n").filter((l) => !l.startsWith(" "));
+check("nothing in an event can add lines to a calendar file", !lines.some((l) => /^(ATTENDEE|BEGIN:VALARM|X-EVIL)/.test(l))
+  && lines.filter((l) => l === "BEGIN:VEVENT").length === 1 && lines.filter((l) => l === "END:VEVENT").length === 1);
+const form = (o) => ({ get: (k) => o[k] ?? null });
+check("a form's date that doesn't exist is refused", readEventForm(form({ title: "x", start_date: "2027-02-30" })).error !== undefined);
+check("a form's time zone that isn't one falls back", readEventForm(form({ title: "x", start_date: "2027-02-03", zone: "Nowhere/Place" }), "Europe/Paris").event?.time_zone === "Europe/Paris");
 process.exit(failed ? 1 : 0);

@@ -157,7 +157,11 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   Members read the group from their own sites when they open it, and can post (with up to 8 photos, which are copied
   to the group) and comment; a copy of their own words stays on their site. Nothing is sent round when someone posts:
   a comment sends a quiet note only to the people who wrote that post or commented on it, which shows in their
-  *Notifications*. The *Update* page brings your groups up to your site's version, and deleting a group removes its
+  *Notifications*. Each group has a *Calendar*: any member can add an event, and members say whether they're
+  going. Adding one sends nothing to anyone; if you've said you're going, or might, you're told when its time, place
+  or name changes or it's called off, and it shows under *Coming up* on *Groups*. Only whoever added an event can
+  change it; they, and the group's admins, can call it off. *Add to my calendar* downloads it for your phone's or
+  computer's own calendar. The *Update* page brings your groups up to your site's version, and deleting a group removes its
   Worker and database. A free Cloudflare account holds about 9 groups besides your site (10 databases in all).
 - **Comments.** You and your friends (from their own sites) can comment under a post or photo; comments show
   straight away. Friends can delete their own, and you can delete any. *Notifications* lists comments on your

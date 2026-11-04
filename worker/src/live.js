@@ -31,7 +31,7 @@ export async function handleLive(request, env, url, user) {
     db.prepare(`SELECT COUNT(*) AS n FROM inbox i ${INBOX_JOIN} WHERE i.kind = 'comment' AND i.created_at >= ?
       AND (${remote.map(() => "(i.connection_id = ? AND i.target = ?)").join(" OR ") || "0"})`)
       .bind(since, ...remote.flatMap((m) => [Number(m[1]), m[2]])),
-    db.prepare(`SELECT COUNT(*) AS n FROM group_inbox WHERE created_at >= ? AND (${pairs("group_id", "post_id")})`).bind(since, ...pairValues),
+    db.prepare(`SELECT COUNT(*) AS n FROM group_inbox WHERE kind IS NULL AND created_at >= ? AND (${pairs("group_id", "post_id")})`).bind(since, ...pairValues),
   ]);
   return json({
     notifications: await newCount(db, user),

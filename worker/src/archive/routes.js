@@ -1,5 +1,7 @@
 // The archive's pages, ported from the routes in afterwrd/app.py and reading the D1 copy that
 // `npm run publish` uploads. Only the sections chosen at publish time are served.
+import { groupPostId } from "../../public/static/activity.js";
+import { FINISHED_SQL, icsFile } from "../calendar.js";
 import { findTarget, latestComments, loadThreads, newCount, photoKey, postKey } from "./comments.js";
 import { connectionById, loadFeed, markMine, rememberPicture } from "../feed.js";
 import * as friend from "../friends.js";
@@ -68,6 +70,9 @@ const ROUTES = [
   [/^\/groups\/(\d{1,15})$/, null, groupHome],
   [/^\/groups\/(\d{1,15})\/posts\/(\d{1,15})$/, null, groupPost],
   [/^\/groups\/(\d{1,15})\/members$/, null, groupMembers],
+  [/^\/groups\/(\d{1,15})\/calendar$/, null, groupCalendar],
+  [/^\/groups\/(\d{1,15})\/posts\/(\d{1,15})\/edit$/, null, groupEventEdit],
+  [/^\/groups\/(\d{1,15})\/posts\/(\d{1,15})\/event\.ics$/, null, groupEventFile],
 ];
 
 export async function renderArchive(request, env, url, user, work) {
@@ -85,6 +90,7 @@ export async function renderArchive(request, env, url, user, work) {
   const sections = [...new Set([...chosen, "posts", "photos"])];
   const ctx = {
     env, db, url, user, chosen, sections, newComments: await newCount(db, user),
+    zone: request.cf?.timezone ?? "Europe/London", // where the reader is, as near as Cloudflare can tell
     requests: (await first(db, "SELECT COUNT(*) AS n FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL")).n,
     updateWaiting: await updateWaiting(env, work),
     me: me.results[0] ?? { id: -1, name: await ownerName(db), is_me: 1 },
@@ -557,13 +563,17 @@ async function friendPhoto(ctx, params, id, hash) {
 
 // --- groups, each its own Worker, read from there (membership.js) ------------------------------------------------------
 
-/** The owner's groups, with comments waiting in each. */
+/** The owner's groups, with comments waiting in each, and the events they're going to that are still to come. */
 async function groupsIndex(ctx) {
   const list = await all(ctx.db, `SELECT g.*, (SELECT COUNT(*) FROM group_inbox i WHERE i.group_id = g.id AND i.created_at > ?) AS notes
     FROM groups g WHERE g.joined_at IS NOT NULL ORDER BY g.name COLLATE NOCASE`, [ctx.user.activity_seen_at ?? 0]);
   // Groups whose Worker this site made, but which it didn't finish claiming.
   const unfinished = await all(ctx.db, "SELECT id, name, origin FROM groups WHERE joined_at IS NULL AND script != '' ORDER BY created_at");
-  return views.groupsIndexPage(ctx, { groups: list, unfinished, remembered: Boolean(ctx.env.UPDATE_TOKEN) });
+  // Plans long over are let go.
+  await ctx.db.prepare(`DELETE FROM group_plans AS e WHERE ${FINISHED_SQL} < ?`).bind(now() - 30 * 86400).run();
+  const plans = await all(ctx.db, `SELECT e.*, g.name AS group_name FROM group_plans e JOIN groups g ON g.id = e.group_id AND g.joined_at IS NOT NULL
+    WHERE ${FINISHED_SQL} >= ? ORDER BY e.starts_at LIMIT 20`, [now()]);
+  return views.groupsIndexPage(ctx, { groups: list, unfinished, plans, remembered: Boolean(ctx.env.UPDATE_TOKEN) });
 }
 
 /** Starting a group: its own Worker, made in the owner's Cloudflare account (groupsites.js). */
@@ -607,6 +617,34 @@ async function groupPost(ctx, params, id, postId) {
   return fromGroup(ctx, id, async (g) => {
     const found = await groups.loadGroupPost(ctx.env, ctx.url.origin, g, postId);
     return found?.post ? views.groupPostPage(ctx, g, found) : views.groupProblem(ctx, g, "That post isn't there any more.");
+  });
+}
+
+/** A group's calendar: events to come, and adding one. */
+async function groupCalendar(ctx, params, id) {
+  return fromGroup(ctx, id, async (g) => views.groupCalendarPage(ctx, g, await groups.loadEvents(ctx.env, ctx.url.origin, g)));
+}
+
+/** Changing an event the owner here added. */
+async function groupEventEdit(ctx, params, id, postId) {
+  return fromGroup(ctx, id, async (g) => {
+    const found = await groups.loadGroupPost(ctx.env, ctx.url.origin, g, postId);
+    if (!found?.post?.event || !found.post.mine) return views.groupProblem(ctx, g, "That isn't an event you added.");
+    return views.groupEventEditPage(ctx, g, found);
+  });
+}
+
+/** An event as a calendar file, to open in the owner's own calendar. */
+async function groupEventFile(ctx, params, id, postId) {
+  return fromGroup(ctx, id, async (g) => {
+    const found = await groups.loadGroupPost(ctx.env, ctx.url.origin, g, postId);
+    const p = found?.post;
+    if (!p?.event) return views.groupProblem(ctx, g, "That isn't an event.");
+    const page = `${ctx.url.origin}/groups/${g.id}/posts/${p.id}`;
+    const body = icsFile(p.event, { uid: groupPostId(g.origin, g.remote_id, p.id), url: page,
+      about: [p.text, `${found.group.name}: ${page}`].filter(Boolean).join("\n\n") });
+    return new Response(body, { headers: { "Content-Type": "text/calendar; charset=utf-8",
+      "Content-Disposition": 'attachment; filename="event.ics"', "Cache-Control": "private, no-store" } });
   });
 }
 

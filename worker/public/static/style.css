@@ -333,6 +333,34 @@ form.stack input, form.stack textarea, #invite input { width: 100%; font: inheri
 form.stack textarea { resize: vertical; }
 form.stack p { margin: 0; }
 #invite { margin-bottom: 1.5rem; }
+
+/* Events in groups: a date tile, when and where, and going / maybe / can't go */
+.event { display: flex; flex-direction: column; gap: 0.75rem; margin: 0.25rem 0 0.5rem; }
+.event-head { display: flex; gap: 0.9rem; align-items: flex-start; }
+.date-tile { flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 3.2rem; height: 3.4rem; border-radius: 14px; background: var(--raised); line-height: 1; }
+.date-tile span { font: 800 0.7rem var(--round); text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent-strong); }
+.date-tile strong { font: 900 1.35rem var(--round); margin-top: 0.15rem; color: var(--text); }
+.event-what { flex: 1; min-width: 0; }
+.event-title { font: 900 1.15rem var(--round); color: var(--text); margin-right: 0.4rem; }
+.event-what p { margin: 0.2rem 0 0; }
+.event.cancelled .event-title { text-decoration: line-through; color: var(--muted); }
+.answers { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.event .who { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 1rem; margin: 0; font-size: 0.9rem; }
+.event .who dt { color: var(--muted); }
+.event .who dd { margin: 0; }
+.event .actions-row { margin: 0; }
+.event .actions-row form { display: contents; }
+.event-form label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.9rem; }
+.when-row { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.when-row label { flex: 1 1 10rem; }
+.add-event { margin-bottom: 1rem; }
+.add-event summary { cursor: pointer; font: 800 1rem var(--round); }
+.add-event[open] summary { margin-bottom: 0.5rem; }
+.coming-up { margin-bottom: 1.25rem; }
+.plan-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.plan-list a { display: flex; align-items: center; gap: 0.8rem; padding: 0.35rem; border-radius: 14px; color: var(--text); }
+.plan-list a:hover { text-decoration: none; background: var(--raised); }
+.plan-list .what { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 #invite #link { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.75rem; }
 #invite #link[hidden] { display: none; }
 #invite #error, main > #error { color: var(--danger); font-weight: 700; }

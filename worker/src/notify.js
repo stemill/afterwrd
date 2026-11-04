@@ -12,8 +12,11 @@
 // Groups work the same way, through POST /_member/notify: a group's Worker sends a comment on one of its posts to the
 // members' sites whose owners wrote that post or commented on it (notifyGroupComment). New posts in a group aren't sent
 // anywhere: members' sites read the group when they open it. A member's site keeps a note in `group_inbox` only if its
-// owner wrote or commented on that post there (receiveGroupNote).
+// owner wrote or commented on that post there (receiveGroupNote). The only other note a group sends is to those going
+// to an event (or who might) when it changes or is called off (notifyEventChange); a member's site keeps it only if
+// its owner still has plans for that event (group_plans).
 import { CONTEXT, groupPostId, POST_KEY_RE, postId, postKey, targetId } from "../public/static/activity.js";
+import { eventObject, eventWhen, parseEvent } from "./calendar.js";
 import { outbox } from "./outbox.js";
 import { SITE_ID } from "./posts.js";
 import { now } from "./util.js";
@@ -100,8 +103,49 @@ export async function notifyGroupComment(env, site, group, post, { id, name, tex
     id: `${address}#c${id}`, inReplyTo: address, content: snippet(text), attributedTo: { type: "Person", name: snippet(name, 100) } } });
 }
 
+/**
+ * In a group's Worker: tells the sites of the members going to an event, or who might, that it's changed or been
+ * called off (`kind`), apart from whoever did it (`from`). Nothing else about events is sent to anyone.
+ */
+export async function notifyEventChange(env, site, group, post, event, { kind, name, from }) {
+  const { results } = await env.DB.prepare(`SELECT m.id FROM group_members m JOIN group_answers a ON a.origin = m.origin AND a.post_id = ?1
+    WHERE m.group_id = ?2 AND m.approved_at IS NOT NULL AND m.origin != ?3 AND a.answer IN ('going', 'maybe') ORDER BY m.id`)
+    .bind(post.id, group.id, from).all();
+  if (!results.length) return;
+  await outbox(env).sendToMembers(results.map((r) => r.id), { "@context": CONTEXT, type: "Update", "afterwrd:change": kind,
+    actor: { type: "Person", name: snippet(name, 100) },
+    object: { type: "Note", id: groupPostId(site, group.id, post.id), "afterwrd:event": eventObject(event) } });
+}
+
+/**
+ * A group's note that an event the owner here is going to (or might) has changed or been called off: their copy of
+ * it is brought up to date, and the note kept. Ignored if they've no plans for it.
+ */
+async function receiveEventNote(db, group, note) {
+  const prefix = groupPostId(group.origin, group.remote_id, "");
+  const id = typeof note.object?.id === "string" && note.object.id.startsWith(prefix) ? note.object.id.slice(prefix.length) : "";
+  const event = parseEvent(note.object?.["afterwrd:event"]);
+  const kind = note["afterwrd:change"];
+  if (!/^\d{1,15}$/.test(id) || !event || (kind !== "changed" && kind !== "cancelled")) return [{ error: "That isn't about an event in this group." }, 400];
+  const at = now();
+  if (kind === "cancelled") event.cancelled_at ??= at;
+  const plan = await db.prepare(`UPDATE group_plans SET title = ?, starts_at = ?, ends_at = ?, all_day = ?, time_zone = ?, place = ?,
+    cancelled_at = ?, updated_at = ? WHERE group_id = ? AND post_id = ? RETURNING answer`).bind(event.title, event.starts_at, event.ends_at,
+    event.all_day, event.time_zone, event.place, event.cancelled_at, at, group.id, Number(id)).first();
+  if (!plan) return [{ ok: true }, 202];
+  const words = `${event.title} · ${eventWhen(event)}${event.place ? ` · ${event.place}` : ""}`;
+  const row = await db.prepare(`INSERT INTO group_inbox (group_id, post_id, actor, text, created_at, kind)
+    SELECT ?1, ?2, ?3, ?4, ?5, ?9
+    WHERE (SELECT COUNT(*) FROM group_inbox WHERE group_id = ?1 AND created_at > ?5 - ?6) < ?7
+      AND (SELECT COUNT(*) FROM group_inbox WHERE group_id = ?1 AND created_at > ?5 - 86400) < ?8
+    RETURNING id`).bind(group.id, Number(id), snippet(note.actor?.name, 100) || "Someone", snippet(words, 400), at,
+    RATE.seconds, RATE.count, DAILY, kind).first();
+  return row ? [{ ok: true }, 202] : [{ error: "That's a lot of notes for now." }, 429];
+}
+
 /** A note from a group the owner here is in: kept, ignored, or refused. Returns [body, status]. */
 export async function receiveGroupNote(db, group, note) {
+  if (note?.type === "Update" && note.object?.type === "Note") return receiveEventNote(db, group, note);
   const object = note?.type === "Create" && note.object?.type === "Note" ? note.object : null;
   const prefix = groupPostId(group.origin, group.remote_id, "");
   const post = typeof object?.inReplyTo === "string" && object.inReplyTo.startsWith(prefix) ? object.inReplyTo.slice(prefix.length) : "";

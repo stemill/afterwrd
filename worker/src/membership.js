@@ -11,7 +11,8 @@
 //
 // What a group's site may ask of this one, with that key:
 //   GET  /_member/hello?from=<origin>&group=<n>  only mid-join, to prove to <origin> the key is ours, for that group
-//   POST /_member/notify      a comment on a post the owner here wrote or commented on (notify.js)
+//   POST /_member/notify      a comment on a post the owner here wrote or commented on, or a change to an event
+//                             they're going to (notify.js)
 //   POST /_member/removed     the group removed this site, turned down its request, or closed
 // The owner's own actions, from their pages (views.js); forms land back where they came from:
 //   POST /_groups/join                    {link}
@@ -20,11 +21,14 @@
 //   POST /_groups/<id>/comments           post, text, back
 //   POST /_groups/<id>/(posts|comments)/<n>/delete    back
 //   POST /_groups/<id>/leave
+//   POST /_groups/<id>/events             an event (the form in views.js): they're going, to start with
+//   POST /_groups/<id>/events/<m>/(answer|edit|cancel)    answer: going, maybe or no; edit: their own; cancel: as delete
 //   Running a group (its admins): POST /_groups/<id>/link (JSON), /_groups/<id>/about (name, about),
 //   /_groups/<id>/members/<m>/(approve|decline|remove|admin|member); its owner: /_groups/<id>/delete (groupsites.js)
 import { CONTEXT, fileUrl, groupId, groupPostId, seconds } from "../public/static/activity.js";
 import { MAX_COMMENT } from "./archive/comments.js";
 import { safeNext } from "./auth.js";
+import { ANSWERS, eventObject, parseEvent, readEventForm } from "./calendar.js";
 import { parseMedia } from "./friends.js";
 import { cleanName, cleanText, MAX_GROUP_ABOUT, MAX_GROUP_NAME, MAX_GROUP_PHOTOS, MAX_GROUP_TEXT } from "./groups.js";
 import { handleGroupSites } from "./groupsites.js";
@@ -64,6 +68,15 @@ function parseComments(collection, base, env) {
   });
 }
 
+/** An event in a group post, with who's going and the owner's own answer; null if there's none. */
+function parseGroupEvent(o, env) {
+  const event = parseEvent(o);
+  if (!event) return null;
+  const people = (list) => (Array.isArray(list) ? list.slice(0, 200) : []).map((p) => person(p, env)).filter((p) => p.name);
+  return { ...event, going: people(o["afterwrd:going"]), maybe: people(o["afterwrd:maybe"]), cantGo: people(o["afterwrd:cantGo"]),
+    answer: ANSWERS.includes(o["afterwrd:answer"]) ? o["afterwrd:answer"] : null };
+}
+
 /** A post in the group `n` on `site`, or null. */
 export function parseGroupNote(note, site, n, env) {
   const prefix = groupPostId(site, n, "");
@@ -77,6 +90,7 @@ export function parseGroupNote(note, site, n, env) {
     photos: attachments.map((m) => parseMedia(m, site)).filter(Boolean),
     comments: parseComments(note.replies, note.id, env),
     commentCount: count(note.replies?.totalItems) ?? 0, // the group sends only the newest with a page of posts
+    event: note["afterwrd:event"] === undefined ? null : parseGroupEvent(note["afterwrd:event"], env),
   };
 }
 
@@ -121,16 +135,24 @@ export function parseGroupMembers(data, site, n, env) {
  * claiming to be from this site is left out.
  */
 export async function markMine(db, group, posts, ownOrigin) {
-  const { results } = await db.prepare("SELECT kind, post_id, remote_id, text, photos, created_at FROM group_mine WHERE site = ? AND remote_group = ?")
-    .bind(group.origin, group.remote_id).all();
+  const { results } = await db.prepare(`SELECT kind, post_id, remote_id, text, photos, event, created_at FROM group_mine
+    WHERE site = ? AND remote_group = ?`).bind(group.origin, group.remote_id).all();
   const posted = new Map(results.filter((r) => r.kind === "post").map((r) => [r.remote_id, r]));
   const said = new Map(results.filter((r) => r.kind === "comment").map((r) => [`${r.post_id}:${r.remote_id}`, r]));
   const hashes = (sent) => { try { return new Set(JSON.parse(sent.photos ?? "[]")); } catch { return new Set(); } };
+  // An event they added, as they last said it (who's going, and whether it's off, are the group's to say).
+  const event = (sent, e) => {
+    let kept = null;
+    try { kept = JSON.parse(sent.event ?? "null"); } catch {}
+    if (!e || !kept) return e;
+    const { title, starts_at, ends_at, all_day, time_zone, place } = kept;
+    return { ...e, title, starts_at, ends_at, all_day, time_zone, place };
+  };
   return posts.flatMap((p) => {
     const sent = posted.get(p.id);
     if (!sent && p.from === ownOrigin) return [];
-    const post = sent ? { ...p, mine: true, text: sent.text, created_at: sent.created_at, photos: p.photos.filter((m) => hashes(sent).has(m.hash)) }
-      : { ...p, mine: false };
+    const post = sent ? { ...p, mine: true, text: sent.text, created_at: sent.created_at, photos: p.photos.filter((m) => hashes(sent).has(m.hash)),
+      event: event(sent, p.event) } : { ...p, mine: false };
     return [{ ...post, comments: p.comments.flatMap((c) => {
       const kept = said.get(`${p.id}:${c.id}`);
       if (kept) return [{ ...c, mine: true, text: kept.text, created_at: kept.created_at }];
@@ -151,11 +173,65 @@ async function refresh(db, group, info) {
     .bind(group.name, group.about, group.role, group.host_name, group.id).run();
 }
 
+/**
+ * Keeps the owner's copies of the events they're going to (or might) as the group just showed them: a copy made,
+ * brought up to date, or dropped if they've said they can't go. `gone`: events no longer there.
+ */
+export async function keepPlans(db, group, posts, gone = []) {
+  const events = posts.filter((p) => p.event);
+  if (!events.length && !gone.length) return;
+  const { results } = await db.prepare("SELECT * FROM group_plans WHERE group_id = ?").bind(group.id).all();
+  const had = new Map(results.map((r) => [r.post_id, r]));
+  const fields = ["answer", "title", "starts_at", "ends_at", "all_day", "time_zone", "place", "cancelled_at"];
+  const writes = [];
+  for (const { id, event } of events) {
+    const plan = { ...event, answer: event.answer };
+    if (plan.answer === "going" || plan.answer === "maybe") {
+      const old = had.get(id);
+      if (old && fields.every((k) => (old[k] ?? null) === (plan[k] ?? null))) continue;
+      writes.push(db.prepare(`INSERT INTO group_plans (group_id, post_id, ${fields.join(", ")}, updated_at) VALUES (?, ?, ${fields.map(() => "?").join(", ")}, ?)
+        ON CONFLICT (group_id, post_id) DO UPDATE SET ${fields.map((k) => `${k} = excluded.${k}`).join(", ")}, updated_at = excluded.updated_at`)
+        .bind(group.id, id, ...fields.map((k) => plan[k] ?? null), now()));
+    } else if (had.has(id)) {
+      writes.push(db.prepare("DELETE FROM group_plans WHERE group_id = ? AND post_id = ?").bind(group.id, id));
+    }
+  }
+  for (const id of gone) if (had.has(id)) writes.push(db.prepare("DELETE FROM group_plans WHERE group_id = ? AND post_id = ?").bind(group.id, id));
+  if (writes.length) await db.batch(writes);
+}
+
 /** A page of a group's posts, read from its site, with the owner's own marked. */
 export async function loadGroup(env, site, group, page) {
   const data = parseGroupPage(await call(group, `/_group/posts?page=${page}`), group.origin, group.remote_id, env);
   await refresh(env.DB, group, data.group);
-  return { ...data, posts: await markMine(env.DB, group, data.posts, site) };
+  const posts = await markMine(env.DB, group, data.posts, site);
+  await keepPlans(env.DB, group, posts);
+  return { ...data, posts };
+}
+
+/**
+ * A group's calendar: events still to come, and recent ones. `outdated` if the group's site is from before events
+ * (its owner can update it).
+ */
+export async function loadEvents(env, site, group) {
+  let upcoming;
+  let past;
+  try {
+    [upcoming, past] = await Promise.all([call(group, "/_group/events"), call(group, "/_group/events?when=past")]);
+  } catch (error) {
+    if (error.message === "Not found.") return { outdated: true, group: null, upcoming: [], past: [] };
+    throw error;
+  }
+  const read = (data) => {
+    const items = Array.isArray(data?.orderedItems) ? data.orderedItems.slice(0, 200) : [];
+    return items.map((note) => parseGroupNote(note, group.origin, group.remote_id, env)).filter((p) => p?.event);
+  };
+  const info = parseGroup(upcoming?.context, group.origin, group.remote_id, env);
+  await refresh(env.DB, group, info);
+  const mine = async (posts) => markMine(env.DB, group, posts, site);
+  const [soon, before] = [await mine(read(upcoming)), await mine(read(past))];
+  await keepPlans(env.DB, group, [...soon, ...before]);
+  return { outdated: false, group: info, upcoming: soon, past: before };
 }
 
 /** One post in a group, or null if it's gone. */
@@ -164,14 +240,17 @@ export async function loadGroupPost(env, site, group, id) {
   try {
     note = await call(group, `/_group/posts/${Number(id)}`);
   } catch (error) {
-    if (/isn't there any more/.test(error.message)) return null;
-    throw error;
+    if (!/isn't there any more/.test(error.message)) throw error;
+    await keepPlans(env.DB, group, [], [Number(id)]);
+    return null;
   }
   const info = parseGroup(note.context, group.origin, group.remote_id, env);
   const post = parseGroupNote(note, group.origin, group.remote_id, env);
   if (!post || post.id !== Number(id)) throw unexpected();
   await refresh(env.DB, group, info);
-  return { group: info, post: (await markMine(env.DB, group, [post], site))[0] ?? null };
+  const posts = await markMine(env.DB, group, [post], site);
+  await keepPlans(env.DB, group, posts);
+  return { group: info, post: posts[0] ?? null };
 }
 
 /** Who's in a group, as it says; for an admin, everyone, with requests to join. */
@@ -307,6 +386,72 @@ async function commentInGroup(env, group, postId, words) {
   return { id: Number(n[1]) };
 }
 
+/** The event in a group's reply (its post, as it is now), checked, kept in the owner's copies of their plans. */
+async function keepReply(env, site, group, reply, id) {
+  const post = parseGroupNote(reply, group.origin, group.remote_id, env);
+  if (!post?.event || post.id !== Number(id)) return;
+  await keepPlans(env.DB, group, await markMine(env.DB, group, [post], site));
+}
+
+const keptEvent = (e) => JSON.stringify({ title: e.title, starts_at: e.starts_at, ends_at: e.ends_at, all_day: e.all_day,
+  time_zone: e.time_zone, place: e.place });
+
+/** Adds an event to a group: a post with the event; the owner here is going to start with. Returns { id } or { error }. */
+async function addEvent(env, site, group, { text: words, event }) {
+  if (words.length > MAX_GROUP_TEXT) return { error: `Posts can be up to ${MAX_GROUP_TEXT} characters.` };
+  let id;
+  try {
+    const reply = await call(group, "/_group/posts", { "@context": CONTEXT, type: "Note", mediaType: "text/plain", content: words,
+      "afterwrd:event": eventObject(event) });
+    const prefix = groupPostId(group.origin, group.remote_id, "");
+    id = typeof reply.id === "string" && reply.id.startsWith(prefix) ? reply.id.slice(prefix.length) : "";
+    if (!/^\d{1,15}$/.test(id)) throw unexpected();
+  } catch (error) {
+    return { error: `Couldn't add the event to ${group.name}: ${error.message}` };
+  }
+  await env.DB.prepare(`INSERT INTO group_mine (group_id, site, remote_group, kind, post_id, remote_id, text, photos, event, created_at)
+    VALUES (?, ?, ?, 'post', ?, ?, ?, '[]', ?, ?)`).bind(group.id, group.origin, group.remote_id, Number(id), Number(id), words || null,
+    keptEvent(event), now()).run();
+  await answerEvent(env, site, group, id, "going");
+  return { id: Number(id) };
+}
+
+/** The owner's answer to an event: going, maybe or no. */
+async function answerEvent(env, site, group, id, answer) {
+  if (!ANSWERS.includes(answer)) return { error: "Going, maybe, or can't go?" };
+  try {
+    await keepReply(env, site, group, await call(group, `/_group/events/${Number(id)}/answer`, { answer }), id);
+    return {};
+  } catch (error) {
+    return { error: `Couldn't send your answer: ${error.message}` };
+  }
+}
+
+/** Changes an event the owner here added. */
+async function editEvent(env, site, group, id, { text: words, event }) {
+  if (words.length > MAX_GROUP_TEXT) return { error: `Posts can be up to ${MAX_GROUP_TEXT} characters.` };
+  let reply;
+  try {
+    reply = await call(group, `/_group/events/${Number(id)}/edit`, { "@context": CONTEXT, type: "Note", mediaType: "text/plain",
+      content: words, "afterwrd:event": eventObject(event) });
+  } catch (error) {
+    return { error: `Couldn't change the event: ${error.message}` };
+  }
+  await env.DB.prepare("UPDATE group_mine SET text = ?, event = ? WHERE site = ? AND remote_group = ? AND kind = 'post' AND remote_id = ?")
+    .bind(words || null, keptEvent(event), group.origin, group.remote_id, Number(id)).run();
+  await keepReply(env, site, group, reply, id);
+  return {};
+}
+
+async function cancelEvent(env, site, group, id) {
+  try {
+    await keepReply(env, site, group, await call(group, `/_group/events/${Number(id)}/cancel`, {}), id);
+    return {};
+  } catch (error) {
+    return { error: `Couldn't call it off: ${error.message}` };
+  }
+}
+
 /** Deletes a post or comment (`kind`: posts or comments): the owner's own, or, running the group, anyone's. */
 async function deleteInGroup(env, group, kind, id) {
   try {
@@ -314,14 +459,18 @@ async function deleteInGroup(env, group, kind, id) {
   } catch (error) {
     return { error: `Couldn't delete it: ${error.message}` };
   }
-  await env.DB.prepare("DELETE FROM group_mine WHERE site = ? AND remote_group = ? AND kind = ? AND remote_id = ?")
-    .bind(group.origin, group.remote_id, kind === "posts" ? "post" : "comment", Number(id)).run();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM group_mine WHERE site = ? AND remote_group = ? AND kind = ? AND remote_id = ?")
+      .bind(group.origin, group.remote_id, kind === "posts" ? "post" : "comment", Number(id)),
+    ...(kind === "posts" ? [env.DB.prepare("DELETE FROM group_plans WHERE group_id = ? AND post_id = ?").bind(group.id, Number(id))] : []),
+  ]);
   return {};
 }
 
-/** Forgets a group here (its notes too). The owner's copies of what they said stay. */
+/** Forgets a group here (its notes and plans too). The owner's copies of what they said stay. */
 export const forgetGroup = (db, group) => db.batch([
   db.prepare("DELETE FROM group_inbox WHERE group_id = ?").bind(group.id),
+  db.prepare("DELETE FROM group_plans WHERE group_id = ?").bind(group.id),
   db.prepare("DELETE FROM groups WHERE id = ?").bind(group.id),
 ]);
 
@@ -373,10 +522,11 @@ export async function handleGroupActions(request, env, url) {
   // Everything else is a form, landing back where it came from.
   const form = await request.formData().catch(() => new FormData());
   const home = `/groups/${group.id}`;
-  const back = new URL(safeNext(String(form.get("back") ?? home), url), site);
+  let back = new URL(safeNext(String(form.get("back") ?? home), url), site);
   const members = new URL(`${home}/members`, site);
   let done = {};
   const del = /^\/(posts|comments)\/(\d{1,15})\/delete$/.exec(action);
+  const ev = /^\/events\/(\d{1,15})\/(answer|edit|cancel)$/.exec(action);
   const decision = /^\/members\/(\d{1,15})\/(approve|decline|remove|admin|member)$/.exec(action);
   if (action === "/comments") {
     const words = cleanText(String(form.get("text") ?? ""));
@@ -386,6 +536,17 @@ export async function handleGroupActions(request, env, url) {
     if (!done.error) back.hash = `g${post}-${done.id}`;
   } else if (del) {
     done = await deleteInGroup(env, group, del[1], del[2]);
+  } else if (action === "/events" || ev?.[2] === "edit") {
+    const read = readEventForm(form, request.cf?.timezone);
+    if (read.error) return problem(read.error, back);
+    const words = cleanText(String(form.get("text") ?? ""));
+    done = ev ? await editEvent(env, site, group, ev[1], { text: words, event: read.event })
+      : await addEvent(env, site, group, { text: words, event: read.event });
+    if (!done.error) back = new URL(`${home}/posts/${ev ? ev[1] : done.id}`, site);
+  } else if (ev?.[2] === "answer") {
+    done = await answerEvent(env, site, group, ev[1], String(form.get("answer") ?? ""));
+  } else if (ev?.[2] === "cancel") {
+    done = await cancelEvent(env, site, group, ev[1]);
   } else if (action === "/leave") {
     if (group.role === "owner") return problem("You own this group: delete it instead.", members);
     await call(group, "/_group/leave", {}).catch(() => {});

@@ -4,6 +4,7 @@ import { MAX_COMMENT } from "./comments.js";
 import {
   aspect, dateRange, EMOJI, fmtAgo, fmtDate, fmtDatetime, linkify, mediaUrl, number, safeUrl, summary, thumbUrl,
 } from "./format.js";
+import { eventDay, eventFormValues, eventWhen, finishedAt } from "../calendar.js";
 import { asset, FAVICON, icon, ownerMain, ownerMenu, siteHeader } from "../nav.js";
 import { host } from "../peers.js";
 import { SITE_ID } from "../posts.js";
@@ -632,7 +633,7 @@ export function activityPage(ctx, { items, paging }) {
   return page(ctx, "Notifications", html`
 <h1>Notifications</h1>
 <p class="meta">Comments on your posts and photos, on friends' posts and photos you've commented on too, and on
-posts in groups that you wrote or commented on.</p>
+posts in groups that you wrote or commented on; and changes to events you're going to.</p>
 ${feed(items, (c) => (c.source === "friend" ? friendActivityItem(c) : c.source === "group" ? groupActivityItem(c)
     : activityItem(ctx, c)), "Nothing yet. Comments on your posts and photos will show here.")}
 ${(paging.page > 1 || paging.hasNext) && pager(ctx, paging)}`);
@@ -656,15 +657,16 @@ function friendActivityItem(c) {
 </article>`;
 }
 
-/** A comment in a group on a post the owner wrote or commented on. */
+/** A comment in a group on a post the owner wrote or commented on, or a change to an event they're going to. */
 function groupActivityItem(c) {
   const href = `/groups/${c.connection_id}/posts/${c.target}`;
+  const what = c.kind === "changed" ? html`changed <a href="${href}">an event you're going to</a>`
+    : c.kind === "cancelled" ? html`called off <a href="${href}">an event you were going to</a>`
+    : c.own_post ? html`commented on <a href="${href}">your post</a>` : html`also commented on <a href="${href}">a post</a>`;
   return html`<article class="card activity${c.isNew ? " new" : ""}">
   <div class="body">
     <header>
-      <span class="what"><strong>${c.name}</strong>
-        ${c.own_post ? html`commented on <a href="${href}">your post</a>` : html`also commented on <a href="${href}">a post</a>`}
-        in <a href="/groups/${c.connection_id}">${c.friend}</a></span>
+      <span class="what"><strong>${c.name}</strong> ${what} in <a href="/groups/${c.connection_id}">${c.friend}</a></span>
       ${c.isNew && raw('<span class="badge badge-new">New</span>')}
       <time title="${fmtDatetime(c.created_at)}">${fmtAgo(c.created_at)}</time>
     </header>
@@ -997,7 +999,7 @@ function groupWhere(g) {
 }
 
 /** The owner's groups, starting one, and joining one with an invite link. */
-export function groupsIndexPage(ctx, { groups, unfinished = [], remembered = false }) {
+export function groupsIndexPage(ctx, { groups, unfinished = [], plans = [], remembered = false }) {
   return page(ctx, "Groups", html`
 <div class="feed-head">
   <h1>Groups</h1>
@@ -1006,6 +1008,15 @@ export function groupsIndexPage(ctx, { groups, unfinished = [], remembered = fal
 <p class="meta">Each group is its own small site, in the Cloudflare account of whoever started it. Its members read it
 from their own sites, and post and comment there. You're told about comments on posts you wrote or commented on; for
 anything else, open the group.</p>
+${plans.length > 0 && html`<section class="card coming-up">
+  <h2>Coming up</h2>
+  <ul class="plan-list">${plans.map((e) => html`<li><a href="/groups/${e.group_id}/posts/${e.post_id}">
+    ${dateTile(e)}
+    <span class="what"><strong>${e.title}</strong>
+      <span class="meta">${eventWhen(e, ctx.zone)}${e.place && ` · ${e.place}`} · ${e.group_name}${e.answer === "maybe" ? " · You might go" : ""}</span></span>
+    ${e.cancelled_at && html`<span class="badge as-written">Called off</span>`}
+  </a></li>`)}</ul>
+</section>`}
 ${groups.length ? html`<ul class="group-list">
   ${groups.map((g) => html`<li><a class="card" href="${groupBase(g)}">
     <span class="icon-tile" aria-hidden="true">${raw(icon("groups"))}</span>
@@ -1181,6 +1192,7 @@ ${(info?.about ?? g.about) && html`<p>${info?.about ?? g.about}</p>`}
 <p class="meta">${groupWhere(g)}${info && ` · ${info.members} ${info.members === 1 ? "member" : "members"}`}. Only its members see it.</p>
 <nav class="tabs">
   <a href="${groupBase(g)}" ${tab === "posts" && raw('aria-current="page"')}>Posts</a>
+  <a href="${groupBase(g)}/calendar" ${tab === "calendar" && raw('aria-current="page"')}>Calendar</a>
   <a href="${groupBase(g)}/members" ${tab === "members" && raw('aria-current="page"')}>Members${waiting > 0 && html` <span class="count">${waiting}<span class="hidden"> asking to join</span></span>`}</a>
 </nav>`;
 }
@@ -1226,6 +1238,7 @@ function groupCard(ctx, g, p) {
       onsubmit="return confirm('Delete this post, its photos and its comments? This can’t be undone.')">
       <input type="hidden" name="back" value="${groupBase(g)}"><button class="delete">Delete</button></form>`}
   </header>
+  ${p.event && eventBlock(ctx, g, p, { full: ctx.url.pathname.includes("/posts/") })}
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
   ${n > 0 && html`<div class="collage collage-${Math.min(n, 4)}">
     ${p.photos.slice(0, 4).map((m, i) => html`
@@ -1252,6 +1265,118 @@ export function groupPostPage(ctx, g, { group: info, post }) {
   return page(ctx, info.name, html`
 ${groupHead(ctx, g, info, "")}
 <div class="feed">${groupCard(ctx, g, post)}</div>`);
+}
+
+// --- events in groups (calendar.js) ---------------------------------------------------------------------------------
+
+const ANSWER_LABELS = [["going", "Going"], ["maybe", "Maybe"], ["no", "Can't go"]];
+
+function dateTile(e) {
+  const d = eventDay(e);
+  return html`<span class="date-tile" aria-hidden="true"><span>${d.month}</span><strong>${d.day}</strong></span>`;
+}
+
+/**
+ * An event in a group post: when and where, who's going, and the owner's answer. `full` (its own page): who's
+ * going by name, adding it to their calendar, and changing it or calling it off.
+ */
+function eventBlock(ctx, g, p, { full = false } = {}) {
+  const e = p.event;
+  const over = finishedAt(e) < Date.now() / 1000;
+  const back = ctx.url.pathname + ctx.url.search;
+  const names = (list) => list.map((x, i) => (x.from === ctx.url.origin ? (i ? "you" : "You") : x.name)).join(", ");
+  const counts = [e.going.length && `${e.going.length} going`, e.maybe.length && `${e.maybe.length} maybe`].filter(Boolean).join(" · ");
+  return html`<div class="event${e.cancelled_at ? " cancelled" : ""}">
+  <div class="event-head">
+    ${dateTile(e)}
+    <div class="event-what">
+      <a class="event-title" href="${groupBase(g)}/posts/${p.id}">${e.title}</a>
+      ${e.cancelled_at ? html`<span class="badge as-written">Called off</span>` : over ? html`<span class="badge as-written">Over</span>` : ""}
+      <p class="meta"><time>${eventWhen(e, ctx.zone)}</time>${e.place && html`<br>${e.place}`}</p>
+      ${counts && html`<p class="meta">${counts}</p>`}
+    </div>
+  </div>
+  ${!e.cancelled_at && !over && html`<form method="post" action="/_groups/${g.id}/events/${p.id}/answer" class="answers" aria-label="Are you going?">
+    <input type="hidden" name="back" value="${back}">
+    ${ANSWER_LABELS.map(([value, label]) => html`<button class="chip${e.answer === value ? " primary" : ""}" name="answer" value="${value}"
+      aria-pressed="${e.answer === value ? "true" : "false"}">${label}</button>`)}
+  </form>`}
+  ${full && html`<dl class="who">
+    ${[["Going", e.going], ["Maybe", e.maybe], ["Can't go", e.cantGo]].filter(([, list]) => list.length)
+      .map(([label, list]) => html`<dt>${label}</dt><dd>${names(list)}</dd>`)}
+  </dl>
+  <div class="actions-row">
+    ${!e.cancelled_at && html`<a class="chip" href="${groupBase(g)}/posts/${p.id}/event.ics" download>${raw(icon("calendar"))}<span>Add to my calendar</span></a>`}
+    ${p.mine && !e.cancelled_at && html`<a class="chip" href="${groupBase(g)}/posts/${p.id}/edit">Change it</a>`}
+    ${mayDelete(g, p) && !e.cancelled_at && !over && html`<form method="post" action="/_groups/${g.id}/events/${p.id}/cancel"
+      onsubmit="return confirm('Call this event off? Everyone going will be told.')">
+      <input type="hidden" name="back" value="${back}"><button class="chip">Call it off</button></form>`}
+  </div>`}
+</div>`;
+}
+
+/** Adding or changing an event. Its times are in `values.zone`, or, for a new one, the browser's own time zone. */
+function eventForm({ action, back, values = {}, text = "", submit }) {
+  return html`<form class="stack event-form" method="post" action="${action}">
+  <input type="hidden" name="back" value="${back}">
+  <input type="hidden" name="zone" value="${values.zone ?? ""}" data-zone>
+  <label>What's happening<input name="title" required maxlength="200" value="${values.title ?? ""}"></label>
+  <div class="when-row">
+    <label>Day<input type="date" name="start_date" required value="${values.start_date ?? ""}"></label>
+    <label>Time <span class="meta">(none for all day)</span><input type="time" name="start_time" value="${values.start_time ?? ""}"></label>
+  </div>
+  <div class="when-row">
+    <label>Ends <span class="meta">(if it runs on)</span><input type="date" name="end_date" value="${values.end_date ?? ""}"></label>
+    <label>Until <span class="meta">(optional)</span><input type="time" name="end_time" value="${values.end_time ?? ""}"></label>
+  </div>
+  <label>Where <span class="meta">(optional)</span><input name="place" maxlength="300" value="${values.place ?? ""}"></label>
+  <label>More about it <span class="meta">(optional)</span><textarea name="text" rows="3" maxlength="5000">${text}</textarea></label>
+  <div class="actions-row"><button class="chip primary">${submit}</button></div>
+</form>
+<script>
+  for (const input of document.querySelectorAll("input[data-zone]")) {
+    try { input.value ||= Intl.DateTimeFormat().resolvedOptions().timeZone; } catch {}
+  }
+</script>`;
+}
+
+/** A group's calendar: what's coming up, by month, adding an event, and recent ones. */
+export function groupCalendarPage(ctx, g, { outdated, group: info, upcoming, past }) {
+  if (info) g.ownerFrom = info.ownerFrom;
+  const months = [];
+  for (const p of upcoming) {
+    const d = eventDay(p.event);
+    if (months.at(-1)?.[0] !== d.monthKey) months.push([d.monthKey, d.monthName, []]);
+    months.at(-1)[2].push(p);
+  }
+  const card = (p) => html`<article class="card social in-group" id="gp${p.id}">${eventBlock(ctx, g, p)}</article>`;
+  return page(ctx, `${info?.name ?? g.name}: calendar`, html`
+${groupHead(ctx, g, info, "calendar")}
+${outdated ? html`<p class="notice">This group's site needs updating before it can have a calendar. ${g.role === "owner"
+    ? html`You can update it from your <a href="/_admin/update">Update</a> page.` : "Its owner can update it from their Update page."}</p>` : html`
+<details class="card add-event" ${!upcoming.length && raw("open")}>
+  <summary>Add an event</summary>
+  <p class="meta">Everyone in the group will see it here. No one is sent anything about it; those who say they're
+  going, or might, are told if it changes or is called off.</p>
+  ${eventForm({ action: `/_groups/${g.id}/events`, back: `${groupBase(g)}/calendar`, submit: "Add the event" })}
+</details>
+${months.length ? months.map(([, label, items]) => html`<h2 class="month">${label}</h2><div class="feed">${items.map(card)}</div>`)
+    : html`<p class="empty">Nothing coming up.</p>`}
+${past.length > 0 && html`<h2 class="month">Before</h2><div class="feed">${past.map(card)}</div>`}`}`);
+}
+
+/** Changing an event the owner here added. */
+export function groupEventEditPage(ctx, g, { group: info, post }) {
+  g.ownerFrom = info.ownerFrom;
+  return page(ctx, `${info.name}: change the event`, html`
+${groupHead(ctx, g, info, "calendar")}
+<section class="card">
+  <h2>Change the event</h2>
+  <p class="meta">If you change its name, time or place, those going, or who might, are told. Times are in
+  ${post.event.time_zone.replace(/_/g, " ")} time.</p>
+  ${eventForm({ action: `/_groups/${g.id}/events/${post.id}/edit`, back: `${groupBase(g)}/posts/${post.id}`,
+    values: eventFormValues(post.event), text: post.text ?? "", submit: "Save" })}
+</section>`);
 }
 
 /** Who's in a group. For its admins: requests to join, the invite link, roles, and (its owner) deleting it. */

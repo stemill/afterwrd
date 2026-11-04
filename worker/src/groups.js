@@ -24,6 +24,11 @@
 //   POST /_group/posts/<m>/delete       their own (an admin: anyone's)
 //   POST /_group/comments         a Note inReplyTo a post here
 //   POST /_group/comments/<n>/delete    their own (an admin: anyone's)
+//   GET  /_group/events?when=past  events still to come (or, past, the most recent), as posts with their event
+//   POST /_group/events/<m>/answer {answer}: going, maybe or no (it answers with the event's post)
+//   POST /_group/events/<m>/edit   {content, afterwrd:event}: only the member who added it
+//   POST /_group/events/<m>/cancel its writer, or an admin (as for deleting): those going are told
+// An event is a post (POST /_group/posts) with an afterwrd:event, and deleting it calls it off.
 //   POST /_group/leave            (not the owner, who deletes the group instead)
 // Admins (the owner, and members the owner makes admins):
 //   GET  /_group/admin/members    everyone, with requests to join
@@ -36,9 +41,10 @@
 import { actorId, CONTEXT, fileUrl, groupId, groupPostId, iso, tidy } from "../public/static/activity.js";
 import pkg from "../package.json";
 import { MAX_COMMENT } from "./archive/comments.js";
+import { ANSWERS, eventChanged, eventObject, FINISHED_SQL, finishedAt, parseEvent } from "./calendar.js";
 import { signedLink } from "./friends.js";
 import { mediaStore } from "./media.js";
-import { notifyGroupComment } from "./notify.js";
+import { notifyEventChange, notifyGroupComment } from "./notify.js";
 import { groupLinkPage, messagePage } from "./pages.js";
 import { callSite, KEY_RE, siteOrigin } from "./peers.js";
 import { removeUnusedFiles } from "./posts.js";
@@ -54,6 +60,8 @@ export const MAX_GROUP_ABOUT = 1000;
 const POSTS_PAGE = 20;
 const PAGE_COMMENTS = 20; // the newest on each post in a page of posts; a post's own page has up to POST_COMMENTS
 const POST_COMMENTS = 300;
+const UPCOMING = 100; // events still to come, in the Calendar
+const PAST = 30; // and the most recent ones that have finished
 const LINK_SECONDS = 14 * 86400;
 const LINK_REQUESTS = 100; // requests to join one invite link can make
 const WAITING_SECONDS = 7 * 86400; // a request to join no one has answered is dropped after this
@@ -100,28 +108,45 @@ async function photoObject(env, site, f) {
   };
 }
 
+/** An event, with who's going (members only) and, for the member asking, their own answer. */
+function eventWithAnswers(e, answers, member) {
+  const people = (answer) => answers.filter((a) => a.post_id === e.post_id && a.answer === answer)
+    .map((a) => ({ type: "Person", id: actorId(a.origin), name: a.name }));
+  return {
+    ...eventObject(e), "afterwrd:going": people("going"), "afterwrd:maybe": people("maybe"), "afterwrd:cantGo": people("no"),
+    "afterwrd:answer": answers.find((a) => a.post_id === e.post_id && a.origin === member.origin)?.answer,
+  };
+}
+
 /**
- * Posts as Notes, each with its photos and its newest `comments` (and how many there are in all). Whoever wrote each
- * is named with their own site. Comments are limited so a page always fits what members' sites will read (2 MB).
+ * Posts as Notes, each with its photos, its event if it's one, and its newest `comments` (and how many there are in
+ * all). Whoever wrote each is named with their own site. Comments are limited so a page always fits what members'
+ * sites will read (2 MB).
  */
-async function groupNotes(env, site, group, posts, comments = PAGE_COMMENTS) {
+async function groupNotes(env, site, group, posts, member, comments = PAGE_COMMENTS) {
   const db = env.DB;
   if (!posts.length) return [];
   const marks = posts.map(() => "?").join(",");
   const ids = posts.map((p) => p.id);
-  const [photos, newest, counts] = await db.batch([
+  const [photos, newest, counts, events, answers] = await db.batch([
     db.prepare(`SELECT * FROM group_photos WHERE post_id IN (${marks}) ORDER BY id`).bind(...ids),
     db.prepare(`SELECT * FROM (SELECT c.*, ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at DESC, id DESC) AS n
       FROM group_comments c WHERE post_id IN (${marks})) WHERE n <= ? ORDER BY created_at, id`).bind(...ids, comments),
     db.prepare(`SELECT post_id, COUNT(*) AS n FROM group_comments WHERE post_id IN (${marks}) GROUP BY post_id`).bind(...ids),
+    db.prepare(`SELECT * FROM group_events WHERE post_id IN (${marks})`).bind(...ids),
+    db.prepare(`SELECT a.post_id, a.origin, a.answer, m.name FROM group_answers a
+      JOIN group_members m ON m.origin = a.origin AND m.approved_at IS NOT NULL
+      WHERE a.post_id IN (${marks}) ORDER BY a.answered_at, m.name`).bind(...ids),
   ]);
   const author = (row) => ({ type: "Person", id: actorId(row.origin), name: row.author_name });
   return Promise.all(posts.map(async (p) => {
     const address = groupPostId(site, group.id, p.id);
     const thread = newest.results.filter((c) => c.post_id === p.id);
+    const event = events.results.find((e) => e.post_id === p.id);
     return {
       type: "Note", id: address, attributedTo: author(p), context: groupId(site, group.id), published: iso(p.created_at),
       mediaType: "text/plain", content: p.text ?? "",
+      "afterwrd:event": event ? eventWithAnswers(event, answers.results, member) : undefined,
       attachment: await Promise.all(photos.results.filter((f) => f.post_id === p.id).map((f) => photoObject(env, site, f))),
       replies: {
         type: "Collection", totalItems: counts.results.find((c) => c.post_id === p.id)?.n ?? 0,
@@ -142,15 +167,28 @@ async function groupPage(env, site, group, member, page) {
   const total = count.results[0].n;
   return tidy({
     "@context": CONTEXT, type: "OrderedCollectionPage", context: await groupObject(db, site, group, member), totalItems: total,
-    "afterwrd:page": page, "afterwrd:hasNext": page * POSTS_PAGE < total, orderedItems: await groupNotes(env, site, group, rows.results),
+    "afterwrd:page": page, "afterwrd:hasNext": page * POSTS_PAGE < total,
+    orderedItems: await groupNotes(env, site, group, rows.results, member),
   });
 }
 
-async function groupPost(env, site, group, member, id) {
+async function groupPost(env, site, group, member, id, comments = POST_COMMENTS) {
   const post = await env.DB.prepare("SELECT * FROM group_posts WHERE id = ? AND group_id = ?").bind(Number(id), group.id).first();
   if (!post) return null;
-  const [note] = await groupNotes(env, site, group, [post], POST_COMMENTS);
+  const [note] = await groupNotes(env, site, group, [post], member, comments);
   return tidy({ "@context": CONTEXT, ...note, context: await groupObject(env.DB, site, group, member) });
+}
+
+/** Events still to come, soonest first; or (`past`) the most recent that have finished, latest first. */
+async function groupEvents(env, site, group, member, past) {
+  const db = env.DB;
+  const { results } = await db.prepare(`SELECT p.* FROM group_events e JOIN group_posts p ON p.id = e.post_id AND p.group_id = ?
+    WHERE ${FINISHED_SQL} ${past ? "<" : ">="} ? ORDER BY e.starts_at ${past ? "DESC" : "ASC"}, p.id LIMIT ?`)
+    .bind(group.id, now(), past ? PAST : UPCOMING).all();
+  return tidy({
+    "@context": CONTEXT, type: "OrderedCollection", context: await groupObject(db, site, group, member), totalItems: results.length,
+    orderedItems: await groupNotes(env, site, group, results, member, 0),
+  });
 }
 
 /** Who's in the group. For an admin (`all`), requests to join too, with the numbers to act on them by. */
@@ -237,10 +275,11 @@ async function copyPhotos(env, photos) {
  * (posts, photos a day) and the group's room for photos; then the photos are copied from the member's site, and if
  * that fails the post goes again, with any files it brought. Returns { id } or { error, status }.
  */
-async function createPost(env, group, member, { text, photos }) {
+async function createPost(env, group, member, { text, photos, event = null }) {
   const db = env.DB;
   if (text.length > MAX_GROUP_TEXT) return { error: `Posts can be up to ${MAX_GROUP_TEXT} characters.`, status: 400 };
-  if (!text && !photos.length) return { error: "Write something or add a photo.", status: 400 };
+  if (!text && !photos.length && !event) return { error: "Write something or add a photo.", status: 400 };
+  if (event && finishedAt(event) < now()) return { error: "That event would already be over.", status: 400 };
   const at = now();
   const bytes = photos.reduce((n, f) => n + f.size + THUMB_BYTES, 0);
   const saved = await db.prepare(`INSERT INTO group_posts (group_id, origin, author_name, text, created_at)
@@ -254,29 +293,41 @@ async function createPost(env, group, member, { text, photos }) {
       POST_RATE.daily, photos.length, POST_RATE.photos, bytes, GROUP_BYTES).first();
   const id = saved?.id;
   if (!id) return { error: "That's a lot of posts or photos for now, or the group is full of photos. Try again later.", status: 429 };
-  // Its photos, referenced before they're copied, so a file can't be cleared away while it's arriving.
-  if (photos.length) {
-    await db.batch(photos.map((f) => db.prepare(`INSERT INTO group_photos (post_id, hash, thumb_hash, width, height, size)
-      VALUES (?, ?, ?, ?, ?, ?)`).bind(id, f.hash, f.thumb_hash, f.width, f.height, f.size + THUMB_BYTES)));
-  }
   try {
+    // Its event, and its photos, referenced before they're copied, so a file can't be cleared away while it's arriving.
+    const rows = [
+      ...photos.map((f) => db.prepare(`INSERT INTO group_photos (post_id, hash, thumb_hash, width, height, size)
+        VALUES (?, ?, ?, ?, ?, ?)`).bind(id, f.hash, f.thumb_hash, f.width, f.height, f.size + THUMB_BYTES)),
+      ...(event ? [db.prepare(`INSERT INTO group_events (post_id, title, starts_at, ends_at, all_day, time_zone, place)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`).bind(id, event.title, event.starts_at, event.ends_at, event.all_day, event.time_zone, event.place)] : []),
+    ];
+    if (rows.length) await db.batch(rows);
     await copyPhotos(env, photos);
   } catch (error) {
-    await deletePost(env, group, null, id);
+    await deletePost(env, null, group, null, id);
     return { error: error.message, status: 400 };
   }
   return { id };
 }
 
-/** Deletes a post, its comments and its photos (the files too). Its writer, an admin (not the owner's), or (member null) this Worker. */
-async function deletePost(env, group, member, id) {
+/**
+ * Deletes a post, its comments, its photos (the files too) and its event (those going to it are told it's off, if it
+ * was still to come). Its writer, an admin (not the owner's), or (member null) this Worker.
+ */
+async function deletePost(env, site, group, member, id) {
   const db = env.DB;
   const post = await db.prepare("SELECT * FROM group_posts WHERE id = ? AND group_id = ?").bind(Number(id), group.id).first();
   if (!post || (member && !(await mayDelete(db, member, post.origin)))) return false;
+  const event = await db.prepare("SELECT * FROM group_events WHERE post_id = ?").bind(post.id).first();
+  if (member && event && !event.cancelled_at && finishedAt(event) > now()) {
+    await notifyEventChange(env, site, group, post, { ...event, cancelled_at: now() }, { kind: "cancelled", name: member.name, from: member.origin });
+  }
   const { results: photos } = await db.prepare("SELECT hash, thumb_hash FROM group_photos WHERE post_id = ?").bind(post.id).all();
   await db.batch([
     db.prepare("DELETE FROM group_comments WHERE post_id = ?").bind(post.id),
     db.prepare("DELETE FROM group_photos WHERE post_id = ?").bind(post.id),
+    db.prepare("DELETE FROM group_answers WHERE post_id = ?").bind(post.id),
+    db.prepare("DELETE FROM group_events WHERE post_id = ?").bind(post.id),
     db.prepare("DELETE FROM group_posts WHERE id = ?").bind(post.id),
   ]);
   await removeUnusedFiles(env, photos.flatMap((f) => [f.hash, f.thumb_hash]));
@@ -313,6 +364,64 @@ async function deleteComment(db, group, member, id) {
   if (!comment || !(await mayDelete(db, member, comment.origin))) return false;
   await db.prepare("DELETE FROM group_comments WHERE id = ?").bind(comment.id).run();
   return true;
+}
+
+// --- events -------------------------------------------------------------------------------------------------------------
+
+/** An event's post and the event, if it's in this group. */
+async function findEvent(db, group, id) {
+  const row = await db.prepare(`SELECT p.*, e.title, e.starts_at, e.ends_at, e.all_day, e.time_zone, e.place, e.cancelled_at, e.changed_at
+    FROM group_events e JOIN group_posts p ON p.id = e.post_id WHERE e.post_id = ? AND p.group_id = ?`).bind(Number(id), group.id).first();
+  return row && { post: row, event: { post_id: row.id, title: row.title, starts_at: row.starts_at, ends_at: row.ends_at,
+    all_day: row.all_day, time_zone: row.time_zone, place: row.place, cancelled_at: row.cancelled_at } };
+}
+
+/** A member says whether they're going. Returns an error message, or null. */
+async function answerEvent(db, group, member, id, answer) {
+  if (!ANSWERS.includes(answer)) return "Going, maybe, or can't go?";
+  const found = await findEvent(db, group, id);
+  if (!found) return "That event isn't there any more.";
+  if (found.event.cancelled_at) return "That event has been called off.";
+  if (finishedAt(found.event) < now()) return "That event is over.";
+  await db.prepare(`INSERT INTO group_answers (post_id, origin, answer, answered_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT (post_id, origin) DO UPDATE SET answer = excluded.answer, answered_at = excluded.answered_at`)
+    .bind(found.post.id, member.origin, answer, now()).run();
+  return null;
+}
+
+/**
+ * The member who added an event changes it (only they can: it's in their name). If anything but the words about it
+ * changed, those going, or who might, are told. Returns an error message, or null.
+ */
+async function editEvent(env, site, group, member, id, { text, event }) {
+  const db = env.DB;
+  const found = await findEvent(db, group, id);
+  if (!found || found.post.origin !== member.origin) return "Only whoever added an event can change it.";
+  if (found.event.cancelled_at) return "That event has been called off.";
+  if (text.length > MAX_GROUP_TEXT) return `Posts can be up to ${MAX_GROUP_TEXT} characters.`;
+  const changed = eventChanged(found.event, event);
+  // Each change sends a note to everyone going: not more than one a minute.
+  if (changed && found.post.changed_at > now() - 60) return "You've just changed this event. Try again in a minute.";
+  await db.batch([
+    db.prepare(`UPDATE group_events SET title = ?, starts_at = ?, ends_at = ?, all_day = ?, time_zone = ?, place = ?,
+      changed_at = CASE WHEN ? THEN ? ELSE changed_at END WHERE post_id = ?`).bind(event.title, event.starts_at, event.ends_at,
+      event.all_day, event.time_zone, event.place, changed ? 1 : 0, now(), found.post.id),
+    db.prepare("UPDATE group_posts SET text = ? WHERE id = ?").bind(text || null, found.post.id),
+  ]);
+  if (changed) await notifyEventChange(env, site, group, found.post, event, { kind: "changed", name: member.name, from: member.origin });
+  return null;
+}
+
+/** Calls an event off: whoever added it, or an admin (as for deleting it). Those going are told. */
+async function cancelEvent(env, site, group, member, id) {
+  const db = env.DB;
+  const found = await findEvent(db, group, id);
+  if (!found || !(await mayDelete(db, member, found.post.origin))) return "That isn't yours to call off.";
+  if (found.event.cancelled_at) return null;
+  const at = now();
+  await db.prepare("UPDATE group_events SET cancelled_at = ? WHERE post_id = ?").bind(at, found.post.id).run();
+  await notifyEventChange(env, site, group, found.post, { ...found.event, cancelled_at: at }, { kind: "cancelled", name: member.name, from: member.origin });
+  return null;
 }
 
 // --- running the group ------------------------------------------------------------------------------------------------
@@ -352,7 +461,8 @@ async function close(env, group, owner) {
   const { results: members } = await db.prepare("SELECT * FROM group_members WHERE id != ?").bind(owner.id).all();
   const { results: photos } = await db.prepare("SELECT hash, thumb_hash FROM group_photos").all();
   await db.batch([
-    ...["group_comments", "group_photos", "group_posts", "group_links", "group_members", "groups"].map((table) => db.prepare(`DELETE FROM ${table}`)),
+    ...["group_comments", "group_photos", "group_answers", "group_events", "group_posts", "group_links", "group_members", "groups"]
+      .map((table) => db.prepare(`DELETE FROM ${table}`)),
     // So it can't be claimed again, should its Worker outlast this (its owner's site deletes it next).
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('group_closed', '1')"),
   ]);
@@ -483,7 +593,7 @@ export async function handleGroupApi(request, env, url) {
     return post ? json(post) : json({ error: "That post isn't there any more." }, 404);
   }
   if (one?.[1] === "POST" && one[4]) {
-    const done = one[2] === "posts" ? await deletePost(env, group, member, one[3]) : await deleteComment(db, group, member, one[3]);
+    const done = one[2] === "posts" ? await deletePost(env, site, group, member, one[3]) : await deleteComment(db, group, member, one[3]);
     return done ? json({ ok: true }) : json({ error: "That isn't yours, or it's already gone." }, 404);
   }
   if (route === "POST /_group/posts") {
@@ -491,8 +601,28 @@ export async function handleGroupApi(request, env, url) {
     if (note?.type !== "Note") return json({ error: "Expected a Note." }, 400);
     const { photos, error } = memberPhotos(note.attachment, member.origin);
     if (error) return json({ error }, 400);
-    const made = await createPost(env, group, member, { text: cleanText(note.content), photos });
+    const event = note["afterwrd:event"] === undefined ? null : parseEvent(note["afterwrd:event"]);
+    if (note["afterwrd:event"] !== undefined && (!event || event.cancelled_at)) return json({ error: "Unexpected event details." }, 400);
+    const made = await createPost(env, group, member, { text: cleanText(note.content), photos, event });
     return made.error ? json({ error: made.error }, made.status) : json({ id: groupPostId(site, group.id, made.id) });
+  }
+  if (route === "GET /_group/events") return json(await groupEvents(env, site, group, member, url.searchParams.get("when") === "past"));
+  const ev = /^POST \/_group\/events\/(\d{1,15})\/(answer|edit|cancel)$/.exec(route);
+  if (ev) {
+    const body = await request.json().catch(() => ({}));
+    let trouble;
+    if (ev[2] === "answer") {
+      trouble = await answerEvent(db, group, member, ev[1], body?.answer);
+    } else if (ev[2] === "cancel") {
+      trouble = await cancelEvent(env, site, group, member, ev[1]);
+    } else {
+      const event = parseEvent(body?.["afterwrd:event"]);
+      trouble = !event || event.cancelled_at ? "Unexpected event details."
+        : await editEvent(env, site, group, member, ev[1], { text: cleanText(body.content), event });
+    }
+    if (trouble) return json({ error: trouble }, 400);
+    // The event as it is now, so the member's site can keep its copy.
+    return json(await groupPost(env, site, group, member, ev[1], 0));
   }
   if (route === "POST /_group/comments") {
     const note = await request.json().catch(() => ({}));

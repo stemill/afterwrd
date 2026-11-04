@@ -3,7 +3,8 @@
 // Bob and Cat with a link, lets them in and makes Bob an admin. They read it from their own sites, post (photos are
 // copied to the group) and comment; comments reach only those who wrote or commented on the post; the group can't put
 // words in a member's mouth; keys open nothing else; the group's Worker serves nothing else; then renaming, moderating,
-// leaving, removing, and deleting the group.
+// events (adding one, answering, changing it, calling it off: only those going hear, and only of changes), leaving,
+// removing, and deleting the group.
 //   node groups.mjs <zip> <fixtures dir> <A state> <B state> <C state> <G state>
 import { execFileSync } from "node:child_process";
 import puppeteer from "puppeteer-core";
@@ -72,6 +73,16 @@ async function join(page, site, link) {
 }
 const call = (site, path, key, body) => fetch(site + path, { method: body ? "POST" : "GET", redirect: "manual",
   headers: { ...(key && { Authorization: `Bearer ${key}` }), ...(body && { "Content-Type": "application/json" }) }, body: body && JSON.stringify(body) });
+async function addEvent(page, fields) {
+  await page.$eval("details.add-event", (d) => { d.open = true; });
+  await page.$eval("form.event-form", (f, v) => { for (const [k, x] of Object.entries(v)) f.elements[k].value = x; }, fields);
+  await Promise.all([page.waitForNavigation({ timeout: 30_000 }), page.click("form.event-form button.primary")]);
+}
+async function answer(page, card, value) {
+  await Promise.all([page.waitForNavigation({ timeout: 30_000 }), page.click(`#${card} .answers button[value=${value}]`)]);
+}
+const pressed = (page, card) => page.$eval(`#${card} .answers [aria-pressed=true]`, (b) => b.value).catch(() => null);
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 const post = (page, path, body) => page.evaluate(async (p, b) => {
   const res = await fetch(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
   return { status: res.status, ...(await res.json().catch(() => ({}))) };
@@ -261,6 +272,105 @@ await Promise.all([ann.waitForNavigation(), ann.click('form[action$="/about"] bu
 await cat.goto(`${C}/groups/${catGroup}`);
 check("renaming reaches members' sites", (await cat.$eval("h1", (h) => h.textContent)) === "Book club (2026)");
 
+// Events. Ann adds one; nobody is sent anything about it.
+for (const page of [ann, bob, cat]) await page.emulateTimezone("Europe/London");
+const notes = (state) => n(state, "group_inbox WHERE kind IS NOT NULL");
+const inboxes = () => [stateA, stateB, stateC].map((st) => n(st, "group_inbox")).join();
+const quiet = inboxes();
+await ann.goto(`${A}/groups/${annGroup}/calendar`);
+check("the Calendar starts empty, with adding an event open", (await text(ann)).includes("Nothing coming up") && await ann.$eval("details.add-event", (d) => d.open));
+await addEvent(ann, { title: "Book swap", start_date: "2027-06-12", start_time: "19:00", end_time: "21:00", place: "Ann's house", text: "Bring a book" });
+const swap = sql(stateG, "SELECT * FROM group_events")[0];
+check("Ann adds an event, in her time zone", swap?.title === "Book swap" && swap.time_zone === "Europe/London"
+  && swap.starts_at === Date.UTC(2027, 5, 12, 18) / 1000 && swap.ends_at === Date.UTC(2027, 5, 12, 20) / 1000, JSON.stringify(swap));
+check("…lands on its page, saying when and where", (await text(ann)).includes("Sat 12 Jun 2027, 19:00–21:00") && (await text(ann)).includes("Ann's house"), (await text(ann)).slice(0, 400));
+check("…and she's going", await pressed(ann, `gp${swap.post_id}`) === "going" && n(stateA, "group_plans WHERE answer = 'going'") === 1);
+await pause(2500);
+check("no one is sent anything about a new event", inboxes() === quiet, `${quiet} -> ${inboxes()}`);
+
+await bob.goto(`${B}/groups/${bobGroup}/calendar`);
+check("Bob's Calendar lists it under its month", (await text(bob)).includes("June 2027") && (await text(bob)).includes("Book swap"));
+await answer(bob, `gp${swap.post_id}`, "going");
+check("Bob says he's going", await pressed(bob, `gp${swap.post_id}`) === "going" && n(stateG, `group_answers WHERE origin = '${B}' AND answer = 'going'`) === 1);
+await cat.goto(`${C}/groups/${catGroup}`);
+check("the event shows in Posts too", (await text(cat)).includes("Book swap") && (await text(cat)).includes("2 going"));
+await answer(cat, `gp${swap.post_id}`, "maybe");
+check("Cat might go", n(stateC, "group_plans WHERE answer = 'maybe'") === 1);
+await pause(2500);
+check("…and no one is told who's going", inboxes() === quiet);
+await bob.goto(`${B}/groups`);
+check("Bob's Groups page shows it coming up", (await text(bob, ".coming-up")).includes("Book swap"));
+await cat.goto(`${C}/groups/${catGroup}/posts/${swap.post_id}`);
+const who = await text(cat, ".event .who");
+check("the event's page names who's going", who.includes("Ann Example") && who.includes("Bob Example") && who.includes("You"), who);
+
+// Changing it: words only, quietly; the time, and those going (or who might) are told.
+await ann.goto(`${A}/groups/${annGroup}/posts/${swap.post_id}/edit`);
+check("Ann's form shows the event as it is", await ann.$eval("form.event-form", (f) => f.elements.start_time.value === "19:00" && f.elements.end_time.value === "21:00"));
+await ann.$eval("form.event-form", (f) => { f.elements.text.value = "Bring a book or two"; });
+await Promise.all([ann.waitForNavigation(), ann.click("form.event-form button.primary")]);
+await pause(2500);
+check("changing only the words tells no one", notes(stateB) + notes(stateC) === 0 && (await text(ann)).includes("Bring a book or two"));
+await ann.goto(`${A}/groups/${annGroup}/posts/${swap.post_id}/edit`);
+await ann.$eval("form.event-form", (f) => { f.elements.start_time.value = "20:00"; f.elements.end_time.value = "22:00"; });
+await Promise.all([ann.waitForNavigation(), ann.click("form.event-form button.primary")]);
+check("changing the time tells Bob and Cat", await waitFor(() => notes(stateB) === 1 && notes(stateC) === 1));
+check("…and not Ann, who changed it", notes(stateA) === 0);
+check("changing it again straight away is refused", (await call(G, `/_group/events/${swap.post_id}/edit`, sql(stateA, "SELECT their_key FROM groups")[0].their_key,
+  { type: "Note", content: "", "afterwrd:event": { type: "Event", name: "Book swap", startTime: "2027-06-12T20:00:00Z", "afterwrd:timeZone": "Europe/London" } })).status === 400);
+check("Bob's copy of his plans is brought up to date", sql(stateB, "SELECT starts_at FROM group_plans")[0]?.starts_at === Date.UTC(2027, 5, 12, 19) / 1000);
+await bob.goto(`${B}/activity`);
+check("Bob's Notifications say what changed", (await text(bob)).includes("Ann Example changed an event you're going to in Book club (2026)")
+  && (await text(bob)).includes("Sat 12 Jun 2027, 20:00–22:00"), (await text(bob)).slice(0, 400));
+await cat.goto(`${C}/groups/${catGroup}/posts/${swap.post_id}`);
+await answer(cat, `gp${swap.post_id}`, "no");
+check("Cat can't go after all: her plans drop it", n(stateC, "group_plans") === 0);
+const ics = await bob.evaluate((p) => fetch(p).then(async (r) => ({ type: r.headers.get("Content-Type"), body: await r.text() })),
+  `/groups/${bobGroup}/posts/${swap.post_id}/event.ics`);
+check("Add to my calendar gives a calendar file", ics.type.startsWith("text/calendar") && ics.body.includes("SUMMARY:Book swap")
+  && ics.body.includes("DTSTART:20270612T190000Z") && ics.body.includes("LOCATION:Ann's house"), ics.body.slice(0, 300));
+
+// Only whoever added an event can change it; an admin can't call off the owner's; the group can't reword Ann's.
+const evPath = `/_group/events/${swap.post_id}`;
+const edited = { type: "Note", content: "x", "afterwrd:event": { type: "Event", name: "Hijacked", startTime: "2027-06-12T19:00:00Z", "afterwrd:timeZone": "Europe/London" } };
+check("Bob can't change Ann's event", (await call(G, `${evPath}/edit`, bobAdminKey, edited)).status === 400
+  && sql(stateG, "SELECT title FROM group_events")[0].title === "Book swap");
+check("Bob, an admin, can't call off the owner's event", (await call(G, `${evPath}/cancel`, bobAdminKey, {})).status === 400);
+check("a made-up answer is refused", (await call(G, `${evPath}/answer`, bobAdminKey, { answer: "definitely" })).status === 400);
+check("an event with a made-up time zone is refused", (await call(G, "/_group/posts", bobAdminKey, { type: "Note", content: "",
+  "afterwrd:event": { ...edited["afterwrd:event"], "afterwrd:timeZone": "Mars/Olympus" } })).status === 400);
+check("…or one that's already over", (await call(G, "/_group/posts", bobAdminKey, { type: "Note", content: "",
+  "afterwrd:event": { ...edited["afterwrd:event"], startTime: "2020-01-01T19:00:00Z" } })).status === 400);
+sql(stateG, "UPDATE group_events SET title = 'Forged swap'");
+await ann.goto(`${A}/groups/${annGroup}/posts/${swap.post_id}`);
+check("Ann sees her event as she wrote it, not the group's version", (await text(ann)).includes("Book swap") && !(await text(ann)).includes("Forged swap"));
+sql(stateG, "UPDATE group_events SET title = 'Book swap'");
+const catNoted = notes(stateC);
+const forged = { type: "Update", "afterwrd:change": "changed", actor: { name: "x" },
+  object: { type: "Note", id: `${G}/groups/1/posts/${swap.post_id}`, "afterwrd:event": edited["afterwrd:event"] } };
+const groupKeyForCat = sql(stateG, `SELECT their_key FROM group_members WHERE origin = '${C}'`)[0].their_key;
+await call(C, "/_member/notify", groupKeyForCat, forged);
+check("a group can't send notes about an event Cat isn't going to", notes(stateC) === catNoted);
+check("…nor one that isn't an event", (await call(B, "/_member/notify", groupKeyForBob, { ...forged, object: { ...forged.object, "afterwrd:event": { type: "Event" } } })).status === 400);
+
+// Bob adds one; Ann, the owner, calls it off; Bob is told.
+await bob.goto(`${B}/groups/${bobGroup}/calendar`);
+await addEvent(bob, { title: "Pub quiz", start_date: "2027-07-01", start_time: "", place: "The Crown" });
+const quiz = sql(stateG, "SELECT * FROM group_events WHERE title = 'Pub quiz'")[0];
+check("Bob adds an all-day event", quiz?.all_day === 1 && (await text(bob)).includes("Thu 1 Jul 2027"), JSON.stringify(quiz));
+await ann.goto(`${A}/groups/${annGroup}/posts/${quiz.post_id}`);
+await Promise.all([ann.waitForNavigation(), ann.click(".event form[action$='/cancel'] button")]);
+check("Ann calls it off", Boolean(sql(stateG, `SELECT cancelled_at FROM group_events WHERE post_id = ${quiz.post_id}`)[0].cancelled_at)
+  && (await text(ann)).includes("Called off"));
+check("…and Bob is told", await waitFor(() => notes(stateB) === 2));
+check("…and his plans say so", Boolean(sql(stateB, `SELECT cancelled_at FROM group_plans WHERE post_id = ${quiz.post_id}`)[0]?.cancelled_at));
+await bob.goto(`${B}/activity`);
+check("Bob's Notifications say it's off", (await text(bob)).includes("Ann Example called off an event you were going to"));
+await ann.setViewport({ width: 390, height: 844 });
+await ann.goto(`${A}/groups/${annGroup}/calendar`);
+await ann.screenshot({ path: `${OUT}/group-calendar-phone.png`, fullPage: true });
+await ann.setViewport({ width: 1280, height: 800 });
+
 // Leaving and removing.
 await ann.goto(`${A}/groups/${annGroup}/members`);
 await Promise.all([ann.waitForNavigation(), ann.click(`button[formaction$="/members/${bobMember}/member"]`)]);
@@ -268,7 +378,8 @@ await bob.goto(`${B}/groups/${bobGroup}/members`);
 check("Ann takes Bob's admin role back", (await bob.$$eval(".member-list button", (l) => l.length)) === 0);
 await Promise.all([bob.waitForNavigation(), bob.click('form[action$="/leave"] button')]);
 check("Bob leaves", n(stateB, "groups") === 0 && n(stateG, `group_members WHERE origin = '${B}'`) === 0);
-check("…keeping his own copy of his post", sql(stateB, "SELECT kind FROM group_mine").map((r) => r.kind).join() === "post");
+check("…keeping his own copies of his posts", sql(stateB, "SELECT kind FROM group_mine").every((r) => r.kind === "post"));
+check("…and forgetting his plans there", n(stateB, "group_plans") === 0);
 check("…which stays in the group", n(stateG, `group_posts WHERE id = ${bobPost}`) === 1);
 await ann.goto(`${A}/groups/${annGroup}/members`);
 await Promise.all([ann.waitForNavigation(), ann.click('button[formaction$="/remove"]')]);
@@ -279,7 +390,8 @@ check("the owner can't just leave", (await ann.evaluate((p) => fetch(p, { method
 // Deleting the group empties it, and Ann's site forgets it.
 await ann.goto(`${A}/groups/${annGroup}/members`);
 await Promise.all([ann.waitForNavigation(), ann.click("#delete-go")]);
-check("deleting the group empties its Worker", n(stateG, "groups") + n(stateG, "group_posts") + n(stateG, "group_photos") + n(stateG, "group_members") === 0);
+check("deleting the group empties its Worker", n(stateG, "groups") + n(stateG, "group_posts") + n(stateG, "group_photos") + n(stateG, "group_members")
+  + n(stateG, "group_events") + n(stateG, "group_answers") === 0);
 check("…and Ann's site forgets it", n(stateA, "groups") === 0 && new URL(ann.url()).pathname === "/groups");
 check("the invite link stops working", (await fetch(link)).status === 404);
 

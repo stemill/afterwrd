@@ -20,6 +20,7 @@ const ICONS = {
   connected: '<circle cx="7" cy="9" r="3"/><circle cx="17" cy="9" r="3"/><path d="M2 20c0-2.8 2.2-5 5-5s5 2.2 5 5"/><path d="M12 20c0-2.8 2.2-5 5-5s5 2.2 5 5"/>',
   // groups: three people, one in front
   groups: '<circle cx="12" cy="8" r="3"/><path d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M5.5 6.5a2.5 2.5 0 0 0 0 5M2 18c0-2 1.2-3.7 3-4.4M18.5 6.5a2.5 2.5 0 0 1 0 5M22 18c0-2-1.2-3.7-3-4.4"/>',
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
   profile: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>',
   memories: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>',
   devices: '<rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M11 18h2"/>', // a phone

@@ -3,11 +3,13 @@
 // migrations apply` and this agree on what's been applied.
 import m0001 from "../migrations/0001_schema.sql";
 import m0002 from "../migrations/0002_groups.sql";
+import m0003 from "../migrations/0003_events.sql";
 
 // Every file in migrations/, in order. A new migration needs adding here too.
 const MIGRATIONS = [
   ["0001_schema.sql", m0001],
   ["0002_groups.sql", m0002],
+  ["0003_events.sql", m0003],
 ];
 
 let ready = null;

@@ -37,19 +37,21 @@ export async function loadThreads(db, keys) {
 const GROUP_THERE = "FROM group_inbox i JOIN groups g ON g.id = i.group_id AND g.joined_at IS NOT NULL";
 
 // Notifications: comments here (site_comments), comments on friends' posts and photos the owner has commented on
-// too, which their sites send (inbox, see notify.js), and comments in groups. One list, newest first. For a group,
-// `connection_id` is the group, `friend` its name, `target` the post, and `own_post` whether the owner wrote it.
+// too, which their sites send (inbox, see notify.js), and comments in groups and changes to events there the owner is
+// going to. One list, newest first. For a group, `connection_id` is the group, `friend` its name, `target` the post,
+// `own_post` whether the owner wrote it, and `kind` NULL for a comment, or 'changed' or 'cancelled' for an event.
 const NOTIFICATIONS_SQL = `
   SELECT 'here' AS source, c.id, c.target, c.text, c.created_at, COALESCE(u.name, c.author_name) AS name, c.author_id,
-    NULL AS connection_id, NULL AS friend, NULL AS own_post
+    NULL AS connection_id, NULL AS friend, NULL AS own_post, NULL AS kind
   FROM site_comments c LEFT JOIN users u ON u.id = c.author_id
   UNION ALL
-  SELECT 'friend', i.id, i.target, i.text, i.created_at, i.actor, NULL, i.connection_id, co.name, NULL
+  SELECT 'friend', i.id, i.target, i.text, i.created_at, i.actor, NULL, i.connection_id, co.name, NULL, NULL
   FROM inbox i ${INBOX_JOIN} WHERE i.kind = 'comment'
 
   UNION ALL
   SELECT 'group', i.id, CAST(i.post_id AS TEXT), i.text, i.created_at, i.actor, NULL, g.id, g.name,
-    EXISTS (SELECT 1 FROM group_mine m WHERE m.site = g.origin AND m.remote_group = g.remote_id AND m.kind = 'post' AND m.post_id = i.post_id)
+    EXISTS (SELECT 1 FROM group_mine m WHERE m.site = g.origin AND m.remote_group = g.remote_id AND m.kind = 'post' AND m.post_id = i.post_id),
+    i.kind
   ${GROUP_THERE}`;
 
 /** The newest notifications, for the Notifications page. */
