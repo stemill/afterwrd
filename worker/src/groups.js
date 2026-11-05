@@ -46,7 +46,7 @@ import { signedLink } from "./friends.js";
 import { mediaStore } from "./media.js";
 import { notifyEventChange, notifyGroupComment } from "./notify.js";
 import { groupLinkPage, messagePage } from "./pages.js";
-import { callSite, KEY_RE, siteOrigin } from "./peers.js";
+import { callSite, KEY_RE, PROTOCOL, siteOrigin } from "./peers.js";
 import { removeUnusedFiles } from "./posts.js";
 import { signedFile } from "./share.js";
 import { html, json, now, randomToken, sha256 } from "./util.js";
@@ -62,6 +62,7 @@ const PAGE_COMMENTS = 20; // the newest on each post in a page of posts; a post'
 const POST_COMMENTS = 300;
 const UPCOMING = 100; // events still to come, in the Calendar
 const PAST = 30; // and the most recent ones that have finished
+const CHANGE_SECONDS = 300; // an event's time, place or name can change, telling those going, once every five minutes
 const LINK_SECONDS = 14 * 86400;
 const LINK_REQUESTS = 100; // requests to join one invite link can make
 const WAITING_SECONDS = 7 * 86400; // a request to join no one has answered is dropped after this
@@ -399,18 +400,28 @@ async function editEvent(env, site, group, member, id, { text, event }) {
   if (!found || found.post.origin !== member.origin) return "Only whoever added an event can change it.";
   if (found.event.cancelled_at) return "That event has been called off.";
   if (text.length > MAX_GROUP_TEXT) return `Posts can be up to ${MAX_GROUP_TEXT} characters.`;
+  const at = now();
+  if (finishedAt(found.event) < at) return "That event is over.";
+  if (finishedAt(event) < at) return "That event would already be over.";
   const changed = eventChanged(found.event, event);
-  // Each change sends a note to everyone going: not more than one a minute.
-  if (changed && found.post.changed_at > now() - 60) return "You've just changed this event. Try again in a minute.";
+  // Each change sends a note to everyone going: not more than one every few minutes, checked and recorded in one
+  // statement, so requests sent together can't all get through.
+  if (changed) {
+    const ok = await db.prepare(`UPDATE group_events SET changed_at = ?1 WHERE post_id = ?2 AND (changed_at IS NULL OR changed_at <= ?1 - ?3)
+      RETURNING post_id`).bind(at, found.post.id, CHANGE_SECONDS).first();
+    if (!ok) return "You've just changed this event. Try again in a few minutes.";
+  }
   await db.batch([
-    db.prepare(`UPDATE group_events SET title = ?, starts_at = ?, ends_at = ?, all_day = ?, time_zone = ?, place = ?,
-      changed_at = CASE WHEN ? THEN ? ELSE changed_at END WHERE post_id = ?`).bind(event.title, event.starts_at, event.ends_at,
-      event.all_day, event.time_zone, event.place, changed ? 1 : 0, now(), found.post.id),
+    db.prepare(`UPDATE group_events SET title = ?, starts_at = ?, ends_at = ?, all_day = ?, time_zone = ?, place = ?
+      WHERE post_id = ?`).bind(event.title, event.starts_at, event.ends_at, event.all_day, event.time_zone, event.place, found.post.id),
     db.prepare("UPDATE group_posts SET text = ? WHERE id = ?").bind(text || null, found.post.id),
   ]);
   if (changed) await notifyEventChange(env, site, group, found.post, event, { kind: "changed", name: member.name, from: member.origin });
   return null;
 }
+
+/** Someone who's left or been removed: their answers go too, so rejoining starts afresh. */
+const forgetAnswers = (db, origin) => db.prepare("DELETE FROM group_answers WHERE origin = ?").bind(origin);
 
 /** Calls an event off: whoever added it, or an admin (as for deleting it). Those going are told. */
 async function cancelEvent(env, site, group, member, id) {
@@ -419,7 +430,10 @@ async function cancelEvent(env, site, group, member, id) {
   if (!found || !(await mayDelete(db, member, found.post.origin))) return "That isn't yours to call off.";
   if (found.event.cancelled_at) return null;
   const at = now();
-  await db.prepare("UPDATE group_events SET cancelled_at = ? WHERE post_id = ?").bind(at, found.post.id).run();
+  if (finishedAt(found.event) < at) return "That event is over.";
+  // Only the first of requests sent together calls it off, and tells people.
+  if (!(await db.prepare("UPDATE group_events SET cancelled_at = ? WHERE post_id = ? AND cancelled_at IS NULL RETURNING post_id")
+    .bind(at, found.post.id).first())) return null;
   await notifyEventChange(env, site, group, found.post, { ...found.event, cancelled_at: at }, { kind: "cancelled", name: member.name, from: member.origin });
   return null;
 }
@@ -451,7 +465,7 @@ async function decide(env, group, admin, id, action) {
   }
   // Decline a request, or remove someone. What they posted stays, as on Facebook; an admin can delete it.
   await tellRemoved(member);
-  await db.prepare("DELETE FROM group_members WHERE id = ?").bind(member.id).run();
+  await db.batch([db.prepare("DELETE FROM group_members WHERE id = ?").bind(member.id), forgetAnswers(db, member.origin)]);
   return null;
 }
 
@@ -568,7 +582,7 @@ async function memberFrom(request, env) {
 export async function handleGroupApi(request, env, url) {
   const route = `${request.method} ${url.pathname}`;
   const db = env.DB;
-  if (route === "GET /_group/ping") return json({ afterwrd: "group", version: pkg.version });
+  if (route === "GET /_group/ping") return json({ afterwrd: "group", version: pkg.version, protocol: PROTOCOL });
   if (route === "POST /_group/claim") return claim(request, env, url);
 
   const member = await memberFrom(request, env);
@@ -576,7 +590,7 @@ export async function handleGroupApi(request, env, url) {
   if (!member || !group) return json({ error: "Not a member of this group." }, 401);
   if (route === "POST /_group/leave") {
     if (member.role === "owner") return json({ error: "You own this group: delete it instead." }, 400);
-    await db.prepare("DELETE FROM group_members WHERE id = ?").bind(member.id).run();
+    await db.batch([db.prepare("DELETE FROM group_members WHERE id = ?").bind(member.id), forgetAnswers(db, member.origin)]);
     return json({ ok: true });
   }
   if (!member.approved_at) return json({ error: `Waiting for ${(await ownerOf(db))?.name ?? "the group"} to let you in.` }, 403);

@@ -12,6 +12,52 @@ gives you; it never signs in to Facebook or fetches anything from it.
 *Friends*, *Groups* and *Notifications* sit beside it. Your picture (top right) opens your profile, *Memories* (everything from
 Facebook, with "On this day"), and your tools: *Your devices*, *Import*, *Download everything* and *Update*.
 
+## What it looks like
+
+Home, with your posts and friends' together (friends' posts come straight from their own sites):
+
+<img src="docs/screenshots/home-desktop.png" alt="Home: a post with a photo of a birthday cake and friends' comments, beside a list of friends" width="760">
+
+A friend's page, read from their site; a group with its events; and on a phone, Home and a group's calendar:
+
+<img src="docs/screenshots/friend-desktop.png" alt="A friend's page: their post with three photos and a comment" width="370"> <img src="docs/screenshots/group-desktop.png" alt="A book club group: two events with Going, Maybe and Can't go, and a post with a comment" width="370">
+
+<img src="docs/screenshots/home-phone.png" alt="Home on a phone" width="240"> <img src="docs/screenshots/calendar-phone.png" alt="A group's calendar on a phone" width="240">
+
+<sub>The people and photos are made up (`npm run test:e2e -- screenshots` makes these pictures from local sites).</sub>
+
+## How sites talk to each other
+
+Each site is its own: friends' and groups' sites ask it for what their owner may see, when they look, with a key
+for that one friendship, and nothing is copied. [PROTOCOL.md](PROTOCOL.md) describes the requests and what's sent,
+for anyone curious or wanting to build something that talks to afterwrd.
+
+## How afterwrd is made
+
+afterwrd is written using an AI coding assistant (Anthropic's Claude), which has written all of its code. The
+direction, and the decisions that shape it, are carefully considered human ones:
+- what afterwrd is for, and what it deliberately isn't;
+- keeping it private by default, with nothing copied to anyone else's site;
+- one person per site, free to run, with no server to look after;
+- calm, with no nudges or "X is going" notifications;
+- every feature, and every one left out.
+
+Because of that, it's built to be checked rather than trusted:
+
+- **All the code is public**, under the GNU Affero General Public License, and every release is built from a tagged
+  commit.
+- **About 400 automated checks** run real copies of afterwrd on one computer, talking to each other as friends' sites
+  and groups do, including deliberately forged and hostile requests. They run before every release.
+- **Security reviews at each major step,** by separate AI agents reading the code without having written it. Every
+  real finding has been fixed. There hasn't yet been a review by a human security expert, and one would be very
+  welcome.
+- **How sites talk to each other is written down** in [PROTOCOL.md](PROTOCOL.md), so the design can be examined and
+  criticised on its own terms.
+
+Found a problem? Please [open an issue](https://github.com/stemill/afterwrd/issues). For anything security-related,
+[report it privately](https://github.com/stemill/afterwrd/security/advisories/new) instead, so it can be fixed before
+it's public (see [SECURITY.md](SECURITY.md)).
+
 ## Install your own
 
 **Easiest: use the install page, <https://afterwrd.app/>.** Make your Cloudflare account (step 1 below) and stay
@@ -250,6 +296,10 @@ and `target_kind` narrow the search.
 afterwrd is free software, licensed under the [GNU Affero General Public License v3.0 or later](LICENSE).
 Anyone can use it, change it and share it, free. If you change it and let other people use your version over a
 network, you must offer them its source code under the same licence, so it can't be taken private.
+
+**No warranty.** afterwrd is provided as is, without any warranty (sections 15 and 16 of the licence say so in full).
+You run your own site in your own Cloudflare account and are responsible for it, including keeping it up to date.
+Think carefully about what you import, and turn on two-factor authentication for your Cloudflare account.
 
 afterwrd includes other open-source projects under their own licences (MIT, BSD, Apache 2.0 and the SIL Open Font
 Licence), listed with their full texts in [worker/public/static/licenses.txt](worker/public/static/licenses.txt),

@@ -34,12 +34,13 @@ import { cleanName, cleanText, MAX_GROUP_ABOUT, MAX_GROUP_NAME, MAX_GROUP_PHOTOS
 import { handleGroupSites } from "./groupsites.js";
 import { receiveGroupNote } from "./notify.js";
 import { messagePage } from "./pages.js";
-import { callSite, KEY_RE, ownerName, siteOrigin } from "./peers.js";
+import { callSite, KEY_RE, ownerName, PROTOCOL, siteOrigin } from "./peers.js";
 import { checkPhotos, removeUnusedFiles } from "./posts.js";
 import { signedFile } from "./share.js";
 import { html, json, now, randomToken, sha256 } from "./util.js";
 
 const PENDING_SECONDS = 600; // a join half made is given up after this
+const MAX_PLANS = 200; // events in one group the owner's said they're going to and that aren't long over
 const LINK_RE = /^\/_join\/([\w-]{40,100})$/;
 const ROLES = ["owner", "admin", "member"];
 const unexpected = () => new Error("Their site sent something unexpected.");
@@ -144,7 +145,7 @@ export async function markMine(db, group, posts, ownOrigin) {
   const event = (sent, e) => {
     let kept = null;
     try { kept = JSON.parse(sent.event ?? "null"); } catch {}
-    if (!e || !kept) return e;
+    if (!e || !kept) return null; // a post of theirs that wasn't an event isn't made one by the group
     const { title, starts_at, ends_at, all_day, time_zone, place } = kept;
     return { ...e, title, starts_at, ends_at, all_day, time_zone, place };
   };
@@ -174,29 +175,38 @@ async function refresh(db, group, info) {
 }
 
 /**
- * Keeps the owner's copies of the events they're going to (or might) as the group just showed them: a copy made,
- * brought up to date, or dropped if they've said they can't go. `gone`: events no longer there.
+ * Keeps the owner's copies of the events they're going to (or might). Only their own answer, given here
+ * (`answered`: {id, answer}), makes or drops one: the group's say-so about who's going never does. Otherwise copies
+ * already kept are brought up to date with what the group just showed (`posts`, already marked as theirs or not), and
+ * dropped for events no longer there (`gone`).
  */
-export async function keepPlans(db, group, posts, gone = []) {
+export async function keepPlans(db, group, posts, gone = [], answered = null) {
   const events = posts.filter((p) => p.event);
-  if (!events.length && !gone.length) return;
+  if (!events.length && !gone.length && !answered) return;
   const { results } = await db.prepare("SELECT * FROM group_plans WHERE group_id = ?").bind(group.id).all();
   const had = new Map(results.map((r) => [r.post_id, r]));
-  const fields = ["answer", "title", "starts_at", "ends_at", "all_day", "time_zone", "place", "cancelled_at"];
+  const fields = ["title", "starts_at", "ends_at", "all_day", "time_zone", "place", "cancelled_at"];
+  const same = (old, e) => fields.every((k) => (old[k] ?? null) === (e[k] ?? null));
+  const drop = (id) => db.prepare("DELETE FROM group_plans WHERE group_id = ? AND post_id = ?").bind(group.id, id);
   const writes = [];
   for (const { id, event } of events) {
-    const plan = { ...event, answer: event.answer };
-    if (plan.answer === "going" || plan.answer === "maybe") {
-      const old = had.get(id);
-      if (old && fields.every((k) => (old[k] ?? null) === (plan[k] ?? null))) continue;
-      writes.push(db.prepare(`INSERT INTO group_plans (group_id, post_id, ${fields.join(", ")}, updated_at) VALUES (?, ?, ${fields.map(() => "?").join(", ")}, ?)
-        ON CONFLICT (group_id, post_id) DO UPDATE SET ${fields.map((k) => `${k} = excluded.${k}`).join(", ")}, updated_at = excluded.updated_at`)
-        .bind(group.id, id, ...fields.map((k) => plan[k] ?? null), now()));
-    } else if (had.has(id)) {
-      writes.push(db.prepare("DELETE FROM group_plans WHERE group_id = ? AND post_id = ?").bind(group.id, id));
+    const old = had.get(id);
+    if (answered?.id === id) {
+      if (answered.answer === "no") { if (old) writes.push(drop(id)); continue; }
+      if (old && old.answer === answered.answer && same(old, event)) continue;
+      if (!old && had.size >= MAX_PLANS) continue;
+      writes.push(db.prepare(`INSERT INTO group_plans (group_id, post_id, answer, ${fields.join(", ")}, updated_at)
+        VALUES (?, ?, ?, ${fields.map(() => "?").join(", ")}, ?)
+        ON CONFLICT (group_id, post_id) DO UPDATE SET answer = excluded.answer, ${fields.map((k) => `${k} = excluded.${k}`).join(", ")},
+        updated_at = excluded.updated_at`).bind(group.id, id, answered.answer, ...fields.map((k) => event[k] ?? null), now()));
+    } else if (old && !same(old, event)) {
+      writes.push(db.prepare(`UPDATE group_plans SET ${fields.map((k) => `${k} = ?`).join(", ")}, updated_at = ? WHERE group_id = ? AND post_id = ?`)
+        .bind(...fields.map((k) => event[k] ?? null), now(), group.id, id));
     }
   }
-  for (const id of gone) if (had.has(id)) writes.push(db.prepare("DELETE FROM group_plans WHERE group_id = ? AND post_id = ?").bind(group.id, id));
+  // Can't go, about an event the group no longer shows: the copy goes all the same.
+  if (answered?.answer === "no" && had.has(answered.id) && !events.some((p) => p.id === answered.id)) writes.push(drop(answered.id));
+  for (const id of gone) if (had.has(id)) writes.push(drop(id));
   if (writes.length) await db.batch(writes);
 }
 
@@ -386,11 +396,14 @@ async function commentInGroup(env, group, postId, words) {
   return { id: Number(n[1]) };
 }
 
-/** The event in a group's reply (its post, as it is now), checked, kept in the owner's copies of their plans. */
-async function keepReply(env, site, group, reply, id) {
+/**
+ * The event in a group's reply (its post, as it is now), checked, kept in the owner's copies of their plans; with
+ * `answer`, the owner's own answer, just given here, which is what makes or drops their copy.
+ */
+async function keepReply(env, site, group, reply, id, answer = null) {
   const post = parseGroupNote(reply, group.origin, group.remote_id, env);
-  if (!post?.event || post.id !== Number(id)) return;
-  await keepPlans(env.DB, group, await markMine(env.DB, group, [post], site));
+  const ok = post?.event && post.id === Number(id);
+  await keepPlans(env.DB, group, ok ? await markMine(env.DB, group, [post], site) : [], [], answer && { id: Number(id), answer });
 }
 
 const keptEvent = (e) => JSON.stringify({ title: e.title, starts_at: e.starts_at, ends_at: e.ends_at, all_day: e.all_day,
@@ -420,7 +433,7 @@ async function addEvent(env, site, group, { text: words, event }) {
 async function answerEvent(env, site, group, id, answer) {
   if (!ANSWERS.includes(answer)) return { error: "Going, maybe, or can't go?" };
   try {
-    await keepReply(env, site, group, await call(group, `/_group/events/${Number(id)}/answer`, { answer }), id);
+    await keepReply(env, site, group, await call(group, `/_group/events/${Number(id)}/answer`, { answer }), id, answer);
     return {};
   } catch (error) {
     return { error: `Couldn't send your answer: ${error.message}` };
@@ -585,7 +598,7 @@ export async function handleMember(request, env, url) {
     if (!group || group.joined_at || !asker || group.origin !== asker || String(group.remote_id) !== url.searchParams.get("group")) {
       return json({ error: "Not joining." }, 401);
     }
-    return json({ name: await ownerName(db) });
+    return json({ name: await ownerName(db), protocol: PROTOCOL });
   }
   if (!group?.joined_at) return json({ error: "Not a member." }, 401);
   if (route === "POST /_member/notify") {

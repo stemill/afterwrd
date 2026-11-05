@@ -174,10 +174,25 @@ export async function shareAlbum(env, site, key, page) {
   };
 }
 
+/** Whether a friend may see this post: one written here, or any if the owner has shared their Facebook posts. */
+export async function postShared(db, post) {
+  return post.id >= SITE_ID || (await chosen(db)).includes("posts");
+}
+
+/**
+ * Whether a friend may see this photo or video: it's in an album they're shown, or it came with a post they're
+ * shown. Anything else isn't theirs to see, even if they know its fingerprint.
+ */
+export async function photoShared(db, m) {
+  const key = m.album_id ? String(m.album_id) : m.kind === "video" ? "videos" : "other";
+  if ((await setKeys(db)).includes(key)) return true;
+  return Boolean(m.post_id) && postShared(db, { id: m.post_id });
+}
+
 export async function sharePhoto(env, site, hash) {
   const db = env.DB;
   const m = await db.prepare("SELECT * FROM media WHERE hash = ? ORDER BY id LIMIT 1").bind(hash).first();
-  if (!m) return null;
+  if (!m || !(await photoShared(db, m))) return null;
   const key = m.album_id ? String(m.album_id) : m.kind === "video" ? "videos" : "other";
   const neighbours = {};
   if ((await setKeys(db)).includes(key)) {
@@ -196,7 +211,9 @@ export async function sharePhoto(env, site, hash) {
       "afterwrd:prev": prev.results[0]?.hash, "afterwrd:next": next.results[0]?.hash,
     });
   }
-  const post = m.post_id ? await db.prepare("SELECT * FROM posts WHERE id = ?").bind(m.post_id).first() : null;
+  // The post it came with, if that's one the friend may see.
+  const post = m.post_id && (await postShared(db, { id: m.post_id }))
+    ? await db.prepare("SELECT * FROM posts WHERE id = ?").bind(m.post_id).first() : null;
   return {
     ...await media(env, site, m),
     ...neighbours,

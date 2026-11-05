@@ -25,6 +25,8 @@ const SNIPPET = 200;
 const KEEP_SECONDS = 60 * 86400;
 const RATE = { count: 60, seconds: 600 }; // notes from one site
 const DAILY = 500;
+// Notes from a group about events the owner's going to: changed or called off. A handful is plenty.
+const EVENT_RATE = { count: 10, seconds: 600, daily: 30 };
 
 const snippet = (text, size = SNIPPET) => (typeof text === "string" ? text.replace(/\s+/g, " ").trim().slice(0, size) : "");
 
@@ -129,17 +131,28 @@ async function receiveEventNote(db, group, note) {
   if (!/^\d{1,15}$/.test(id) || !event || (kind !== "changed" && kind !== "cancelled")) return [{ error: "That isn't about an event in this group." }, 400];
   const at = now();
   if (kind === "cancelled") event.cancelled_at ??= at;
+  // An event the owner here added keeps their own words, time and place: the group can only say it's off.
+  const mine = await db.prepare("SELECT event FROM group_mine WHERE site = ? AND remote_group = ? AND kind = 'post' AND remote_id = ?")
+    .bind(group.origin, group.remote_id, Number(id)).first();
+  let kept = null;
+  try { kept = JSON.parse(mine?.event ?? "null"); } catch {}
+  if (mine && kept) {
+    if (kind !== "cancelled") return [{ ok: true }, 202]; // their own change: nothing to tell them
+    Object.assign(event, { title: kept.title, starts_at: kept.starts_at, ends_at: kept.ends_at, all_day: kept.all_day,
+      time_zone: kept.time_zone, place: kept.place });
+  }
   const plan = await db.prepare(`UPDATE group_plans SET title = ?, starts_at = ?, ends_at = ?, all_day = ?, time_zone = ?, place = ?,
     cancelled_at = ?, updated_at = ? WHERE group_id = ? AND post_id = ? RETURNING answer`).bind(event.title, event.starts_at, event.ends_at,
     event.all_day, event.time_zone, event.place, event.cancelled_at, at, group.id, Number(id)).first();
   if (!plan) return [{ ok: true }, 202];
   const words = `${event.title} · ${eventWhen(event)}${event.place ? ` · ${event.place}` : ""}`;
+  // Counted apart from comments, and far fewer: event news can't crowd out comments, or become a stream of nags.
   const row = await db.prepare(`INSERT INTO group_inbox (group_id, post_id, actor, text, created_at, kind)
     SELECT ?1, ?2, ?3, ?4, ?5, ?9
-    WHERE (SELECT COUNT(*) FROM group_inbox WHERE group_id = ?1 AND created_at > ?5 - ?6) < ?7
-      AND (SELECT COUNT(*) FROM group_inbox WHERE group_id = ?1 AND created_at > ?5 - 86400) < ?8
+    WHERE (SELECT COUNT(*) FROM group_inbox WHERE group_id = ?1 AND kind IS NOT NULL AND created_at > ?5 - ?6) < ?7
+      AND (SELECT COUNT(*) FROM group_inbox WHERE group_id = ?1 AND kind IS NOT NULL AND created_at > ?5 - 86400) < ?8
     RETURNING id`).bind(group.id, Number(id), snippet(note.actor?.name, 100) || "Someone", snippet(words, 400), at,
-    RATE.seconds, RATE.count, DAILY, kind).first();
+    EVENT_RATE.seconds, EVENT_RATE.count, EVENT_RATE.daily, kind).first();
   return row ? [{ ok: true }, 202] : [{ error: "That's a lot of notes for now." }, 429];
 }
 
@@ -158,8 +171,8 @@ export async function receiveGroupNote(db, group, note) {
   const at = now();
   const row = await db.prepare(`INSERT INTO group_inbox (group_id, post_id, actor, text, created_at)
     SELECT ?1, ?2, ?3, ?4, ?5
-    WHERE (SELECT COUNT(*) FROM group_inbox WHERE group_id = ?1 AND created_at > ?5 - ?6) < ?7
-      AND (SELECT COUNT(*) FROM group_inbox WHERE group_id = ?1 AND created_at > ?5 - 86400) < ?8
+    WHERE (SELECT COUNT(*) FROM group_inbox WHERE group_id = ?1 AND kind IS NULL AND created_at > ?5 - ?6) < ?7
+      AND (SELECT COUNT(*) FROM group_inbox WHERE group_id = ?1 AND kind IS NULL AND created_at > ?5 - 86400) < ?8
     RETURNING id`).bind(group.id, Number(post), snippet(object.attributedTo?.name, 100) || "Someone", snippet(object.content) || null,
     at, RATE.seconds, RATE.count, DAILY).first();
   await db.prepare("DELETE FROM group_inbox WHERE created_at < ? OR group_id NOT IN (SELECT id FROM groups)").bind(at - KEEP_SECONDS).run();

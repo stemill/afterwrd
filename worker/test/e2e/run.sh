@@ -90,6 +90,7 @@ three_sites() { # $1: the suite, run against three sites, each with its own data
 }
 run_feed() { three_sites feed.mjs; }
 run_groups() { three_sites groups.mjs group; }
+run_screenshots() { three_sites screenshots.mjs group; } # the README's pictures, in docs/screenshots (not a test)
 run_forged() {
   echo "== forged"
   "$WORKER/node_modules/.bin/esbuild" "$HERE/unit-entry.js" --bundle --format=esm --platform=node --loader:.json=json \
@@ -112,7 +113,7 @@ run_upgrade() { # $1: an older release tag
 if [ $# -eq 0 ]; then set -- core fresh albums update feed groups forged; fi
 while [ $# -gt 0 ]; do
   case "$1" in
-    core|fresh|albums|update|feed|groups|forged) "run_$1" ;;
+    core|fresh|albums|update|feed|groups|forged|screenshots) "run_$1" ;;
     upgrade) shift; run_upgrade "${1:?give an older release tag, e.g. v0.12.0}" ;;
     *) echo "Unknown suite: $1" >&2; FAILED=1 ;;
   esac

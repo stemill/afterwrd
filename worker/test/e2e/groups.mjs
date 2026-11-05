@@ -352,6 +352,19 @@ const groupKeyForCat = sql(stateG, `SELECT their_key FROM group_members WHERE or
 await call(C, "/_member/notify", groupKeyForCat, forged);
 check("a group can't send notes about an event Cat isn't going to", notes(stateC) === catNoted);
 check("…nor one that isn't an event", (await call(B, "/_member/notify", groupKeyForBob, { ...forged, object: { ...forged.object, "afterwrd:event": { type: "Event" } } })).status === 400);
+// Only Cat's own answer, given from her site, puts an event in her plans: the group saying she's going doesn't.
+sql(stateG, `INSERT INTO group_answers (post_id, origin, answer, answered_at) VALUES (${swap.post_id}, '${C}', 'going', 1)
+  ON CONFLICT (post_id, origin) DO UPDATE SET answer = 'going'`);
+await cat.goto(`${C}/groups/${catGroup}/calendar`);
+check("a group saying Cat's going doesn't put it in her plans", n(stateC, "group_plans") === 0);
+sql(stateG, `UPDATE group_answers SET answer = 'no' WHERE origin = '${C}' AND post_id = ${swap.post_id}`);
+// A post Bob wrote that wasn't an event isn't made one of his by the group.
+sql(stateG, `INSERT INTO group_events (post_id, title, starts_at, all_day, time_zone) VALUES (${bobPost}, 'Forged party', ${Date.UTC(2027, 7, 1) / 1000}, 1, 'Europe/London')`);
+await bob.goto(`${B}/groups/${bobGroup}/posts/${bobPost}`);
+check("the group can't turn Bob's post into an event of his", !(await text(bob)).includes("Forged party"));
+sql(stateG, `DELETE FROM group_events WHERE post_id = ${bobPost}`);
+check("Ann can't move her event into the past", (await call(G, `${evPath}/edit`, sql(stateA, "SELECT their_key FROM groups")[0].their_key,
+  { type: "Note", content: "", "afterwrd:event": { type: "Event", name: "Book swap", startTime: "2020-06-12T19:00:00Z", "afterwrd:timeZone": "Europe/London" } })).status === 400);
 
 // Bob adds one; Ann, the owner, calls it off; Bob is told.
 await bob.goto(`${B}/groups/${bobGroup}/calendar`);
@@ -380,6 +393,7 @@ await Promise.all([bob.waitForNavigation(), bob.click('form[action$="/leave"] bu
 check("Bob leaves", n(stateB, "groups") === 0 && n(stateG, `group_members WHERE origin = '${B}'`) === 0);
 check("…keeping his own copies of his posts", sql(stateB, "SELECT kind FROM group_mine").every((r) => r.kind === "post"));
 check("…and forgetting his plans there", n(stateB, "group_plans") === 0);
+check("…and the group forgets his answers, so rejoining starts afresh", n(stateG, `group_answers WHERE origin = '${B}'`) === 0);
 check("…which stays in the group", n(stateG, `group_posts WHERE id = ${bobPost}`) === 1);
 await ann.goto(`${A}/groups/${annGroup}/members`);
 await Promise.all([ann.waitForNavigation(), ann.click('button[formaction$="/remove"]')]);

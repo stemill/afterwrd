@@ -52,6 +52,16 @@ export function zonedMoment({ year, month, day, hour = 0, minute = 0 }, zone) {
   return t;
 }
 
+/**
+ * The first moment of a day in `zone`. Usually midnight; where the clocks go forward at midnight there's no such
+ * moment, and the day starts at 01:00 (or so), so it's found by stepping on until the date is right.
+ */
+export function dayStart(date, zone) {
+  let t = zonedMoment(date, zone);
+  for (let i = 0; i < 4 && wallClock(t, zone).day !== date.day; i++) t += 3600;
+  return t;
+}
+
 function readDate(value) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? "");
   if (!m) return null;
@@ -94,13 +104,13 @@ export function readEventForm(form, fallbackZone = "Europe/London") {
   const endDate = get("end_date") ? readDate(get("end_date")) : null;
   if (get("end_date") && !endDate) return { error: "That end date doesn't look right." };
   if (all_day) {
-    if (endDate) ends_at = zonedMoment(endDate, zone);
+    if (endDate) ends_at = dayStart(endDate, zone);
   } else if (get("end_time")) {
     const endTime = readTime(get("end_time"));
     if (!endTime) return { error: "That end time doesn't look right." };
     ends_at = zonedMoment({ ...(endDate ?? startDate), ...endTime }, zone);
   }
-  const event = { title, starts_at: zonedMoment({ ...startDate, ...(startTime ?? {}) }, zone), ends_at, all_day, time_zone: zone,
+  const event = { title, starts_at: startTime ? zonedMoment({ ...startDate, ...startTime }, zone) : dayStart(startDate, zone), ends_at, all_day, time_zone: zone,
     place: clean(get("place"), MAX_PLACE) || null };
   if (all_day && event.ends_at === event.starts_at) event.ends_at = null; // the same day
   const error = trouble(event);

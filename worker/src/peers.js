@@ -9,12 +9,14 @@
 //   POST /_peer/comments/<n>/delete     their owner deletes a comment they made
 //   POST /_peer/notify                  a note: something new on their site (notify.js)
 //   POST /_peer/disconnect              they've disconnected
-// The feed and comments are ActivityStreams (public/static/activity.js). Only posts written on afterwrd are
-// shared, never the imported archive. Plus the helpers for calling other sites.
+// The feed and comments are ActivityStreams (public/static/activity.js). The feed and notes carry only posts written
+// on afterwrd; friend pages (posts, albums, photos) also show the parts of the Facebook archive the owner has chosen to
+// share (share.js), and nothing else, even to a friend who knows a photo's fingerprint. Plus the helpers for calling
+// other sites.
 import { commentId, CONTEXT, POST_KEY_RE, postId, tidy } from "../public/static/activity.js";
 import { findTarget, MAX_COMMENT } from "./archive/comments.js";
 import { SITE_ID } from "./posts.js";
-import { notes, ownerActor, shareAlbum, shareAlbums, sharePhoto, sharePosts } from "./share.js";
+import { notes, ownerActor, photoShared, postShared, shareAlbum, shareAlbums, sharePhoto, sharePosts } from "./share.js";
 import { json, now, sha256 } from "./util.js";
 import { notifyComment, receiveNote } from "./notify.js";
 
@@ -24,6 +26,9 @@ const MAX_REPLY = 2_000_000;
 const RATE = { count: 30, seconds: 600 };
 const DAILY = 300; // comments from one site a day, whatever the pace
 export const KEY_RE = /^[\w-]{40,100}$/;
+// The version of the protocol between sites (PROTOCOL.md), sent in the hello and ping answers. Adding things doesn't
+// change it; anything an older site would misread does.
+export const PROTOCOL = 1;
 
 /** An https site address as an origin, or null. http on this computer only when testing (ALLOW_LOCAL_SITES). */
 export function siteOrigin(text, env) {
@@ -105,7 +110,7 @@ export async function handlePeer(request, env, url) {
   if (route === "GET /_peer/hello") {
     const asker = siteOrigin(url.searchParams.get("from"), env);
     if (!peer || peer.connected_at || !asker || peer.origin !== asker) return json({ error: "Not connected." }, 401);
-    return json({ name: await ownerName(db) });
+    return json({ name: await ownerName(db), protocol: PROTOCOL });
   }
   if (!peer?.connected_at) return json({ error: "Not connected." }, 401);
   // A connection this site's owner hasn't approved yet gets nothing but the chance to withdraw.
@@ -139,7 +144,9 @@ export async function handlePeer(request, env, url) {
     const target = reply.startsWith(postId(url.origin, "")) ? reply.slice(postId(url.origin, "").length)
       : reply.startsWith(`${url.origin}/photos/sha256/`) ? `photo-${reply.slice(`${url.origin}/photos/sha256/`.length)}` : "";
     const found = (POST_KEY_RE.test(target) || /^photo-[0-9a-f]{64}$/.test(target)) && (await findTarget(db, target));
-    if (!found) return json({ error: "That isn't there any more." }, 404);
+    // Only what they're shown: something unshared answers as if it weren't there.
+    const visible = found && (found.post ? await postShared(db, found.post) : await photoShared(db, found.photo));
+    if (!visible) return json({ error: "That isn't there any more." }, 404);
     // Limits checked in the same statement as the insert, so comments sent all at once can't slip past.
     const row = await db.prepare(`INSERT INTO site_comments (target, author_id, author_name, text, created_at, origin)
       SELECT ?1, NULL, ?2, ?3, ?4, ?5

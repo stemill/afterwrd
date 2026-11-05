@@ -191,6 +191,14 @@ check("a note about a comment Bob had no part in isn't kept", notesOnBob() === n
 check("wrong key, no feed", (await peer("/_peer/feed", "x".repeat(43))).status === 401);
 const bobsImportedPost = sql(stateB, "SELECT timestamp FROM posts WHERE id < 1000000000 LIMIT 1")[0];
 check("can't comment on an imported post", (await peer("/_peer/comments", keyForB, { type: "Note", inReplyTo: `${B}/posts/post-${bobsImportedPost.timestamp}-00000000`, content: "x" })).status === 404);
+// With his Facebook photos not shared, a photo from them can't be seen or commented on, even by fingerprint.
+const sharedBefore = sql(stateB, "SELECT value FROM settings WHERE key = 'sections'")[0]?.value ?? "[]";
+sql(stateB, `INSERT OR REPLACE INTO settings (key, value) VALUES ('sections', '[]')`);
+const unshared = sql(stateB, "SELECT hash FROM media WHERE hash IS NOT NULL AND (album_id IS NULL OR album_id < 1000000000) AND (post_id IS NULL OR post_id < 1000000000) LIMIT 1")[0]?.hash;
+check("a photo Bob hasn't shared can't be fetched by its fingerprint", Boolean(unshared) && (await peer(`/_peer/photos/${unshared}`, keyForB)).status === 404, unshared);
+check("…or commented on", (await peer("/_peer/comments", keyForB, { type: "Note", inReplyTo: `${B}/photos/sha256/${unshared}`, content: "x" })).status === 404);
+sql(stateB, `INSERT OR REPLACE INTO settings (key, value) VALUES ('sections', '${sharedBefore.replace(/'/g, "''")}')`);
+check("…but can once his photos are shared", (await peer(`/_peer/photos/${unshared}`, keyForB)).status === 200);
 const bobsComment = sql(stateB, "SELECT id FROM site_comments WHERE origin = 'site' LIMIT 1")[0].id;
 await peer(`/_peer/comments/${bobsComment}/delete`, keyForB, {});
 check("can't delete Bob's own comments", sql(stateB, `SELECT COUNT(*) AS n FROM site_comments WHERE id = ${bobsComment}`)[0].n === 1);
