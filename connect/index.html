@@ -1,0 +1,127 @@
+<!doctype html>
+<!-- afterwrd's Connect page (https://afterwrd.app/connect/): the one address Cloudflare sends people back to after
+     they allow afterwrd to change their account for an hour. It does two things, both in the browser, with nothing
+     stored anywhere and no server behind it (this is a static page on GitHub Pages):
+       1. On the way out (?to=…&state=…&challenge=…, from a site's /_cloudflare/start): remembers which site asked,
+          in this tab only, and sends the browser to Cloudflare's sign-in.
+       2. On the way back (?code=…&state=…, from Cloudflare): checks the state is the one this tab started with, and
+          hands the one-time code to that same site (in the fragment, which no server or log sees). Only that site
+          holds the PKCE secret, so only it can turn the code into a token. See worker/src/cloudflare.js. -->
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:">
+<title>Connecting to Cloudflare · afterwrd</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Crect%20width%3D%2224%22%20height%3D%2224%22%20rx%3D%226%22%20fill%3D%22%23ff8a3d%22%2F%3E%3Cpath%20d%3D%22M12%204a8%208%200%201%201-4.7%2014.5L3.8%2020l1.2-3.6A8%208%200%200%201%2012%204z%22%20transform%3D%22translate(2.4%202.2)%20scale(0.8)%22%20fill%3D%22none%22%20stroke%3D%22%2316201b%22%20stroke-width%3D%223.6%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E">
+<style>
+  :root { --bg: #16201b; --surface: #1f2b25; --text: #ede6da; --muted: #a9a092; --accent: #ff8a3d; --accent-strong: #ffab73;
+          --round: ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", system-ui, sans-serif; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 480px; margin: 48px auto; background: var(--surface); border-radius: 24px; padding: 28px; }
+  .brand { display: flex; align-items: center; font: 900 1.35rem/1 var(--round); margin: 0 0 18px; letter-spacing: -0.02em; }
+  .brand .o { width: 0.82em; height: 0.82em; color: var(--accent); margin: 0 0.02em; }
+  p { margin: 8px 0; }
+  a { color: var(--accent-strong); }
+  .meta { color: var(--muted); font-size: 0.9rem; }
+  #error:empty { display: none; }
+  #ask[hidden] { display: none; }
+  #host { font: 800 1.15rem/1.3 var(--round); word-break: break-all; }
+  button { display: inline-block; padding: 10px 18px; border: 0; border-radius: 999px; background: var(--text); color: var(--bg);
+    font: inherit; font-weight: 700; cursor: pointer; margin-top: 8px; }
+</style>
+</head>
+<body>
+<main>
+<p class="brand" aria-label="afterwrd">afterw<svg class="o" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 1-4.7 14.5L3.8 20l1.2-3.6A8 8 0 0 1 12 4z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>rd</p>
+<p id="status">Connecting to Cloudflare…</p>
+<section id="ask" hidden>
+  <p>Connect this afterwrd site to Cloudflare?</p>
+  <p id="host"></p>
+  <p class="meta">Check it's your own site's address. Cloudflare's next page says what afterwrd is asking for, but not
+  which site it's for: only this page does. If this isn't your site, close this tab.</p>
+  <p><button id="continue">Continue to Cloudflare</button></p>
+</section>
+<p id="error" role="alert"></p>
+<p class="meta">This page passes you between your afterwrd site and Cloudflare. It keeps nothing. <a href="/how-it-works/#install">How it works</a>.</p>
+</main>
+<script>
+  const CLIENT_ID = "9a89827907d5681523b116176031302e";
+  // As in worker/src/cloudflare.js (SCOPES). "Workers Admin", because "Workers Editor" can't create a Worker.
+  const SCOPE = "workers-scripts.admin d1.write account-settings.read";
+  const KEY = "afterwrd-connect";
+  const status = document.getElementById("status");
+  const problem = document.getElementById("error");
+  const fail = (text) => { status.textContent = ""; problem.textContent = text; };
+  const params = new URLSearchParams(location.search);
+  history.replaceState(null, "", location.pathname); // neither the code nor the challenge belongs in the history
+
+  // The site that asked: an afterwrd site or installer at its workers.dev address (the only kind there is), at its
+  // own /_cloudflare/done, and nothing else. So a link can't send someone's code to an address elsewhere.
+  const HOST_RE = /^[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev$/;
+  const siteFrom = (to) => {
+    try {
+      const url = new URL(to);
+      if (url.protocol !== "https:" || !HOST_RE.test(url.hostname) || url.port || url.pathname !== "/_cloudflare/done"
+        || url.search || url.hash || url.username || url.password) return null;
+      return url;
+    } catch { return null; }
+  };
+  const ID_RE = /^[A-Za-z0-9_-]{16,128}$/;
+
+  if (params.has("to")) {
+    // On the way out.
+    const site = siteFrom(params.get("to"));
+    const state = params.get("state") ?? "";
+    const challenge = params.get("challenge") ?? "";
+    if (!site || !ID_RE.test(state) || !ID_RE.test(challenge)) {
+      fail("This page is only used while connecting an afterwrd site. Start from your site's Update or Groups page.");
+    } else {
+      try {
+        sessionStorage.setItem(KEY, JSON.stringify({ to: site.href, state }));
+      } catch {
+        fail("Your browser won't let this page remember which site asked (private browsing can do that). Try in an ordinary window.");
+      }
+      if (!problem.textContent) {
+        // The one place the person can see which site is being connected, so it asks before going on.
+        status.textContent = "";
+        document.getElementById("host").textContent = site.host;
+        document.getElementById("ask").hidden = false;
+        document.getElementById("continue").addEventListener("click", () => {
+          const auth = new URL("https://dash.cloudflare.com/oauth2/auth");
+          auth.searchParams.set("response_type", "code");
+          auth.searchParams.set("client_id", CLIENT_ID);
+          auth.searchParams.set("redirect_uri", location.origin + location.pathname);
+          auth.searchParams.set("scope", SCOPE);
+          auth.searchParams.set("state", state);
+          auth.searchParams.set("code_challenge", challenge);
+          auth.searchParams.set("code_challenge_method", "S256");
+          location.replace(auth.toString());
+        });
+      }
+    }
+  } else if (params.has("code") || params.has("error")) {
+    // On the way back.
+    let started = null;
+    try { started = JSON.parse(sessionStorage.getItem(KEY) || "null"); sessionStorage.removeItem(KEY); } catch {}
+    const site = started && siteFrom(started.to);
+    if (!site || !ID_RE.test(started.state ?? "")) {
+      fail("This tab didn't start a connection, so there's nowhere to send you back to. Start again from your site.");
+    } else if (params.get("state") !== started.state) {
+      fail("This isn't the connection this tab started. Start again from your site.");
+    } else if (params.has("error")) {
+      location.replace(site.href + "#error=" + encodeURIComponent(params.get("error")));
+    } else {
+      status.textContent = "Back to " + site.host + "…";
+      const back = new URLSearchParams({ code: params.get("code"), state: started.state });
+      location.replace(site.href + "#" + back.toString());
+    }
+  } else {
+    fail("This page is only used while connecting an afterwrd site to Cloudflare. There's nothing to see here.");
+  }
+</script>
+</body>
+</html>

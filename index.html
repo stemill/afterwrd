@@ -1,0 +1,795 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install afterwrd</title>
+<meta name="description" content="A small, private social network of your own, with your Facebook years brought along. Free, in your own Cloudflare account.">
+<meta name="theme-color" content="#16201b">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Crect%20width%3D%2224%22%20height%3D%2224%22%20rx%3D%226%22%20fill%3D%22%23ff8a3d%22%2F%3E%3Cpath%20d%3D%22M12%204a8%208%200%201%201-4.7%2014.5L3.8%2020l1.2-3.6A8%208%200%200%201%2012%204z%22%20transform%3D%22translate(2.4%202.2)%20scale(0.8)%22%20fill%3D%22none%22%20stroke%3D%22%2316201b%22%20stroke-width%3D%223.6%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E">
+<style>
+  /* Campfire, as on the sites themselves (the fonts are the device's own here). */
+  :root { --bg: #16201b; --surface: #1f2b25; --raised: #263329; --sunken: #121a16; --text: #ede6da; --muted: #a9a092; --border: #2e3d35;
+          --accent: #ff8a3d; --accent-strong: #ffab73; --accent-soft: #2b2118; --on-accent: #16201b; color-scheme: dark;
+          --round: ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font: 900 2.5rem/1.12 var(--round); margin: 0 0 12px; letter-spacing: -0.02em; }
+  .brand { display: inline-flex; align-items: center; font: 900 1.7rem/1 var(--round); margin: 0 0 26px; letter-spacing: -0.02em; }
+  .brand .o { width: 0.82em; height: 0.82em; margin: 0.08em 0.01em 0; color: var(--accent); }
+  .lede { color: var(--muted); margin: 0 0 14px; font-size: 1.08rem; }
+  .how { margin: 0 0 30px; }
+  ol.steps { list-style: none; counter-reset: step; padding: 0; margin: 0; display: grid; gap: 14px; }
+  ol.steps > li { counter-increment: step; background: var(--surface); border-radius: 22px; padding: 18px 20px 18px 64px; position: relative; }
+  ol.steps > li::before { content: counter(step); position: absolute; left: 18px; top: 16px; width: 30px; height: 30px; border-radius: 50%;
+    background: var(--accent); color: var(--on-accent); font: 900 0.95rem var(--round); display: grid; place-items: center; }
+  ol.steps > li.optional { background: transparent; border: 2px dashed var(--border); }
+  ol.steps > li.optional::before { content: "+"; background: var(--surface); color: var(--text); }
+  h2 { font: 900 1.2rem var(--round); margin: 2px 0 6px; }
+  h2 .meta { font: 600 0.85rem system-ui, sans-serif; }
+  details.by-hand { margin-top: 14px; }
+  details.by-hand > ol { padding-left: 1.2rem; }
+  details.by-hand > ol li { margin: 6px 0; }
+  p { margin: 6px 0; }
+  .meta { color: var(--muted); font-size: 0.9rem; }
+  a { color: var(--accent-strong); }
+  .button { display: inline-block; margin: 8px 8px 0 0; padding: 11px 20px; border-radius: 999px; border: 0;
+    background: var(--raised); color: var(--text); font: 800 1rem var(--round); text-decoration: none; cursor: pointer; }
+  .button.primary { background: var(--text); color: var(--on-accent); }
+  .path { font-weight: 600; }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
+  textarea { width: 100%; height: 260px; margin-top: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--sunken); color: var(--text); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+  .safe { margin-top: 28px; background: var(--accent-soft); border: 0; border-radius: 22px; padding: 18px 20px; }
+  .safe h2 { margin-top: 0; color: var(--accent-strong); }
+  .safe ul { margin: 0; padding-left: 1.2rem; }
+  .safe li { margin: 0.4rem 0; }
+  footer { margin-top: 28px; color: var(--muted); font-size: 0.85rem; }
+  code { font-size: 0.9em; }
+</style>
+</head>
+<body>
+<main>
+<p class="brand" aria-label="afterwrd">afterw<svg class="o" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 1-4.7 14.5L3.8 20l1.2-3.6A8 8 0 0 1 12 4z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>rd</p>
+<h1>A small social network of your own</h1>
+<p class="lede">Post, share photos and talk with friends who have their own afterwrd site, and, if you like, bring your
+Facebook years along. It runs in your own free Cloudflare account, so no one else holds your data and there's nothing
+to pay. A few minutes on a computer.</p>
+<p class="meta how">Curious or cautious? <a href="/how-it-works/">How it works</a> explains where your site runs, what it
+talks to, how signing in and friends work, and how to check all of it in the public code.</p>
+
+<ol class="steps">
+  <li>
+    <h2>Make a free Cloudflare account</h2>
+    <p>An email address is all it asks for. Don't add a card; afterwrd stays within the free plan. Confirm your email
+    from the message Cloudflare sends, and stay signed in.</p>
+    <a class="button" href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">Sign up to Cloudflare</a>
+    <p class="meta">Already have a Cloudflare account? <a href="https://dash.cloudflare.com/login" target="_blank" rel="noopener">Sign in</a>.</p>
+  </li>
+  <li>
+    <h2>Install on Cloudflare</h2>
+    <p>Once you're signed in, this opens Cloudflare with afterwrd's installer ready to deploy. Leave the name as it is
+    (you'll choose your site's address in a moment) and press <b>Deploy</b>.</p>
+    <a class="button primary" href="https://dash.cloudflare.com/workers-and-pages/deploy/playground/afterwrd-installer#LYVwNgLglgDghgJwgegGYHsHALQBM4RwDcABAEbogB2+CAngLzbPYZb6HbW5QDGU2AAwBOAKyiAbABYpoqYIDsCgFwsWbYBzhcafASPHTZ8pQFgAUAGF0VCAFNb2ACJQAzjHSuo0G8pIa8AmISKjhgOwYAIigqV0IwMDsEADoAK1dI0lQoRNDwqJi4uASktIyLa1sHCGwAFToYOz84GBgwPgIoG2RUuAA3OFdeBFgIAGpgdFxwOwsLZGQSOFR7BAB3BFwSQvjEhAAaEj6krxsSQWSAJkvki-MFkmsYOhGAcwALCBIACksAShIl0ElwkJAAyvYSABZHLtKivCA2ZIkABiCDsdhIrnQKzWiEx3CSJAg70xAHEAHIAVRIAEFUKgkugSGSHEliiQAAogMjtXgkAAyfAcrjsh2OCFOVBIAGYSJgSGACEkiPdFtiQAheJjeFNMXAaIrhVRtUsvp8IDBXMoFq9vO8ecldcBkHE7MBYchlqsNrg1WqSE47G10HRie83EtXEtHmBKLhUEr0SQAOqYADWRO+JMxO2KYBI8FedgA5NHIgBJWK7eXSyxxkAJpN2SLkEAQRHS3DoOzR7yHBXwN3hyNrd7oRIB7KJba2ZlwVMZolkMPvA24P6HHPS9CNaU5xcITMIMtLXC4dGua0BkgkbBRmNUOxrQ-Hw7eWdFBLR71JX1m8N9XPS9ozoSgSF4cdPDsVUHlve90AlJZpTsAAPNxoHhJYVj-TZ3y+EAYA4Xtti+RER2jCUpUOTNgxiV5SOjIdXEzOhXEOXUqCfXgfFiQ5EEgqBjmQrYYHHRFXGSf0HhTNcvg-btewHE1MTAkAS2EzjuPsLZ63jRN8R+GAQLpBJ0BfM49MbAz0VPIsmmQkhx01U9EUzKgaODL4qHM0lkzIdsAwXXV0HTKBMTOElI3s0hXC1ZBeAbJt8TKAFB0GHTHNpTkK2JUKHBINSSGAOBcExNhAMLTUPFFZQbxIABGZFshoaMoujNMjyJGJCsoBAll4XVqAgeqbgg9FlR-QMGpILQyEGcqFV-dY8Plfr0RAUU2tJWt9RwlatmKCbcFXQZ6plZFuzWKg41Kn99v-VAEHQYBKtKi9e2jMg7DjF91wg0leHTaM7AlMNp31V44B2SqWuLBBjJiL5vt+-Z6tvLFmTHAhTzzEotkjNC4B4sAwwPGAeXaVxSS2dFEgW+qpGRQjbtwPsvkGR9nyOE4uh3VAKNfIlMEOCqFyfF8vEhAgYx4BkkmqM8PqvfipoloX+rWe10dvEkZbyMVAOldFJmObbIzxvZa1NZb-wNVw1hOQDk1+JKbNLaMgxDMN7JIO0zcAnXP12IlxbCTEtZJGMEHXF6SAcHh4UObE3uAz7tmjSDoOlPzc2rOxSr+AMKXQKKsMjTMYA5h7EDZvwlVWEhCOIzObG02N9ObJYoZ6p644PKWPZIKkiOVQs4GLKTzADeAgYnuwyhscwBn62f03ngB9MrUDgcAvgYEgAG9zFvA2-EiW3NmwNYlwQSI0dvKi+fPi5rlue+T8LEYBnsPwIAQEAYpP58hFA5SItIyScgFNgC6ghsCYGwA3JIH9dYNDAZMaYiQUFYmGKMa0R9P63jKn0c+GwDSvCtsQ7BRDgxxjoOfHyZUcEjCrq4ZAZVvbJGAOkah8prpJAYXqZheDkDmSfCkbhGQH4Y0iPYOIyh6K9ggJEQRTDmA8FcHAXkdhr6ICoPRBgABRVCjQRjhFsMUFMej6LEiUQlF68B0TYEUXELhPDpG3jpgXWqJBIiMMxEMFhEA2FeIWm4qRhCQil2FPgvxQjAkiJ8tAbUklJG8NkUo5QdhLgtnPnIlA2S7DIAAVQZI1NIifwAL7SI4QnBw-Bex+GPhjXxAABLwwA2jPjsPNds7wqCuiSBKFRviGpMwuDKdJrSABesAyjIFmTAMoIzIg3EuOMipt5qmf2IV7OpJpwr4OaRjXsAUci4BflcAAHFcdJYBpnYDiCMeEKymqiHfh43xFNWh2HsEkbAup0QrMuO8hqEgPmRLIfCPY58mYNUkLcqp0jL4XIIS00JW1z5ug9AkL0D1Ni8MHufFFyQWgwF4YlTu+J6zhVsOfYQcArnCCuZcBQwhFC4EkFc+FlwZRkAamChqCgJCCBlA1GUwIWxVPMJU1UAY4q8GQO2HIZRzCoGoDxPmJB0g2G+FoZOhAICbRIAfIEggATHPREahA0p1YACVeweFiHYb4AApMEAB5CkZT-70SgKgOgeqgibiPliQ1m1DiklKicJpvjKj2EcPURoKyyV8k6N0HVVBWyVJIJUv4qpKlqo1bxJyEBgBgG+BQE6BqCDGtNYIc1aKSBWs1La7mDr3A2FFJWqYdBDiHzDbW9iTkC5lUlLGyI8bqh1DQSs+wqEUCfHLaQSCiBRQQAYO2VA2Arn3zjcTUk2B43PTACsnyjzERAtzbm-NMrp4PAVQlN2zZVUr0eAKCshiKS1A3hWJwJrx5z2LFvOwO896kvxbgJ0z7qXtGqKqN9drDEClpAATQAwAAwtFaG0yAAAkh816b23rvSAEGfSbDKd4OwlT7FcTsDxZAGGEOIBILUD1ABpL9G8v1OE5B6is36AORGw9aBY+BqbQapeiJ0L1RG7xJJcZAbkHCZGXqxsEtRaR2p-ZYD1nHP3Cd4KgDeWkGPKJY-1djXGKQbz0wZwxRmTMqazZZ8EWmdMbzBIYvTFInBggAyKwQbmABCtJLAcY3khgDyAAB6AAdZA3wAD8ABCAA2sgeL8WAC6fx0vxdQpcBq2BCsKDsDlgAVHh5Abm9NOEMVFxzB84vpdpNgAAWtoaZcDhDJA3gAPzGMgJgOXD5XP2A1YEUhKk1bc2ZniQoqDpgA5W4m6YAQMAAHwkAw8gUzMH0SukIEgZL80gYMAI-UvUVI7UVmsJ0mw1Q1tAz+JU5jRaTQloWzpWo+UqDfHRAAR0AXEC1n9OJxDyu5ADx1rChXCoDuwIOlGHGs9x+zHHP23s8b81t0OCoADJCePA9Q1pryR8nZn+wCZLBPpR+CoOAMABbPuasiv9lEmAkco7iIcKtYYD6HzzU2yHXwhyZQPhANBOJyC9sp-9k1DAD6RCefRVsdOBcK-cpTsx3wATnzU7eMX9OAMS7sFsAAPpbiCbdzMW7++5HnoOIA4+2ALb4qWXMAhJM9F86tDEIGeggb4k67c8Q7tZLu2RJQQGSJEN3LabX09Z4MOgJp-DFq1WuGgiQrLJXRM71H8cqB9EOJqMA4PjddvFwQd4AGK-JHgCSA2ZSQGh-25SqP+JIjJFyAid4bv-U-GBy7rhvzxxbGVyrskhjaitmJ+PKO0-fHHcQMogESfpRFCQEXvnTcECV9VLeYfe+4-hBJFMJXM+58L5J83+vK-IjsKewn5tePk9Lord2J8nJ5766Hw91HyUXH0vy2FS2V18X400zfy3xCGZ2P3dxH2RzHyjTHUkmLAgFDw9TeBiDfwgIPkb0wCgDtCoE3w-2lEzW+AHSSGD3PgdV5y+D7legNFLj8ixGo2zUOHkBlEAKMjr2v1XxajcHeFgIoP8BiBELP0OAcDLyWDxA-GANcSoL+CdAIEgm+H1xNR22oLzT+D4O+Af0EOfw0R+zEOtWlEjneHhzChdSoIHVCj-gAUxDzUOAwwI3R1s0x0-UqQYFID-xJAYFq2hDgFQmwFpGLAYGCxIAAAkOwYAPUbo6BSAwQGNNQYJwRw4wRqMGAIQRgeIMNE9xCmcEhU9XB09+R1UvstUd8sClCIBy9D8q9bdqx-BnpXoD56jkg0CThkhMDQ9UjeBsAURflIJsBsj7AE9EDT9mCSBF9ZiCDfFNFwh4FcCs05iScFjIC4knxzD8d7D44g9MBz4IR18WjtIbFZi1J+oxEOD7B49c1uDRU3cTdzsVtCDD8ykC4tR3g-8Y5gAMDflQ83i39ks6dn8jckDPcwsIsKcqc3j9D38LDtVsQAcaCjiEBz4qQnwTF7ctgypCAchJIuCSB5BzVECTcJR-Vwp+pOjY5gBvgpArkXia9B1IQ6SaAXpvh1kWTWjV0Sh4RMQD55pRRpAK9vh1YqQkYrlaQg84BA04AFCvhhgGhEQykeQIBEhkgeBiw4gBiYj2sQUJA911Zag0IIBDETQ9QQ9VDrsypvgqTsgkh9D9CKTWS6Z5SANJS7UBRvgkMUNUMiilQ6AviBJfjEAwhJJ11Q9EQ913DD4iC1jaMDtpMikf87BCjECPSQzRQwy-jIyvisDVdDUWwa17Agz5TQyfj8yATCzQ9+T+9SyAZ8wHBiwijkSrCbDEdIkO0nVRRkh0QeB0QeIkdgyFc8j6J9dDgJVLhNxIl4zNNtNdN9MsdDFfCCMih7BKlkgCNHSaTtyCMRS7AxTD8JTuYzSF1LTdQx19dkg7SXUES3t-C68gjSAoRQjwjIiCNFzPNvNfN-NZVYj4jEjSYUi0j0QUisiciBRQiMNP5b1C008M8qj2dpRhDqZpCS85CBdmiTdaiLdYdR0uyXV6jDgfzlyHNadwTISTd0tNzDY9ykh+d1sry9RcAcsAN8KoN3B2giz49eSodEpvjMNvyPMKLVzfDnzAjgj3ywiIiIhoi4jLQQLkjwRwKMiwQoL7AGAYLUIPsT8PdUt6KSBrcSBUtGL+pTLUs3jWKyoNwkT8dOz0AEc7DUTqDDi6DfFagIxW56NUKnJOY0IYAoBBzkRTikBu5oY0L2jepNQ7iF4SSySQ0hLEADDpdGhZctdjLFjiznlXhWxTKsqSyzLID6LyCOz7RiLvgDjaDjivK5IM4qASwyIdofstV2p4rB0kALcwqTsOYe5SlEqG1kr6YEA0qZcBYtdrzMQcq1cXkTKbdUt6tGskNKclEe0TpZMypES4CnKXLqq3L0TPLJ1DtMQeBcAmqvhRRDRgo9QHjqlSThqOJRqBLkZ1svTzzzSgxpqbTtSGM9RvhmCQsFoTyK0bKrS7LXSIdWSE4PAkYANZDktkhaQBQBQPUUwN40bLAUavMKxahDEAsn8Go78sLkgPVaQqRagYiN5PCN5bsBQSA6dZCyaKaqaabONuN6aSA-BabeN+NBNag3TWjLw+yhT5DoYmDRj3hvhYb0AkZ+1IkL9J9z5oD59Pkejx1Q0w8qhE1Z1iVWg01eJkAwi1hTbWBMAcAK97zcAuDIkBdGduZ6bUi8yIyAT3LXgY5bAN50qwEFNxwRhpl00qBTM9Q91pq-Apq9RDhByQrzMN5NQoA-B-S0NnraUIAN4oBUVLAP0v0f0-0OI9QN4LK-ALKb0qlXrZoggANFSJb39O1nVF4AdVDeB1DpatDtsfhhcoaDKfhUsRau0F5QoFriQJrK7CBSVBpPpvbFdZrfUXlmjq9WixxBcx64A7yMSQMEkq4tVTKtB17g9h6MMYjahahOQSACN+6G7NzNp3tEDccKqSQqqaqMS-AMN893ZZpM7LqJD9FqZzjzN6I-ACNl73tHjHrzVnrvi3dC0e7Pdlq4T1q97iYUlXBp73IdrxC9rbCDrdUjq6qTrUzXJFc3Bv6eoFwNBBZB4IIDQSBaIlkhqIGIIXqhaodRROI2YAN3ySQuFQjvgRVDguH3guEYhvgKQQBgBvoQ896grY7UGYgARTKZQgtpygsAR7wRUK70yAMsHEcDi3i-AYTItVr4T1tadyB3rz5kBs0RqoGszMHKrnLsH0y3CPCOavCVyfDLtD4kHJ6rw0GHBAKAj3hXyQi5KvzD42GbA2ZAKlKEikiwLeB0jILwgJiIgJyCiEK2cS10y-9iwtDLVxCMMAAeVLbsHiNBUtctLbcwIpr-RUchKIBwbAMkELSIap2p0ddpi-YKNcSUX5KILdHdNpmp7pkIcOKIPocKNYDwJAVsTiBNDdSILWXAQI4hYUa+TOkkd8fRaAYoR5FuxIBgYmrp35MOfISIZ6CgYJOZmwBZqIHyGIMqVCQ4HyDAMyNYYZopuEFbOmAoTiVsd4dEVAKILQZQfYT56ATUuwLbSoC4rCcid+5sIp5TbwRIdpuIOgNFz+AXUNEqBAUgvwaI+Ac8QBwEKQGAVCUgN4j2ygGgPwAAYjBSBAajIBXQnDqvpYt2PPwCyFub8DBQpeQDeSxDYnsEtqgEOGwFTR0XKOxUOEiFSNeB7GHgrD3TtXQCufQGTntkeSSH9VIBgeKiitxY-OWZJD8CZMEApdIDxYJdJKuQpaWHbHQANc-gXAHV1DjExJIHpYZC0QUBlFddvE5ZfvdCrjDAHQ0TaHlMZye1deRYxaxeRbQPaYFy6aivaZgG2FwCiGvoyC2xREkOphsTavheZERfxHixACBBBGRZgEzezcaYxNbBPQiAvj2GUS2zrfaeQBKhiHRdwSrmqdvG+CQv5Hbp22OUXqh0cUjI+pfCdu+MghrNcG+DjBbt4m6MGCEdcHbwam7oxjwvDWjAPjKfEeqD6N+UMUSHMQgBCzoArFwFDzzamMiRN2Mg1ZvYAzPdvcvYtJveqHvcfdD1qrvjd1vB8svRDPRGje1FOPsAlOZ3lb3XXaDqbzrwNnzRIAeAPGmozg4OhR0U2kNn+iSX8AVAPEg8wDoEiVP1ndrP6MiFA4TwXoxjzbWoXSnVsGE0hJaQ-e0WAA44gC4-3nHn+MBKLOY8222OQanrKn0Qt02RaQxnBNQ3AnOu-vzHMlImTmZCSQjCwjXEzhz2LCgxIDU5AGoelCVfMaBhEmJHoEipiHj0iRaXPgreTCGjAAuuav-p4nPhIDGDE4LMY6k7voxi33C8Nd1kc6ncPfdJIgPhro-EZAgA0OfxTO7yO3QtEP7WKgnymBVo9RgMjVHRjS1pE5nWTX1raA6CNszVtuU4xntpIHdS9R9Tyv9UDQ9b1D8Ho4k-rNDpDXor69doG+LOVDfxFzzXC+na+C0GrqVLrsbtvI3Y0Inc7r0Nm6hL7t7GSFCh90Be04DwxKDXHtA+HoVZegnxsUdm442BsFeH4u29Q83Zg6VG1DO7XreMu6sfA+vTW-rxlqD1Y9vHY-nWE9ucVhV144xn45vaE5E4RqD3HyvHnii-Lv11VCKcSy3ogB7bTZqeQC-y2w+0LRQpLR0ZIsdQHoLpctwtZMoFE-tRp+dSR3rv7IF2jtZ9FDdyZ+6LK8lFJR+RoAGN+SPUcfCjDsl7sHbPxyZ9Zwp61Thxl8wsw9F1ZIwG4FWy6I1vG+ItBOotUJ4u8FDyIATx4ZgE0N4E2x214F1ygAZP0OSBaife+Bt+0Igh9XX1cBTHtG+HjINl8MKLl+Ty18NDp3D+4vb1b37yjiC-3e5vgNKLvTfU9u7A6J+BXDkVt-MdFKkHFJVKrnQD-btXpIADVihQczyF3pTZSY5A1s-ewXS3MjzQbVsm-XBc+yBEQ4BvgJz4QXf2jLBenrB7TkgJ-O-nf3viYXUsthtXh5XsALeZ-PustbR5WN4V-aFZ-vgRsxgatkPb030gaQaC-D9VsIfc+pTbAZS5SQzmDR3EQyBsxzSByd+1-sBkBF-fExht-YO5+G8b-vKz+4hp3eufe3qugQBj87AtILAualvTyp4oHCOhK+lYzZRcoKuUTLhhaBQApMWXBeM6CfRp1kAfQKQGpjHaZ5qiZwXAdTnciHAH82zD8ELhFzHITcevADAOlpB9JiCgdXiK-RCzfEiQBGFzKA1lSfxT8PtWXJITjw4sn8c1fKgCD17pZtaCzKri2A4oq5U0dXPmD0FRI0UEuHPMWsl0lppdpa8ZDAbNkIx153seXCfskBkGldo0koG9Cw3m5V0kuS3S+v2RUJqEzBmhXProQPan5duRg-bitl3pBB1SvjE9pAR3hgBeeTaObvlzR7Fhv2UQ0Dq4CRolQreMtXPgvHCCpDZeaQOWgDkyC+IFGNuI+ifTPoX0eeC8PNrfUiS+5tOHqMgKkHMykorwJBAHCd2DwB8POASaGKigIyFDNExYd7CGgHR5s-A3ghoce1cHSp76+OPepeD3hlEKiVA-yjfC6gIBUiHYeiKuxcz8RBotLBosIirjNF-4EbSJHARMFLBgqdAhwG4S9CnDhobCAjMgzOG0Ydhx4NhHjw+ERNB2EAWjOukwivBXAmZKpNQzME-BQOrHU-KB295GpYhB8eQFIHKr44SiLOZoUdxfCgdEChaRCuUWQpZ4zgrvTqMeCeEeQLhruJtBVHd6skvhw0eUALHuG0Djhq+ZkbYAyCIk4uJuOYYt1rqpcNCFgnKLRm5HBJ8Mh8SUQ4NwA-Db4-w4EYCLx6gjfk4IyEQrSa569Y03Ay-AHSDoCChB-UEQf9jEGRIZutHIAvUPCGYjk8A6SUc0DeG2A5RycdUYcL8CjsvBNolQqoTWGQBc0hIz+C0P9zcxA8-Qt+pQG87f1XeMYSkUSAOaJAtgkQDcsCMqStgrC4YGWC5mRBWJtomIFzEayYQ9QB44cSPAXn1DOiIAyWKEYWjfS1A7UqGDeBAlpCCYN4UIQmiQHSwNQ7AMoacr2JyxuYwQnIbTI1gbGfpOxEgNzE4HRoUg0atIJwDTQrBQhDEHqSmu2MnF2ApAqoSgUrzOCswHU9MbtEeUOAlR9EjIOIGCDXBGkvSzOBnq0V9SJdQ07gfEH4GHGjiaad2AmoGOhqtEroN0dAKVFWwV5c+-41mH7xJAOpHxq7CvFuBGDN83B5AOgHIiFEKQxErMAPoeQWi0Yzx-qEApmihGwNcJF4iAFeLgA3jF89w6mORMkCVpkJzfEqgfGIlKIyJRpVjiGJCBhjTukQbypiAxRnUewrgb+iVFhEHg4YSQRGNxw-DUwoxWwNcMcF05RIy4DEPEH2GrAtkoMr7LZL+KhzMSocB8Nrt6kcTdpTSX1f6jeVUJlRpqdEnPqH2lBxc9JDRSJLuJyAuojOg+JIfFz5JQ8eRqE+buhMAlPt4yR5WjARncmTDtup+KideNonzNqgXfRiQFWpiHc-cnEl8OGO5zgJ38R48qK5NmiCThJrdRiD-XhiSTzhKcfTrd05iWweqWk5TnATik8iMeWyDYaSOoHSgWYgU2kFeF+RHD-sJwoaLYGTjAjueOU+8VDgHSOTr0nRH6N4hgg6TkYdAGItu3nYhErejkroeulSQtBNCcAXPuljXruT+IeWCultClB+SHhUAakS8MlGAjJRCo3YUqKCQqi0xXoHqcEi4AhhSourboTYAwxaiMYStQrlAWK5q07avaPwIZI65+oA07lRyX4DaEdCeIQ-F6JaWgnfANpgwLaZb12n7S16jA0NO5OaBbtqYycKANMgchr0vAFM3NCdLLpbI3ciQL4KkDWCiczpfMNIKzMQIMjXiIAIGL8lZFYhPoHMgKPzOCSM06c6WPLJ5JNwUMD46sLnFgCcBBAsekSHmayXcmCzRZmYOkXF2SFYyBZwpJaduz-bfB3J-3W8BoGF57gn2R0tKaiFcnfB0sbfKQF6Nrr8SXejsg2XHmolsS-gOWSNNuzy4+1mg70ynBUy24Wi32rJTqdGinzi0PwtA9mUiBZnnC9st06UfdOQC-CTgb0raUqi+m4AzsZ-BgP-EAT-TcWBXVFJEFVp7oWuFDS0S0lTkN5C5FuJGs3LBLaouZSwhysnlTmtTKiZItCo8xwKWAJo9gZWYQCPLXSBog084erzYGa9aW8ct2YnMeGcj05VYu6VWNoy4AGo7CIIEeWSwGwvG95W7PdgcRPZbAEpcOG9hD6ezReeqUCckANiCFMOdjZElHwlmXSZ5m8uedvLnm7z95c0BaBXMmlVyiuJXOXCdEhmepvUCgrru5VfnTdMme4lCOhDiD0RJ5WiBaN8DBGHDxpyMR5jYgPj4L4QkkMgMQvIVI1XemhMgN33DmNBjCe8kmmQBfllin8TgVpnZPIBUKGImuPhXKO-mULdAg-EBaKAzpbBGcCBO9LuKHmzRaEoYcvrzF1ScjJRw0oJKNLml5dU5hwcRXYEfZuiDh5Ct0cMF6mcCc0rAhaSa3PFKJpp2UuaYhKM4QhMAYtG+eEFz5kKIRyQERYnAhFI1sQ4QOhQwp9rMLNQWiRIBvA1ZIz06BsF8dqFYXQYsZG8V+SvnfnWKJY9YA2SeyNa2LXEHoD2kHUkgSwN4rgIHLxTsAHZslnsyAEkE0Lq8O6qWZxZehdSYcK63TBbkLkVpRUN4GCGYH4A2l9tg6fSxIJ8mdDN4oAlC3inQC3jKgBlBoPCa4nGWdApl3gGZcRDGUOIVlOQNZRvAMgQj5leSuPMsugCrLpceypUBCM+S+KPRXY1zqGhDm+IWFLzcOOfC4V7pM6fgfRY+0eL3L7BG06YDHG0RRL2h5mbabkPsod13KjyyIICoiWVLolcdOJbPCbJnxZo7C8IM9WSVoqoMiUbFWWL0KfJbwA6GFd7KkRjNwg58WkGCG8y1AwQjXZTvYMRmdDqg8E1dmwytRd8cZTsg2FuHNLSyoVJKtBFigYxWpva5pE0uHD5ULob0RcFpAHMiR0MN4Ny8hX4BUEcrfk4qhdJEAVUtIyVsaXRS0WyCvBDliyuPGSpDpUBjVuaKpNMQ9yZKlQPUySHHw8kdKohBSmOLxByUDoSlhAE1bkrNXCNClXql+c+G9oTwXmYaspRUqqVOqHaawLJU6p-HJC5Z9sxWcAGwWqzLZFta2QnFDxurCAJpbmCFjjAv90sUMhBbDILV7SA5Dy4Vb4m0EbtdBDXWVdzIVCMjWiIyiKALEGVTAZgCUuLlbLJR5qu1GKw2ArMdkHTvROUmpS6lHW+zJA-s08X2q1K8q61jQAZSuoXihLI52k28OyPXn9Tdsrw-+ZnJ3nZzFRroZUdKNVFgL8uYBFWpTTrkQzyOWARYcSM2FoL8p10cCfaCglsrvgsEhzocmaIMimZZoMVlXAAzRFSABASDeMDGCsdwNebW8SnxaTXDPJyQwUZ4OFFS1ANh+PLjqK1pUhRQCAT8tUBTSQYSSXgV4KEDAB+BaQFAJANkVo3FBKcjvOwEz2+AziUwc48mouNqDLjVx64jsQCEbnKdT8cw20b3LbS19b+9feUqvK+BSbEADfELCAHlg2kLZbJOtHXVFrIjNoUXGEZBE8nRcWiM7S5l+3llcT+hKGunJGPAA+d-JP6wKZVH4k-ANyx7PNMkAwxJ8w8jm7+mBNc0Hh+JfgMkN4BiI8hP6Tm5CA7FKB1TYGKGxfChqKYkBRADaDYjpujCLEpAlwYQClO07w93Q4XKKR2DDZfAtsB8BsU2JbFtiOxfeVslHFMrQSykjiTEEUwPiNoOJRW4AOFxa0vinE2AcLvcPVich2ibgF1OzwnDHBPFvyWoBxq42Xhpthsarc2LJCtjbMHYg6WVs6QQATpQYj9W1P8oLqJANkhiYvL-EkE7FOGj8EXzVKuANSWpHUutQVYGlsARpOufRK74fz8c6WewZKTr7389UV2sHDlm5X0LPebCxEAP1eDfAwUqhYluFSwKXB5WggFjiUJEaRBX25PeRS7LO0DrgEAskRYgBXpY621-UNdgLKgDQbSA1O1LZ3wa3wgSQtOwLgfBlCsoJAzJXhaEEc5jAD4MOlGcABH6IAYB3wewQzoe3zQgdErbYIF1lAc7mSPCnvoBMrQxASdmTAMDVIQDIAtdaA-qP6UMTUrmsvibAbaHtCOgiB2KT0CimKSzSFobCILaVFIGvwbgaOtzFCFpAUgKwKIAmj+jBAGkbxKuYQBIFEBXI4AMoOwKIAUBwBGUvACQA1DgCiB8AwqOAAntQBkBhAMoXgJcCuS4BBA0gZlqKhlAp6pAweiQINEEAyBK9wgXgFcl7ESA89lwNTG+nL6GI7UYICsF6mEwu734bmTkG3qhAVgaVneikJ2PSwDpWIpCRUaUuVF7oYVFubwCSQn12B6ETy4mluHrVMceAyiMBsvtX0XwqxpS90eQrn2b7jo2aQcepisxuM6aPpYTKboPmSYu8FY2TC6A-YQwvQwVbAC5iyGmIPQv0qgGSGeiEQOMK+1wFEDl1ny7sD2J1M9grVz07QsM-vXakH3D6vUYIREkF0iCE5JRj7BgJVkJzTInseB-MIThPkooAApECC13N7WMnhMEBvBHGz5798RMTI-qEbP73Yr+5AO-tcmf6BAP+2g-1ChAL64ALi5MAfDxVXh6ReG1jnARZ5GDQ8KKfDt9BsTNxlQuAUgBhonjGsyGxUGIO2ASp5cZhaW0VIsO0niC30HqdsBQFQgAYpD0YY5JQOKCIAneTaQ1g8CSQkQluw0HIG5oLgFgmethlQ+thlRuYtdIGMDAGK6X7qSRlRPDaRSwqscTcFeVafTTPzJAQJJWj3I3g-aIhPWxhbDMoD2LJ5eyA9d-kOXMwB8H9BGRvOODiBWDcjGHcOI0c+K5kfitg2UIIH3bZHkCjBUApPmMKz558mWpoy3g4XbE-umG8zcqXcAAYYihuhrO3pUGVdBiCdaXNgE5ATg+AdAHVe-wAGh4SMe8R5FqBIBlgfoqAEsHGSOOQATj-Ic42AEuNss-KNQBVGcdFCPGSwpaS0Gwcqw7kZRVYpwC9Cir4bK8EU+5fIfbT1DDC-+IDSFmcr0wAciNZIFwpDTwmJwBcAHD9gdz-Yz8+hRomACrLLsxupsyIEqzfxE0E8AM7UYLyOQkB7BCxhcW3rBDytVj4FNZZse2O8BdjfgXgO4FZM+SagSaXJL4gh7E8y0LOZsn0w3SDNd0NqpruJr3UYxT8Yx-pOHG95IBfe-vDLpwebCgDpjAo+oRdJzy4A88p1TCrIQJPabJN9Q0Hl5KhwcDrNL4GIrSfZ76a9e2m7NRTtoprqBgYAQBBxVlzMrkZrKw5N8EZNLGMDAIEIXrxJnuLZeSg2k3WV9NV9Ze23ZYcngUOi03T5Rrns+OPazCbRebJwegXMPKczNZmo9sGAbyfEH8reXdsKA7yWwrGjOgfP9xtP9GgZU+bYrXNGO1nmj4QDU8EggnS1n8zZt-IvmDNx4jOHqa6P33xqcgWTYaYMHyPuUdnUCSZxjjgRIJ4EAQixRMjubIIyaSAZRhus-WOoMEXcbROOKwRzD9RB4S+rLRazMOKmMYGGvWfaeRi9oLpXRFQumePOnmfBble4ZpkMSLm6K9gGADlg2p9paRFIcOKCZDRAaXMiszCjhQPYtIc0gPOERiTtMZnpQgFheOebqpIixh88XfU+fAZlnMLUc9FMUShOKGL4kGFQ3YBsQ1TNJxhgs49SkAlnyuEZ5k2WaJFuZ+L7ezgZ-EnQHodEx6CcGenQAXpXF2CVQdOjWMjANjWxvkDyaeWgZSMrx04w8aeO0i7jZx6gJokZDOIboMQUsLFGlyJAjLJYEy8sB0QxA4QVl7YMAFeBGXQWWQf4jogNApJL00YEsD5CfAlheWWAKVv5X0tXHpECrX1DxDqCe1O0SAcYuyelwrISoYReeAwDFSiAlGDaNHTFYAAaEvHWkKbQTYAPU29LtLJaEn+pUAilh1IyCDz-J1LOxlZMsR0TEFSCFScQV+twNPtM6zREIa1l6zaBUAY2dnbNmQBrU9SMO74JnW-lY6XS4YVKX0MyneUZYJDXzguEGGzyzh2bZ7p-DgKZ1Fe8ivHvBaCUgSm0IQuo54AgCt4E4WpkkKHmSA5yheVCREhxLWsh5IglVgqAeC10ARvA0YN65JGIRKwQIh1-CwfkJP1H7r6pk3nxQTzpZBAl+usaxklFAmhlwEpop71utxB6ztXJG8bz3aqFUgpQl66+zfQPbXgupHSBdbcV49c+cWFFOZa-B7Bvg2AS3Hhj+DTWqcTNxmg2qo1J88eO4uI1sJLQGykAaIDEDPPUUUrZe11j3PcLev7CNRctqsS8o8XsS8R9sjKSHgwy8TbIP4MAMdDDALh4x-URMQRRTGHwg+rYEsT5XLEf1ZRjwKCKKGQhsFQ4acFWGtCQLeBTwiQFYNeZYIoREAcGfqNcL0WzTIQH4HqLte+CW3owJOXJgxP+jGR04VYdm051KSESbVOO9qfFQZvxnCFTDTEwBjmuvzO5S1h3k7wVwChzISQSwLgoMKpZWs3WXrNBeSzKADp2AHrNgGEDYAxsggfYPHsqS93+7wgPLMlhqwzWsCKVMgjrdWs2bMpFnfqO9BMgt0OpHt36EkBbo731RJwF5uI0kY-hDQ7wBoKSFiA-AyO2YnaLUT9sJxVCdUw1g1MROs430oFxc2JdvAyQIwJm2XAeBcynhbpgsS2-hxiCHAxwE+bqBABAem3R05tyDFA--v153NSrEiJA-s45hP4MkW+NhAoxbAMHakxEH-CdtPZX1jkdQ-YAHCR3Wq9RgqK-O+Bjg+A9eUAATd87fRiQcAdBpQ-FjcxB4UkWI5sMggMZ0wSCglRotGAEmtwNOGWayQdGa2hZxiiEfYvuEUjb4M8pm+FxNyTSFlJEtR0twPF27u0Buo3QI093e7fdXmAPYup0cxyYAhSphAfHROImZaGC8EdgunleKu+-3E3CdkwItynHmIOnHjxFvUZi7Vd0J8CPbMe4AnAsxYgLfZE9Tpb6IF1GoqUfxPXc4XOAoo7nnigVFVAU1SROSBPwbA5eRxzHDKhbhEAgT8QVsmkQPBeJ8VU8LcQhjRg8FNl3sKSF+TvhHsEVeyKoTdbi2yV7leW1k7AZ48ZH9OOQ+IQHSpzmgPhwud1K2ka255wHSUcNwicIWJnncpm-xCMeBTDxc0v0shkN3eYLHXun3Zphse0g-Zya35b-cWDNP9F2D1qlHQfD8OXwZT-mGA9vi0PPn9s8B3fZ1AMPpQG9z6EI6jCbCUBoYMZ0o8NUTOHqUzmG7I94dxd+ro7KsX44S45SLpxjnKac4FDnPDElzqxzc-913O7H0c1oj44ukcij1f8s4QAu+EXrHpV656Tetek+O87yQtCBhBIXxwPHWCw+bgp8exO4Rwr+EHafuGwu6AyiyUHzDWdnCpHVcLRQtB0Wsy9For0UI+z8D8vMFScZRxqOosRc5nnEhdJYz3SERgnThQBA86VPJDUlRdnZ7U4Fl7OYn9jztYhAIryyyxiT4Eb0Yxk+v7KyT0jRABlvpOj18t9JS0hNyvObtTBEedAPHl2AvHuCjJ-k4Vs4vaXeOGADAIAx-aJ+d2kvpgTL6clgAlff072Br7DxAdDfbkhiP9ng6Ql6AOa-DvQ64Akd3JVHejvJuY6EtMxoWWYvFlC5wQc+KkJyDsxk5DEfgddIRALf1OMYsrxRfK8KfKvhoWtw2PxM1fnDvlqKfRZkZACZ0jFGozdccC2B05hcIt4-VcuHecrTXp+U2BbhldLcGX9A49RnM+HnrQbHLkRARiD6ugeQGfKKmAvuW3guzkCsGU11vAtd4DnXWGTQVCDaJUUZcw2BncmbPhUGDgeFainiEe2809y185WdZJUMmJIbwW1hlYO4YAPLR-45jeBMiMQJoDPwAedII5PzXOJCAK-Q3LUZkyftQZEahgDJZpqXjed-m71CdHB4y6i9xU9tf+BigBHwkY08WCJEbYzF+2I7BcGbXxZtxCF77Y6qA3IwJsEN8iBUrxwkIHVS28pFJgkAWHM4OO0JOaq4PFgyh4Gxcf4iGgbAtnmwKaAPDqwqGRnYqYe+GciPEThEeF1m6ReqvzhyFuRxi6rEbPsXXrqHM68HjF2snEr+M4IQFu5P5Q6YO1y4RS9fB0sHoJ8FuFJAhVXAmghOV8DG0vQJtpKBIE7NVu3u+pH7+W-s7s+3w1bhwjd0NOzd5Yg3qWMr5iFMoGvPHOrudZZcqFmUcwVX4eqlgm8iup5Gbyr5KAwbIkHCBXhTwkKK-OS33h6j90y-eFnrAFbLv4X+9YRcugknR8BQ+t8QNZiX+Naxhx62-5fCvDzoS1ky1T2RQT74VwCPA2V+cdIhwJVqXZA89QkugJxjwDiyOE7vINO6xW6CzYHwYLz1HJUtc97FN2gBGRKNGHs1MMsZUQPHwkPTG+bDclSLti+OlAOH7mbTAjGMDGBUBKkCbeAFQC7Y8A+gW2Q8r2lZ-sIhIXbZAO0FJ6IT9POStwED7HjUURbkFgPpElqaXAYW7t1SH1AhufRk2SvhX1mzp8Xwfb+bIpjEApjyQc2ficOK2D9OAISfETEALTaUQW5i751hCyBLeytgFM6AcZUzLbY4h6rWIRoAkFEcXZIg+HqVE13d8t1gq8QcmW22CstglgIwbQEqBRhRA17LT6MAbDaZFMafRPq8FEG6ZtN-jkPln2z4NBC-622vnP+AciD5+ts3lC2NGHHAvgnotKDhlrASA-0tg1xeKsiAbtaf97mIJmasGHRM4JGTsf6BfbEgihkg3bPO3AWKalMPfoSknjUzqZKh4QjTKgM01abtMU2IzU5lKfXQDMIA26XdCc0IAK2JmUzGZjvsamLMzWwTNZtqA2YrN3gTA3ZmAH2bFAIgxzPf+f5PkXMNWUuAyAWiO5jiRHmNCBeYcQCcF+hPmb5myk-mGwABYgWEFiCAwWCFlRZoWLOxrAUUZFkhYk2RNmhZP4ZQGehS4UNGYAyAf1UZYJAZllZY7wR5E1Ad4bUAZYGoVAEuAyAEFFIBmAGOAm1UUelhBAZQdnWEBOA+gOWwHAZgOKxU9KcToCIeBli5YG9YIGYBQAHSAZY4ABlBEBLgf83ghsAJjTHQGWHJBlBcAGUFEBhA2TjpQfWBkDD0DAkwMnpHAJ5Ee4GWP1jIAA2YQJsAIrbUDMCqAmgOEDJgK8AZYrkdPVQAFAVAE0C6A4AzpYm4AQDCC7KeVjBAUQLkGegTzZeUU55WMRh2Z0APdEiAAARWPcgYTRBoA90WVjFYuAGXTyDXAXVhGBgg23C9Z9mUkEpVK6I8CDYSASrFDRbDR5HJlSWHQP+RbDRoJxY9HfFhiBCWUgGJY-FflgkBrWWznTAaWbgBLpEATm20DXgLDk9Y6qFeDmCr+XljMD4UQVjeRRAEVmxRigyVmlZHkUVndAYguwAwcVWNVkADEQbVliByg-VnlMjWHqD0cTaTZneA-ASQCtZKWI1n6CinMlkdZ3fKlnWwpg8IJWDmAB7QQBGAtMzlxNgf5CqcoATaD8B1kcYOGDSWHPXGDDWHxXT5Q0KNmDI-ARMDQhYNdoFo1nEMVnwR3A1YHWDuPEgHZRBARqGSAjAk2CFYjgWYK4Dl5LDltYBg84C5CGoB1i+DB-f5HiVSWIQFuAckXrQeDMQ-6H25Q0e-0JZkgFlGK0R0Egk+BZQ+ULFClg71lBC3A6oHZDanTkNpCLgSVDFDDWd4BmgB0DADMCaQukIUBRARkKahLgZkJDxWQ7gB1Cfgwli5DeQ0gH5CyNQUPhA-AYUO6NRABUOND7Qs0L5YSAK5Ay0moQQBtD3QIVnpCHQuYKiCXQu1nJY7DWkNTDGgrNj6C7WMYLTDGg91iqDlglkK1DbA-+Ee4sODENGYeuL1hmDHQ7ACUCX3SkLaCKZFUKuQTYRoJ8V2wTsH5wuws4EjY3AaNlX1nLSy20D12dMCGD3oUlimxHWHkPGDOg71miJ5w7ADhCEQ6kOEBhAOcKBCog2sNWDzSRYPZYNQ4sNcDTA7JzVkwwmID8hvAJsMdglQqkIUAG0LQ3NI8Af6k9Vn4KJCfAV0TUGxBvWOGiqAEADsICgOwJEEiYaAEnRaCtw5eR3CuA6GFFANwNlhrCEw5gDWCHgwCM7BlADRFw9Q0XcGJg1lWUKkDEmSUDqobjCAFdZcHZoOadfcDEGXMcMR8BPsFYLYH4AtQUZSNhKoFH2RBKsZAE-gJwbom04B0KmFeMunWNg-Dx4Ell9DzgG1l1Dfg64EdZ9Q0gBxCY2P2BGBNDP2BaBEQz4MaDuIxvxIAdsdoGxCBw3EMUiTrQyNwBv9MNiQQAUCcHEZYgPwAlQZwp6FIAoYGAH5YMwh4M0jtOF+WlDXgmyPUjFQj4CpDbIr4KXCVw-BHS0KDQEKBhgQ1FE1CTw-cIQjNQ48JsDTwlpHNCqQy0IuAxAE2EQjlwtkLkj9IhSI9ojIgARJD3QMkOqAVQb4NIJv9XcERD0QriNht3I1CL7CKomICqinI8MNqjg2QsQHQZQxqAbQwo8jjMCLwvVhIiRIkYN6iZw3MIkjXQkgFzCuQxcMwBdAxqEdZsQdoC2BNQ+cKw4go0qHhD8EdcI3DKWO2ggjpgrKIe1RAsgngiiwusOQjr4HpDCgagCHl1YCI3CM-ohgRoIJJoYBIX247zE1h+DWo-lh8jDWd6KJIvo9gge1gAPFgjYIIL8LqpfwikMLDDwusIbC4IgaNeNo-VsPbDxQ7Ey2Bqwy6LmCfA77RRibo28L8B7w6IkNZ6WGzmzCWoxEDaiyYz+CWRxfPSJ4oFI-EK+DigHoWKiASXkzKj-w-wESATaGODaiyEGAAcjVI0knGCOQzfxpi-AD0IeD6WV+W6ivIxqB7ExQjK2f9zWXqMEB+olKL8Aho1S2vDWLPyJJiHw0aNJZeQxqBcj5w-lmWjtjNaOLCNo8Li2ieAVcL2jNwiKO3CTo6gHQYLohGN3CF0CsLqieIl8B0i8BSmKWAiQzf2owuYiCB5jSI3+2aD6vD2k+h9XA9CNAnwfDmSRMwLYB98Hwfz3NJyAM4MKB2IziODY4wBiD4iMIC9ExYHIWPwnDRI-1WiJJYtSJkjxIuWLLiskXbUhj5I1fVri249AAYhdIgdBqhvAN8I9JoAY4Dri-FRBFAwqQkEAljJIi1hkifYqCPrDDDZGPJiy4o0GUBlAb6DYBMQHrlKtDcIYM8AR43wCWAyAFaMMNPQmeMXivg6WPOBkgcQAVCeo-aNIBKvI2OpC5whaNhDto1cNCjwoyYI9jooxKIDjS4-uKNBtSChxxjfYpCL3DGg+lk3j2gSBKfBt43eNcVQ0W-3Pgq2VlHFRyhalg9je49UJXj8YrDnvjoiIO1njxgnqIBDfI5UKdZEQA2OJjwwk2PJjQOQ4Fes9EDBIPCHA1AAjD7w+BNA4O48NiZjBwoSIyJC0T+HpYtGAdCXD74hqBtjVorKIdjmoqWOqjAQHyJRD4QP6MahJouWPTJ0sCMHPAHAWtSkSKHAxMzp5OExI0BzEoxKoAOKfsOZie4uNj0SKHd4BDDCY6mQcg7QjGPJitGAcl4iXo0RL5iCQ4JIFixY4WNFi2o2WMljtEsZA6j6TDAFICqYqSMuAW4umITYunHtl38imQniKYhlBtl18yAdPjd8E-RBC0QfoKIBRQ2mW2Cz8+gBiF190go4CmZ4TVCCiB9QsljJYSkqAG0BDE+TiiA0PTPyMJTfKEAah7QqQEZRww7kMahsAJmAUALYx+IFALoK5HUSwAO0JgRkgCQFpBlk5ZPaSZoUZNJJpkVsGnAwAe5lfww0Z6EzAogAiPRBbAawC9ZWwOwMzB1Y4JkiBJkc5PyhEESy37cqAKICiDn8IX1cA6krbE2Bu2FfwagefQ+El9R4SEHBIpfSYj80sA-MEiAc0HAOJ5wUmph19HVKvxr8CMKFOIhKPOv2jBqHEiC79lDciAIxW9dvRH0HqOhhsQu-ZiFYhh0Nqi7R7OMMiEgF4Cn12xCU4OHzB7oQh3PpD4SlI70vUHNCRhmQLv12t5bEF3V9pDIqCzhoIHzX59y-LPwAYzgTOiiANAT5gnBK-KIEb9hmW8E+F9fQ1k81gwDtW0gCKezQV83EmFnDwvgQYU19h2DGCKZMU4n0iAsYtplhY8SUWAo4doLjycg+oafx4NSeJPjgoWkRXxtSXjZ2yRZieLXzDSXU3P2r9TmapOYsnwC3DahmQMxTHgFwV53+hY5AmGCQLjZEElSWIUCHAhyILThfA9Yc4TFgqASJGcheYyqXLhowSuGrgfQWuEkhQUsNOCgsUqIEaj1idVLdTbUpANAxrfH7CWxxHZ-GSwlWI5gTx0xCNPbh7Ur0EdTbwIpiBiEhHVMiAvbO+Gp9xGCGK2wKwAWFLYGIRSCc8vgX4XLwPbGhgwF6cBNl3SSdZdKdT407FKTSu2BcEBYR0221pp6adMW4d8WfpkiBlVNf3TAW2CpLiRdwNkG3Sx5AuGlgb0pdNnAo018Uqg-9NwClBXAe5UMhjkgihiBYoYYGgDv1GkQztpDHJIjTMIe13IgwYiGORYyALbAq8CoYjKgyx4R3AcAqMmjNtxngUiHs5zcDjNzgoXFpCDAvfDjPjtTqAhz-B20n4CKY305AM-S3GBgyYM1yVsCycogQDINBgM+ALAy9wZBC2woQMMHq8IYEgGwSGoYQHtDr0pjNiBkWOAC2xVCTtOU5DfKgGN9G2WRH+wFMtBH6SJVehI98HEL3yiAffB5P98wAQP3TANUxTzj8ABccG84kgFPzV9r0lzC6TE-cpJOTIgVP2iynMh9ORY101wFJ43sT+BNSreYpj7SHM8kwhS8U6X18Q4UvaEIdWwc+ERT2-KpP58+00nnlZyTLLORYJwHtjYZeIdpm1SB0suMz9REMAAbYB05jmbQMTSpI7Zes5VPaytUAdPTIAWCxIcBHUxXwcz0yb-QwDes61M-hnUjdJr9U-Xa2ZSUIVqDs97QR20xB60pCUYhC0n4APTYqceDdBDoU3B2BR0aOwEyPwHyDWA6oLtKcgpM1xhsxZMiBHkzf0zAiUzeQFTJAyEsnyHAzxENpm0z4gnEDykDMozLpAcoNjH+xXAczK2xkgP4GszNs7rJnifXO+C2yk0pyDmyOfZp0BsvOGLRM9hIdz0eM-AOVJoYyoATIPBwHa2z9Aw06jNTEgkYu2Y8WM+DITsk7OYjCARYrkHnguVLHK58N0v3H1SnU7tNdS+0h21N95mAwzj9304FghISMpXLygRMg6DRyNsgX258ieSbJsACkntMTTz-RJM7ZjnBaAkJEgH8E85AYLOJzsocMSUUQEYZ5C+ACMD3SudrHSlyNI28RsxHtGoWckqRsE4EFBA0E5MANBkJAzgYgLYdSXxhA05VN7YM2Gpjx5HUh4EMRU49WBctiQPgGBhWRAWAPAKHcPIXhrFMuKFB9JfKUSZf2TAmvZ3QQDgfYn2SIB6yK6TONWx2gXPgHRT8dvNDQkEhw3LzzVc8EONX8LDiQSIeJHgPhR880hE59jD7jn4Q8kEEP5fEKYmvQl3E3E3i0fK-k944uTOLXZ+4-vL7wMoWvNvYR+c5BzcocXSNPYPfc9hdFM0+wCPznsJvKgBB3SfM45BTADAh5wuMvIwhc1UXnbzCRRAjkVC7FH3jN+cXtGSNDBC6RFFRzHXTjywAKxjl011e72VoQZKBSI0B0JS11pquBtQNodBDNH0EwGODzgVoZeEEQUcKU13jcPBWr2W4-zK0V7pLwaTS+sV7KRgyEMSS7jBBruZSTs9FYB7kH5B3OAi0AgxZISxiAMPH1tSLcJdweBPUiPEIBMwKaF9ga6c20NB9GVOGVg2oNBAJhm0ryEocQtCgihcTcA2BaTv2K-Oryr2ADlsAgORvIz83cd8xpdWGfoF9chZAA3EN54P9grAxWJQ0gw2bXYGwArCoN00QL3TLQML0AVCABAgi1CFKdUzTinsLNDSJGTkqAZwsnhKcgxXcKmLQhy8L8wHwvN9oGYzXrxhcHZGMKL2GvLMK72BvMG4XjBPCRp3oQxGOBbAfvIgz6yPkGAzDgDbm3zYuKEjCKAQOIoSKGhX5DcL3QDwrSLLYTIvCBJVcIBaSIi6twrCcio+ENZxNH9kKLTCuvPMLSisk3SDVCKopqKIAOovEQGi3PL3RKBPIS3zbCr8zsNL8qvIWL-2JYpKLgORzPchB3fx0VxhSYIsFtbDCYsARa7LQiPjjijygVAzi6-Ljwiiq4osKQOZtn+4kRMfLfyYeYb0LFF8VLCxiLUH4pSAIS0q2EwpCu1OEyY8VxHKFIuB4NvBt1N1zjwMIlD3fznCT-L3zv85EoWYeOUgAeByGS8HrwH7ZaEchQOZoVi57lfQo4VK8-4r-Z785YpuKrCpGkt95pJrjLjQ8EfjEc6UtX0lSqxN5z4kTHOwHnzjSbTV0c9rTdx5hFXcpybhKnaNBqc-0r4BzRE3aiPrJ7cvdBJUj1ZBW01RSyIBHhWYGxGUNWwILh+c5dSIFPAqGdp0VLB3ZIXmdWZQx1rpgCi+HelyVM0o69MnAktNdbwUUptcqnEJ1KzoUu0uYtyIB0vVLzpLAw9K-NBjPBFKoHNMNBLYeMsIcPS5UoUcLXcqWowZPAigNKqC-0rldTS+nAGkVXLuXOEkXS0v7jQ8KxBHisIMWATLmQWoiTLg3AIvBIAIJMu9JfSQeFUI4bPzTfxUy6tlDzPS7DkWBaQe2UZit7bh0zAYwMr0MNNc4dUQBSAXwwLA0JJSH8ApaNiyYIPoySHuUwNKnRp1ZdVLRFRadJnzwsh3IenI8L3cDxU4qCqArwVqMZ0v2wBPMuLwI8uDBDARz0QFHJUW6UR0ER5LK9G81twAIU940PZotz4Q-OVRg9bwT0XUc8NDLl-L+4-8owTJLCCriAFLWVXCF-zU-AO5yACaHHDXykbW5h6vf-Um0xqT3nXR5tcIEW1DgM1AQFtuMzSIkQ3B8qtKHUU2BsQAbWAqSACy-8xVKh6Csqok5fN1PC9yUYOWjdQyvUpvQ-BdbkCFtvPEOCzW1V8pCEyK+YpdFAS29mBKm83HOGQxy4nIAwQ-TirXMPcWwwBBXioUupL7lPSoBLFiwypWLlsvAJbBVCSkuh4tS4J1fLwSNzyJToUgikTK5dJ0qwMXOFCuJRmLWPPZsCKGWCHLHaH0k-LyyHiKhxIqkgApB84tSBLB2-EqFXLriD4wFhgbPhHER48bbmcqeS4oqMrFcpnC8ruiIFg+oF0bbh3yv81xEdVLi4-IjBvObTSqqDK+vJuLNUsytsSSSwBEqqCi-StcrBqxvJmyRq+TgsrgsozWwtgeBio-NwSqfMhKPKVHnGFhS5TnxK9S7UjcBMIg+EsraLMsweBgaOzlmI0S3k1U0wwM4EzEhK9myhdT8YQsXwCMJVisUWkKjnoAZ82fng5WlJDiXyQBQd36rpqvksbyms6DFzys1G1Rx4rvfHiJ5ck8UyqYyecwCCpMAL4GOQRDHgDEMWlaRGsMIAWw2kQIjYiIfBiIsI3MALANQGYANALQB0AeAfgCEAxASQBkA5ARQAUAKgQU2cABwk+P4FX1HAAEKL-U3NKgggcoQhh--XkA1ZIgbmtKt1BZoBwKm1PApsA5gcwEPhB0zpG2VplWZUmJijGtgkBsAKbCEB19avx6Uu1FRGiBhKlIB4RKkGmtpr6aoIEZq9AFmsMB2akwAUBmACwCAA" target="_blank" rel="noopener">Install on Cloudflare</a>
+    <p class="meta">If Cloudflare asks you to create an account, you aren't signed in in this browser:
+    <a href="https://dash.cloudflare.com/login" target="_blank" rel="noopener">sign in</a>, then press the button again.</p>
+    <details class="by-hand">
+      <summary>If the button doesn't work, do it by hand</summary>
+      <ol>
+        <li>Go to <a href="https://dash.cloudflare.com/?to=/:account/workers-and-pages" target="_blank" rel="noopener">Workers &amp; Pages</a>
+          (<span class="path">Compute → Workers &amp; Pages</span> in the left-hand menu), press <span class="path">Create application</span>,
+          then <span class="path">Start with Hello World</span>. Change the <b>Worker name</b> to <code>afterwrd</code>, leave
+          <b>Protect with Cloudflare Access</b> off and press <b>Deploy</b>.</li>
+        <li>Copy the installer, then in your new Worker press <b>Edit code</b>, select everything in the editor
+          (<kbd>⌘A</kbd> or <kbd>Ctrl+A</kbd>), paste over it and press <b>Deploy</b>.<br>
+          <button class="button" id="copy">Copy installer</button></li>
+      </ol>
+      <details>
+        <summary>See the installer (afterwrd 0.22.0)</summary>
+        <textarea id="installer" readonly spellcheck="false">// afterwrd installer, version 0.22.0.
+// Copyright (C) 2026 Ste Millington. Free software under the GNU Affero General Public License, version 3 or later;
+// source code and licence at https://github.com/stemill/afterwrd
+//
+// Deploy this as a Cloudflare Worker (the install page's "Install on Cloudflare" button does it, or paste this whole
+// file into a Worker by hand), then open the Worker's address:
+//   - as a new Worker, it installs afterwrd at the address you choose;
+//   - over an existing afterwrd, it updates it to this version, keeping its passkeys, connections, archive and photos.
+//
+// What it does, once you've connected Cloudflare (press Allow on Cloudflare's page: an hour's token, kept nowhere but
+// a cookie on this page; src/cloudflare.js) or pasted an API token you made for the purpose:
+//   1. finds this Worker in your account
+//   2. creates a D1 database for afterwrd, or reuses the one afterwrd already has
+//   3. downloads afterwrd from the address below and checks every file against the fingerprint below,
+//      so what's installed is exactly the published release
+//   4. uploads it as a new version of this Worker or, for a new site at a different address, as a new Worker with
+//      that name, then removes this installer once afterwrd answers there (Cloudflare's Deploy page gives the
+//      installer a name with a random ending, so the address is chosen here instead)
+// Nothing is kept afterwards: later updates connect Cloudflare again from the site's Update page.
+
+
+// package.json
+var package_default = {
+  name: "afterwrd-worker",
+  version: "0.22.0",
+  private: true,
+  license: "AGPL-3.0-or-later",
+  type: "module",
+  scripts: {
+    dev: "wrangler dev",
+    deploy: "node scripts/deploy.mjs",
+    owner: "node scripts/owner.mjs",
+    "test:ingest": "node --disable-warning=ExperimentalWarning test/compare-ingest.mjs",
+    release: "node scripts/release.mjs",
+    notices: "node scripts/notices.mjs",
+    "test:e2e": "test/e2e/run.sh"
+  },
+  dependencies: {
+    "@simplewebauthn/server": "14.0.3",
+    "@zip.js/zip.js": "2.24.0"
+  },
+  devDependencies: {
+    esbuild: "0.28.2",
+    "lz-string": "1.5.0",
+    "puppeteer-core": "25.16.0",
+    wrangler: "4.156.2"
+  },
+  afterwrd: {
+    releases: "stemill/afterwrd",
+    site: "afterwrd.app",
+    cloudflareClient: "9a89827907d5681523b116176031302e"
+  }
+};
+
+// src/util.js
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
+}
+function html(body, status = 200) {
+  return new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+}
+
+// src/cloudflare.js
+var CLIENT_ID = package_default.afterwrd.cloudflareClient;
+var RELAY = `https://${package_default.afterwrd.site}/connect/`;
+var TOKEN_ENDPOINT = "https://dash.cloudflare.com/oauth2/token";
+var START_COOKIE = "cf_connect";
+var TOKEN_COOKIE = "cf_token";
+var START_SECONDS = 600;
+var BACK_RE = /^\/(?![/\\])[\x21-\x7e]*$/;
+var CODE_RE = /^[A-Za-z0-9._~+/=-]{8,1024}$/;
+var connectLink = (back) =&gt; `/_cloudflare/start?back=${encodeURIComponent(back)}`;
+function connectedToken(request) {
+  const token = readCookie(request, TOKEN_COOKIE);
+  return token &amp;&amp; CODE_RE.test(token) ? token : null;
+}
+function tokenFor(request, body = {}) {
+  const pasted = typeof body.token === "string" ? body.token.trim() : "";
+  const token = pasted || connectedToken(request);
+  if (!token) throw new Error("Connect Cloudflare first.");
+  return token;
+}
+async function handleCloudflare(request, env, url) {
+  const path = url.pathname.slice("/_cloudflare".length);
+  if (request.method === "GET" &amp;&amp; path === "/start") return start(request, url);
+  if (request.method === "GET" &amp;&amp; path === "/done") return html(donePage());
+  if (request.method !== "POST") return null;
+  if (request.headers.get("Origin") !== url.origin) return json({ error: "Request from another site" }, 403);
+  if (path === "/finish") return finish(request, env, await request.json().catch(() =&gt; ({})));
+  if (path === "/disconnect") return withCookie(json({ ok: true }), `${TOKEN_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`);
+  return null;
+}
+async function start(request, url) {
+  const from = request.headers.get("Sec-Fetch-Site");
+  if (from &amp;&amp; from !== "same-origin" &amp;&amp; from !== "none") return json({ error: "Start connecting from your own site." }, 403);
+  const back = url.searchParams.get("back") ?? "/";
+  if (!BACK_RE.test(back)) return json({ error: "Unexpected details." }, 400);
+  const verifier = random(48);
+  const state = random(24);
+  const challenge = base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+  const relay = new URL(RELAY);
+  relay.searchParams.set("to", `${url.origin}/_cloudflare/done`);
+  relay.searchParams.set("state", state);
+  relay.searchParams.set("challenge", challenge);
+  return withCookie(
+    Response.redirect(relay.toString(), 302),
+    `${START_COOKIE}=${state}.${verifier}.${base64url(new TextEncoder().encode(back))}; Path=/; Max-Age=${START_SECONDS}; HttpOnly; Secure; SameSite=Lax`
+  );
+}
+async function finish(request, env, body) {
+  const started = readCookie(request, START_COOKIE) ?? "";
+  const [state, verifier, backEncoded] = started.split(".");
+  const clear = `${START_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
+  if (!state || !verifier || !backEncoded) return withCookie(json({ error: "This connection has expired. Start again from your site." }, 400), clear);
+  if (typeof body.state !== "string" || body.state !== state) return withCookie(json({ error: "That isn't the connection this site started. Start again." }, 400), clear);
+  if (typeof body.code !== "string" || !CODE_RE.test(body.code)) return withCookie(json({ error: "Cloudflare didn't send a code." }, 400), clear);
+  const back = new TextDecoder().decode(fromBase64url(backEncoded));
+  const endpoint = env?.ALLOW_LOCAL_SITES === "1" &amp;&amp; env.OAUTH_TOKEN_URL ? env.OAUTH_TOKEN_URL : TOKEN_ENDPOINT;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "authorization_code", code: body.code, redirect_uri: RELAY, client_id: CLIENT_ID, code_verifier: verifier })
+  });
+  const data = await response.json().catch(() =&gt; ({}));
+  if (!response.ok || typeof data.access_token !== "string") {
+    const why = data.error_description || data.error || `HTTP ${response.status}`;
+    return withCookie(json({ error: `Cloudflare didn't finish connecting: ${why}` }, 400), clear);
+  }
+  if (!CODE_RE.test(data.access_token)) return withCookie(json({ error: "Cloudflare's token isn't in a form this site can keep." }, 400), clear);
+  const seconds = Math.max(60, Math.min(Number(data.expires_in) || 3600, 3600) - 60);
+  const done = withCookie(json({ back: BACK_RE.test(back) ? back : "/" }), clear);
+  return withCookie(done, `${TOKEN_COOKIE}=${data.access_token}; Path=/; Max-Age=${seconds}; HttpOnly; Secure; SameSite=Strict`);
+}
+function donePage() {
+  return `&lt;!doctype html&gt;
+&lt;html lang="en-GB"&gt;
+&lt;head&gt;
+&lt;meta charset="utf-8"&gt;
+&lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
+&lt;meta name="robots" content="noindex, nofollow"&gt;
+&lt;link rel="icon" href="data:,"&gt;
+&lt;title&gt;Connecting to Cloudflare&lt;/title&gt;
+&lt;style&gt;
+  body { margin: 0; padding: 24px; background: #16201b; color: #ede6da; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 480px; margin: 48px auto; }
+  a { color: #ffab73; }
+  #error:empty { display: none; }
+&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;main&gt;
+&lt;p id="status"&gt;Finishing connecting to Cloudflare\u2026&lt;/p&gt;
+&lt;p id="error" role="alert"&gt;&lt;/p&gt;
+&lt;/main&gt;
+&lt;script&gt;
+  (async () =&gt; {
+    const params = new URLSearchParams(location.hash.slice(1));
+    const status = document.getElementById("status");
+    const problem = document.getElementById("error");
+    history.replaceState(null, "", location.pathname); // the code is single-use, and not for the history
+    if (params.get("error")) {
+      status.textContent = "";
+      problem.textContent = params.get("error") === "access_denied"
+        ? "You didn't allow it, so nothing has changed. You can go back and try again."
+        : "Cloudflare couldn't connect: " + params.get("error");
+      return;
+    }
+    try {
+      const res = await fetch("/_cloudflare/finish", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: params.get("code"), state: params.get("state") }) });
+      const data = await res.json().catch(() =&gt; ({}));
+      if (!res.ok) throw new Error(data.error || "Something went wrong.");
+      location.replace(data.back || "/");
+    } catch (err) {
+      status.textContent = "";
+      problem.textContent = err.message;
+    }
+  })();
+&lt;\/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;`;
+}
+function withCookie(response, cookie) {
+  const out = new Response(response.body, response);
+  out.headers.append("Set-Cookie", cookie);
+  return out;
+}
+function readCookie(request, name) {
+  const found = (request.headers.get("Cookie") ?? "").split(";").map((c) =&gt; c.trim()).find((c) =&gt; c.startsWith(`${name}=`));
+  return found ? found.slice(name.length + 1) : null;
+}
+var random = (bytes) =&gt; base64url(crypto.getRandomValues(new Uint8Array(bytes)));
+var base64url = (bytes) =&gt; btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+var fromBase64url = (text) =&gt; Uint8Array.from(atob(text.replace(/-/g, "+").replace(/_/g, "/")), (c) =&gt; c.charCodeAt(0));
+
+// src/deploy.js
+var API = "https://api.cloudflare.com/client/v4";
+async function api(token, path, init = {}) {
+  const headers = { Authorization: `Bearer ${token}` };
+  if (typeof init.body === "string") headers["Content-Type"] = "application/json";
+  const response = await fetch(`${API}${path}`, { ...init, headers });
+  const data = await response.json().catch(() =&gt; ({}));
+  if (!response.ok || data.success === false) {
+    const message = data.errors?.map((e) =&gt; e.message).join("; ") || `HTTP ${response.status}`;
+    throw Object.assign(new Error(`Cloudflare said: ${message}`), { status: response.status });
+  }
+  return data.result;
+}
+async function workerSettings(token, account, script) {
+  try {
+    return await api(token, `/accounts/${account}/workers/scripts/${script}/settings`);
+  } catch (error) {
+    if (error.status === 404) return null;
+    throw error;
+  }
+}
+async function findWorker(token, script) {
+  for (const account of await api(token, "/accounts")) {
+    const response = await fetch(`${API}/accounts/${account.id}/workers/scripts/${script}/settings`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (response.ok) return { account: account.id, settings: (await response.json()).result };
+  }
+  throw new Error(`Couldn't find a Worker called "${script}" with that token. Was the token made in the same Cloudflare account?`);
+}
+var TRY_AGAIN_MS = [1e3, 3e3];
+var SPARE_TRIES = 6;
+var DOWNLOAD_TIMEOUT_MS = 6e4;
+async function loadRelease(base, manifestSha256 = null) {
+  const tries = { spare: SPARE_TRIES };
+  const download = (url) =&gt; downloadWithRetries(url, tries);
+  const bytes = await download(`${base}/manifest.json`);
+  if (manifestSha256 &amp;&amp; await sha256(bytes) !== manifestSha256) {
+    throw new Error("The release doesn't match the fingerprint it should have, so nothing was installed.");
+  }
+  const manifest = JSON.parse(new TextDecoder().decode(bytes));
+  return {
+    manifest,
+    async file(hash) {
+      const contents = await download(`${base}/${hash}`);
+      if (await sha256(contents) !== hash) throw new Error("A release file doesn't match its fingerprint, so nothing was installed.");
+      return contents;
+    }
+  };
+}
+async function uploadAssets(token, account, script, release) {
+  const { manifest } = release;
+  const byHash = new Map(manifest.assets.map((a) =&gt; [a.hash, a]));
+  const session = await api(token, `/accounts/${account}/workers/scripts/${script}/assets-upload-session`, {
+    method: "POST",
+    body: JSON.stringify({ manifest: Object.fromEntries(manifest.assets.map((a) =&gt; [a.path, { hash: a.hash, size: a.size }])) })
+  });
+  let jwt = session.jwt;
+  for (const bucket of session.buckets ?? []) {
+    const form = new FormData();
+    for (const hash of bucket) {
+      const asset = byHash.get(hash);
+      form.append(hash, new File([base64(await release.file(asset.sha256))], hash, { type: asset.type }));
+    }
+    const uploaded = await api(session.jwt, `/accounts/${account}/workers/assets/upload?base64=true`, { method: "POST", body: form });
+    jwt = uploaded?.jwt ?? jwt;
+  }
+  return jwt;
+}
+async function findOrCreateDatabase(token, account, name) {
+  const found = (await api(token, `/accounts/${account}/d1/database?name=${encodeURIComponent(name)}`)).find((d) =&gt; d.name === name);
+  return found ?? api(token, `/accounts/${account}/d1/database`, { method: "POST", body: JSON.stringify({ name }) });
+}
+function existingDatabase(settings) {
+  const binding = settings.bindings?.find((b) =&gt; b.type === "d1" &amp;&amp; b.name === "DB");
+  return binding ? binding.id ?? binding.database_id : null;
+}
+async function deployVersion(token, account, script, release, { jwt, databaseId, settings, secrets = {} }) {
+  const { manifest } = release;
+  const hasStore = (name) =&gt; settings.bindings?.some((b) =&gt; b.type === "durable_object_namespace" &amp;&amp; b.class_name === name);
+  const newClasses = manifest.migrations.new_sqlite_classes.filter((name) =&gt; !hasStore(name));
+  const metadata = {
+    main_module: manifest.main_module,
+    compatibility_date: manifest.compatibility_date,
+    compatibility_flags: manifest.compatibility_flags,
+    bindings: [
+      { type: "d1", name: "DB", id: databaseId },
+      ...manifest.durable_objects.map((d) =&gt; ({ type: "durable_object_namespace", name: d.name, class_name: d.class_name })),
+      { type: "assets", name: "ASSETS" },
+      ...Object.entries(secrets).map(([name, text]) =&gt; ({ type: "secret_text", name, text }))
+    ],
+    keep_bindings: ["secret_text"],
+    assets: { jwt, config: manifest.assets_config }
+  };
+  if (newClasses.length) metadata.migrations = { new_tag: manifest.migrations.new_tag, new_sqlite_classes: newClasses };
+  const form = new FormData();
+  form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
+  for (const module of manifest.modules) {
+    form.append(module.name, new File([await release.file(module.sha256)], module.name, { type: module.type }));
+  }
+  await api(token, `/accounts/${account}/workers/scripts/${script}`, { method: "PUT", body: form });
+}
+async function downloadWithRetries(url, tries) {
+  for (let attempt = 0; ; attempt++) {
+    let status = null;
+    try {
+      const response = await fetch(url, { headers: { "User-Agent": "afterwrd" }, signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+      if (response.ok) return new Uint8Array(await response.arrayBuffer());
+      status = response.status;
+    } catch {
+    }
+    const problem = new Error(status ? `Couldn't download the release (${status}).` : "Couldn't download the release: GitHub didn't answer.");
+    if (status &amp;&amp; status &lt; 500 &amp;&amp; status !== 429) throw problem;
+    if (attempt &gt;= TRY_AGAIN_MS.length || tries.spare &lt;= 0) throw problem;
+    tries.spare--;
+    await new Promise((resolve) =&gt; setTimeout(resolve, TRY_AGAIN_MS[attempt]));
+  }
+}
+async function sha256(bytes) {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((b) =&gt; b.toString(16).padStart(2, "0")).join("");
+}
+function base64(bytes) {
+  let binary = "";
+  for (let i = 0; i &lt; bytes.length; i += 32768) binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
+  return btoa(binary);
+}
+
+// installer/installer.js
+var RELEASE = "https://github.com/stemill/afterwrd/releases/download/v0.22.0";
+var MANIFEST_SHA256 = "9658a3e57aa8c61a5da76a1afb93c28d06420103376a4966cc044049c8e36d02";
+var VERSION = "0.22.0";
+var PERMISSIONS = [{ key: "workers_scripts", type: "edit" }, { key: "d1", type: "edit" }, { key: "account_settings", type: "read" }];
+var TOKEN_URL = "https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=" + encodeURIComponent(JSON.stringify(PERMISSIONS)) + "&amp;accountId=*&amp;zoneId=all&amp;name=afterwrd%20installer";
+var TOKENS_PAGE = "https://dash.cloudflare.com/profile/api-tokens";
+var MediaStore = class {
+  fetch() {
+    return new Response("afterwrd is being updated; try again in a minute.", { status: 503 });
+  }
+};
+var Outbox = class {
+  async alarm() {
+  }
+  // notes wait until the real outbox is back
+};
+var installer_default = {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.protocol === "http:") return Response.redirect(`https://${url.host}${url.pathname}${url.search}`, 301);
+    if (request.method === "GET" &amp;&amp; url.pathname === "/") {
+      const csp = HEADERS["Content-Security-Policy"].replace("default-src 'self'", `default-src 'self'; connect-src 'self' https://*.${accountDomain(url)}`);
+      return new Response(page(url, Boolean(env?.DB), Boolean(connectedToken(request)), url.searchParams.get("go") === "1"), {
+        headers: { ...HEADERS, "Content-Security-Policy": csp, "Content-Type": "text/html; charset=utf-8" }
+      });
+    }
+    if (url.pathname.startsWith("/_cloudflare/")) {
+      const response = await handleCloudflare(request, env, url);
+      if (response) {
+        const headers = new Headers(response.headers);
+        for (const [name, value] of Object.entries(HEADERS)) if (!headers.has(name)) headers.set(name, value);
+        return new Response(response.body, { status: response.status, headers });
+      }
+    }
+    const step = url.pathname.slice("/install/".length);
+    if (request.method === "POST" &amp;&amp; url.pathname.startsWith("/install/") &amp;&amp; Object.hasOwn(STEPS, step)) {
+      if (request.headers.get("Origin") !== url.origin) return Response.json({ error: "Request from another site" }, { status: 403 });
+      try {
+        const body = await request.json();
+        return Response.json(await STEPS[step](body, scriptName(url), url, tokenFor(request, body)));
+      } catch (error) {
+        return Response.json({ error: error.message }, { status: 400 });
+      }
+    }
+    return new Response("afterwrd is being installed.", { status: 404, headers: HEADERS });
+  }
+};
+var HEADERS = {
+  "Cache-Control": "no-store",
+  "Content-Security-Policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; form-action 'self'",
+  "Strict-Transport-Security": "max-age=31536000",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "same-origin"
+};
+function accountId(id) {
+  if (!/^[0-9a-f]{32}$/.test(String(id ?? ""))) throw new Error("That isn't a Cloudflare account id.");
+  return id;
+}
+function scriptName(url) {
+  if (!url.hostname.endsWith(".workers.dev")) throw new Error("Open the installer at its workers.dev address.");
+  return url.hostname.split(".")[0];
+}
+var accountDomain = (url) =&gt; url.hostname.split(".").slice(1).join(".");
+var suggestedName = (script) =&gt; /^afterwrd-installer(-|$)/.test(script) ? "afterwrd" : script;
+async function assertFree(token, account, name) {
+  if (await workerSettings(token, account, name)) {
+    throw new Error(`There's already a Worker called "${name}" in this Cloudflare account. Choose another address, or if it's left from an earlier try, delete it in Cloudflare (Workers &amp; Pages) and press Install again.`);
+  }
+}
+function siteName(name) {
+  const clean = String(name ?? "").trim().toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(clean)) {
+    throw new Error("Your address can use lowercase letters, numbers and hyphens (not at the start or end).");
+  }
+  return clean;
+}
+var STEPS = {
+  // Which of the token's accounts this Worker is in, whether it's already afterwrd, which release goes in, and the
+  // Worker afterwrd goes into: this one for an update, or the chosen name (which mustn't be taken) for a new site.
+  async check({ name }, script, url, token) {
+    const { account, settings } = await findWorker(token, script);
+    const { manifest } = await loadRelease(RELEASE, MANIFEST_SHA256);
+    const upgrade = Boolean(existingDatabase(settings));
+    const target = upgrade ? script : siteName(name ?? script);
+    if (target !== script) await assertFree(token, account, target);
+    return { account, version: manifest.version, upgrade, target };
+  },
+  // The site's own files (stylesheet, import page).
+  async assets({ account, target }, script, url, token) {
+    return { jwt: await uploadAssets(token, accountId(account), siteName(target ?? script), await loadRelease(RELEASE, MANIFEST_SHA256)) };
+  },
+  // The database and the code, as a new version of this Worker, or as a new Worker at the chosen address.
+  async deploy({ account, jwt, target }, script, url, token) {
+    accountId(account);
+    const release = await loadRelease(RELEASE, MANIFEST_SHA256);
+    const settings = await api(token, `/accounts/${account}/workers/scripts/${script}/settings`);
+    const existing = existingDatabase(settings);
+    if (existing) {
+      await deployVersion(token, account, script, release, { jwt, databaseId: existing, settings });
+      return { next: "/", upgrade: true };
+    }
+    const name = siteName(target ?? script);
+    const moved = name !== script;
+    if (moved) await assertFree(token, account, name);
+    const database = await findOrCreateDatabase(token, account, name);
+    const setupCode = [...crypto.getRandomValues(new Uint8Array(24))].map((b) =&gt; b.toString(16).padStart(2, "0")).join("");
+    const secrets = { SETUP_CODE: setupCode };
+    await deployVersion(token, account, name, release, { jwt, databaseId: database.uuid, settings: moved ? {} : settings, secrets });
+    if (moved) {
+      await api(token, `/accounts/${account}/workers/scripts/${name}/subdomain`, {
+        method: "POST",
+        body: JSON.stringify({ enabled: true, previews_enabled: false })
+      });
+    }
+    const site = moved ? `https://${name}.${accountDomain(url)}` : url.origin;
+    return { next: `${site}/_auth/setup?code=${setupCode}`, site, moved, upgrade: false };
+  },
+  // Once afterwrd answers at its own address, this installer is removed. Only ever this Worker, only while it isn't
+  // afterwrd itself, and only once the new site has its database.
+  async cleanup({ account, target }, script, url, token) {
+    accountId(account);
+    const name = siteName(target);
+    if (name === script) return { ok: true };
+    const [mine, theirs] = await Promise.all([workerSettings(token, account, script), workerSettings(token, account, name)]);
+    if (!mine || existingDatabase(mine) || !theirs || !existingDatabase(theirs)) return { ok: false };
+    await api(token, `/accounts/${account}/workers/scripts/${script}`, { method: "DELETE" });
+    return { ok: true };
+  }
+};
+function page(url, isUpdate, connected, go) {
+  const domain = accountDomain(url);
+  let n = 0;
+  const step = (body, cls = "") =&gt; `&lt;li${cls ? ` class="${cls}"` : ""}&gt;&lt;span class="n"&gt;${++n}&lt;/span&gt;&lt;div&gt;${body}&lt;/div&gt;&lt;/li&gt;`;
+  const address = isUpdate ? "" : step(`
+    &lt;h2&gt;Choose your address&lt;/h2&gt;
+    &lt;p class="address"&gt;&lt;input id="name" value="${suggestedName(scriptName(url))}" autocomplete="off" spellcheck="false"
+      autocapitalize="none" aria-label="Your site's name"&gt;&lt;span class="meta"&gt;.${domain}&lt;/span&gt;&lt;/p&gt;
+    &lt;p class="meta"&gt;This is how friends will find your site. Lowercase letters, numbers and hyphens.&lt;/p&gt;`);
+  return `&lt;!doctype html&gt;
+&lt;html lang="en-GB"&gt;
+&lt;head&gt;
+&lt;meta charset="utf-8"&gt;
+&lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
+&lt;meta name="robots" content="noindex, nofollow"&gt;
+&lt;link rel="icon" href="data:,"&gt;
+&lt;title&gt;Install afterwrd&lt;/title&gt;
+&lt;style&gt;
+  :root { --bg: #16201b; --surface: #1f2b25; --raised: #263329; --sunken: #121a16; --text: #ede6da; --muted: #a9a092;
+          --border: #2e3d35; --accent: #ff8a3d; --accent-strong: #ffab73; --on-accent: #16201b; --moss: #8fbf7f;
+          --round: ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", system-ui, sans-serif; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 560px; margin: 24px auto; background: var(--surface); border-radius: 24px; padding: 28px; }
+  .brand { display: flex; align-items: center; font: 900 1.35rem/1 var(--round); margin: 0 0 18px; letter-spacing: -0.02em; }
+  .brand .o { width: 0.82em; height: 0.82em; color: var(--accent); margin: 0 0.02em; }
+  h1 { font: 900 1.75rem/1.2 var(--round); margin: 0 0 8px; letter-spacing: -0.015em; }
+  h2 { font: 800 1.05rem/1.3 var(--round); margin: 4px 0 4px; }
+  p { margin: 6px 0; }
+  a { color: var(--accent-strong); }
+  .meta { color: var(--muted); font-size: 0.88rem; }
+  .button, button { display: inline-block; padding: 10px 18px; border: 0; border-radius: 999px; background: var(--text); color: var(--on-accent);
+    font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }
+  .button.secondary { background: var(--raised); color: var(--text); }
+  button:disabled { opacity: 0.6; cursor: default; }
+
+  /* The three steps: a numbered circle, then the step. */
+  ol.how { list-style: none; padding: 0; margin: 22px 0 0; display: grid; gap: 20px; }
+  ol.how &gt; li { display: grid; grid-template-columns: 30px 1fr; gap: 14px; }
+  ol.how .n { width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: var(--on-accent);
+    font: 900 0.95rem var(--round); display: grid; place-items: center; margin-top: 2px; }
+  ol.how .button { margin-top: 8px; }
+  #token { width: 100%; font: inherit; padding: 10px 16px; margin: 6px 0 0; border: 1px solid var(--border); border-radius: 999px;
+    background: var(--sunken); color: var(--text); -webkit-text-security: disc; }
+  details.other { margin-top: 10px; }
+  details.other summary { cursor: pointer; color: var(--muted); font-size: 0.88rem; }
+  .connected { color: var(--moss); font-weight: 700; }
+  #go { margin-top: 0; }
+  p.address { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+  #name { width: 11em; max-width: 100%; font: inherit; font-weight: 700; padding: 8px 14px; border: 1px solid var(--border);
+    border-radius: 999px; background: var(--sunken); color: var(--text); }
+  ol.how &gt; li.go { align-items: center; }
+
+  /* Progress: each line is ticked off as the next begins. */
+  #log { list-style: none; padding: 0; margin: 20px 0 0; }
+  #log:empty { display: none; }
+  #log li { position: relative; padding-left: 26px; margin: 4px 0; color: var(--muted); }
+  #log li::before { content: ""; position: absolute; left: 4px; top: 0.55em; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+  #log li.done { color: var(--text); }
+  #log li.done::before { content: "\u2713"; background: none; color: var(--moss); top: 0; left: 2px; width: auto; height: auto; font-weight: 800; }
+  #error, .warn { color: #ff8070; }
+  #error:empty { display: none; }
+
+  #done { border-top: 1px solid var(--border); margin-top: 20px; padding-top: 16px; }
+  #done[hidden], #done [hidden], #form[hidden] { display: none; }
+  #done h2 { font-size: 1.2rem; }
+  #done .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .foot { margin: 22px 0 0; }
+&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;main&gt;
+&lt;p class="brand" aria-label="afterwrd"&gt;afterw&lt;svg class="o" viewBox="0 0 24 24" aria-hidden="true"&gt;&lt;path d="M12 4a8 8 0 1 1-4.7 14.5L3.8 20l1.2-3.6A8 8 0 0 1 12 4z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/&gt;&lt;/svg&gt;rd&lt;/p&gt;
+&lt;h1&gt;${isUpdate ? "Update" : "Install"} afterwrd&lt;/h1&gt;
+&lt;p class="meta"&gt;${isUpdate ? `This updates your afterwrd to ${VERSION}, keeping your passkeys, connections and archive.` : `This installs afterwrd ${VERSION} into your Cloudflare account, at the address you choose.`}&lt;/p&gt;
+&lt;section id="form"&gt;
+&lt;ol class="how"&gt;
+  ${address}
+  ${step(connected ? `
+    &lt;h2&gt;Connect Cloudflare&lt;/h2&gt;
+    &lt;p class="connected"&gt;Connected, for the next hour.&lt;/p&gt;` : `
+    &lt;h2&gt;Connect Cloudflare&lt;/h2&gt;
+    &lt;p class="meta"&gt;afterwrd needs to create a database and upload itself. Cloudflare asks you to allow that, for an
+    hour; nothing is kept afterwards.&lt;/p&gt;
+    &lt;a class="button" id="connect" href="${connectLink("/?go=1")}"&gt;Connect Cloudflare&lt;/a&gt;
+    &lt;details class="other"&gt;&lt;summary&gt;If connecting doesn't work, use an API token&lt;/summary&gt;
+      &lt;p class="meta"&gt;&lt;a href="${TOKEN_URL}" target="_blank" rel="noopener"&gt;Create a token&lt;/a&gt; in Cloudflare: the permissions
+      are filled in; scroll down, press &lt;b&gt;Continue to summary&lt;/b&gt;, then &lt;b&gt;Create Token&lt;/b&gt;, copy it and paste it here.
+      Delete it in Cloudflare afterwards (&lt;a href="${TOKENS_PAGE}" target="_blank" rel="noopener"&gt;My Profile \u2192 API Tokens&lt;/a&gt;).&lt;/p&gt;
+      &lt;input id="token" type="text" autocomplete="off" spellcheck="false" placeholder="Your API token" aria-label="Your API token"&gt;
+    &lt;/details&gt;`)}
+  ${step(`&lt;button id="go"&gt;${isUpdate ? "Update afterwrd" : "Install afterwrd"}&lt;/button&gt;`, "go")}
+&lt;/ol&gt;
+&lt;/section&gt;
+&lt;ol id="log"&gt;&lt;/ol&gt;
+&lt;p id="error" role="alert"&gt;&lt;/p&gt;
+&lt;section id="done" hidden&gt;
+  &lt;h2 id="done-title"&gt;&lt;/h2&gt;
+  &lt;p class="meta"&gt;Your Cloudflare connection ends within the hour by itself. (If you pasted a token instead, delete it now:
+    &lt;a href="${TOKENS_PAGE}" target="_blank" rel="noopener"&gt;My Profile \u2192 API Tokens&lt;/a&gt;.)&lt;/p&gt;
+  &lt;p id="leftover" class="meta" hidden&gt;The installer couldn't remove itself: you can delete the Worker called
+    &lt;b&gt;${scriptName(url)}&lt;/b&gt; in Cloudflare (Workers &amp;amp; Pages).&lt;/p&gt;
+  &lt;div class="row"&gt;
+    &lt;a class="button" id="continue" href="/"&gt;Continue to afterwrd&lt;/a&gt;
+  &lt;/div&gt;
+&lt;/section&gt;
+&lt;p class="meta foot"&gt;Release files are checked against the fingerprint ${MANIFEST_SHA256.slice(0, 12)}\u2026 before anything is installed.&lt;/p&gt;
+&lt;/main&gt;
+&lt;script&gt;
+  // Each new line ticks off the one before.
+  const logList = document.getElementById("log");
+  const tick = (li) =&gt; { if (li) { li.classList.add("done"); li.textContent = li.textContent.replace(/\u2026$/, ""); } };
+  const log = (text) =&gt; {
+    tick(logList.lastElementChild);
+    const li = document.createElement("li");
+    li.textContent = text;
+    logList.append(li);
+  };
+  async function step(name, body) {
+    const res = await fetch("/install/" + name, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Something went wrong.");
+    return data;
+  }
+  const connected = ${connected};
+  // Connect takes a page away and back: the address typed is kept for the return.
+  const nameBox = document.getElementById("name");
+  try {
+    const saved = sessionStorage.getItem("afterwrd-install-name");
+    if (saved &amp;&amp; nameBox) nameBox.value = saved;
+    sessionStorage.removeItem("afterwrd-install-name");
+  } catch {}
+  document.getElementById("connect")?.addEventListener("click", () =&gt; {
+    try { if (nameBox) sessionStorage.setItem("afterwrd-install-name", nameBox.value); } catch {}
+  });
+  document.getElementById("go").addEventListener("click", async (e) =&gt; {
+    const box = document.getElementById("token");
+    const token = box ? box.value.trim() : "";
+    const error = document.getElementById("error");
+    error.textContent = "";
+    if (!token &amp;&amp; !connected) { error.textContent = "Connect Cloudflare first."; return; }
+    e.target.disabled = true;
+    logList.textContent = ""; // a fresh start after an error
+    try {
+      const name = document.getElementById("name")?.value;
+      log("Checking your Cloudflare account and the release\u2026");
+      const { account, version, upgrade, target } = await step("check", { token, name });
+      log("Uploading afterwrd " + version + "'s site files\u2026");
+      const { jwt } = await step("assets", { token, account, target });
+      log(upgrade ? "Updating afterwrd to " + version + "\u2026" : "Creating the database and installing afterwrd\u2026");
+      const { next, site, moved } = await step("deploy", { token, account, jwt, target });
+      log("Waiting for afterwrd to start" + (moved ? " at " + new URL(site).host : "") + "\u2026");
+      // A new address can take a minute to appear; until it does, fetching it fails.
+      for (let i = 0; i &lt; 60; i++) {
+        const ok = moved
+          ? await fetch(site + "/_auth/login", { mode: "no-cors", cache: "no-store" }).then(() =&gt; true, () =&gt; false)
+          : (await fetch("/_auth/login", { cache: "no-store" })).ok;
+        if (ok) break;
+        await new Promise((r) =&gt; setTimeout(r, 2000));
+      }
+      if (moved) {
+        log("Removing the installer\u2026");
+        const { ok } = await step("cleanup", { token, account, target }).catch(() =&gt; ({ ok: false }));
+        if (!ok) document.getElementById("leftover").hidden = false;
+      }
+      if (box) box.value = "";
+      document.getElementById("done-title").textContent = upgrade
+        ? "afterwrd is updated to " + version + "."
+        : "afterwrd is installed at " + new URL(site).host + ". Next you'll make yourself its owner.";
+      document.getElementById("continue").href = next;
+      tick(logList.lastElementChild);
+      document.getElementById("form").hidden = true;
+      document.getElementById("done").hidden = false;
+    } catch (err) {
+      error.textContent = err.message;
+      e.target.disabled = false;
+    }
+  });
+  // Back from Connect: carry on with the install.
+  if (connected &amp;&amp; ${go}) {
+    history.replaceState(null, "", "/");
+    document.getElementById("go").click();
+  }
+&lt;\/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;`;
+}
+export {
+  MediaStore,
+  Outbox,
+  installer_default as default
+};
+</textarea>
+      </details>
+    </details>
+  </li>
+  <li>
+    <h2>Open your Worker and follow the installer</h2>
+    <p>Press <b>Visit</b>. The installer walks you through the rest: your site's address (<code>afterwrd</code> unless you
+    choose otherwise), <b>Connect Cloudflare</b> (press <b>Allow</b> on Cloudflare's page; it lasts an hour and nothing is
+    kept), then a passkey for you (your face, fingerprint or device PIN; no password). Then you're in: write a post, add
+    photos, and invite friends from <b>Friends</b>.</p>
+  </li>
+  <li class="optional">
+    <h2>Bring your Facebook years <span class="meta">(optional, any time)</span></h2>
+    <p>In Facebook's <a href="https://accountscenter.facebook.com/info_and_permissions/dyi/" target="_blank" rel="noopener">Download your information</a>,
+    choose your profile, <b>All available information</b>, format <b>JSON</b> and media quality <b>High</b>. Facebook
+    emails you when it's ready, which can take from minutes to a day. Then choose <b>Import</b> in afterwrd's menu (behind
+    your picture), pick the zip file(s) and tick what to bring. Your posts, photos and comments go under <b>Memories</b>,
+    and your Facebook friends list shows who to invite.</p>
+  </li>
+</ol>
+
+<section class="safe">
+  <h2>Keeping it safe</h2>
+  <ul>
+    <li><b>Turn on two-factor authentication</b> for your Cloudflare account (My Profile → Authentication). Anyone who gets
+      into that account can see your whole site.</li>
+    <li><b>Open device links only on your own phone or computer.</b> They let a new device in as you, so they work once,
+      for an hour. <b>Your devices</b> can cancel them, remove a passkey (signing that device out) or sign out everywhere.</li>
+    <li><b>Approve only friends you know.</b> Connect and invite links can be passed on, so each one only asks: nothing is
+      shared until you approve, and you can check the site address first.</li>
+    <li><b>Photo locations are removed</b> from photos you post, and left out of a Facebook import unless you choose to
+      include them: they can show where you live.</li>
+    <li><b>Keep it up to date</b> from the <b>Update</b> page (marked when there's a new version), so security fixes
+      reach your site.</li>
+  </ul>
+</section>
+
+<footer>
+  <p>The installer downloads afterwrd 0.22.0 from its <a href="https://github.com/stemill/afterwrd/releases/tag/v0.22.0">published release</a> and checks every file
+  against the fingerprint <code>9658a3e57aa8…</code> before installing anything. Connecting uses Cloudflare's own
+  sign-in for apps, for an hour at a time; what you've allowed is under My Profile → Connected Applications. <a href="https://github.com/stemill/afterwrd">Source code</a>.</p>
+  <p>afterwrd isn't affiliated with or endorsed by Meta. It only reads the "Download your information" file Facebook gives you.</p>
+</footer>
+</main>
+<script>
+  document.getElementById("copy").addEventListener("click", async (e) => {
+    const text = document.getElementById("installer").value;
+    try {
+      await navigator.clipboard.writeText(text);
+      e.target.textContent = "Copied: now paste it into your Worker";
+    } catch {
+      const box = document.getElementById("installer");
+      box.closest("details").open = true;
+      box.select();
+      e.target.textContent = "Press ⌘C or Ctrl+C to copy";
+    }
+  });
+</script>
+</body>
+</html>
