@@ -45,7 +45,16 @@ export async function findWorker(token, script) {
   throw new Error(`Couldn't find a Worker called "${script}" with that token. Was the token made in the same Cloudflare account?`);
 }
 
+// GitHub sometimes answers a download with a 5xx (a 504 once stopped an update) or drops the connection, so
+// each download is tried up to 3 times, a second and then 3 seconds apart. Every try is one of the 50 calls the free
+// plan allows a request, and a fresh install already makes about 30, so a release gets at most 6 extra tries.
+const TRY_AGAIN_MS = [1000, 3000];
+const SPARE_TRIES = 6;
+const DOWNLOAD_TIMEOUT_MS = 60_000;
+
 export async function loadRelease(base, manifestSha256 = null) {
+  const tries = { spare: SPARE_TRIES };
+  const download = (url) => downloadWithRetries(url, tries);
   const bytes = await download(`${base}/manifest.json`);
   if (manifestSha256 && (await sha256(bytes)) !== manifestSha256) {
     throw new Error("The release doesn't match the fingerprint it should have, so nothing was installed.");
@@ -125,10 +134,21 @@ export async function deployVersion(token, account, script, release, { jwt, data
   await api(token, `/accounts/${account}/workers/scripts/${script}`, { method: "PUT", body: form });
 }
 
-async function download(url) {
-  const response = await fetch(url, { headers: { "User-Agent": "afterwrd" } });
-  if (!response.ok) throw new Error(`Couldn't download the release (${response.status}).`);
-  return new Uint8Array(await response.arrayBuffer());
+async function downloadWithRetries(url, tries) {
+  for (let attempt = 0; ; attempt++) {
+    let status = null; // what GitHub answered, if it answered and it wasn't OK
+    try {
+      const response = await fetch(url, { headers: { "User-Agent": "afterwrd" }, signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+      if (response.ok) return new Uint8Array(await response.arrayBuffer());
+      status = response.status;
+    } catch {} // no answer, or it broke off part way
+    const problem = new Error(status ? `Couldn't download the release (${status}).` : "Couldn't download the release: GitHub didn't answer.");
+    // A 404 and the like won't change by asking again; a 5xx, 429 or no answer might.
+    if (status && status < 500 && status !== 429) throw problem;
+    if (attempt >= TRY_AGAIN_MS.length || tries.spare <= 0) throw problem;
+    tries.spare--;
+    await new Promise((resolve) => setTimeout(resolve, TRY_AGAIN_MS[attempt]));
+  }
 }
 
 export async function sha256(bytes) {

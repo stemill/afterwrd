@@ -186,9 +186,10 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   each connected site, and either of you can read the other's posts and photos (everything they've published)
   without leaving your own site: press their name. Comments you make are stored on your friend's site, with a
   copy kept on yours. Their photos and videos load straight from their site through links it signs, which last
-  an hour or two. Disconnecting ends it all at once. Sites exchange posts and comments as ActivityStreams too. Only posts written on
-  afterwrd are shared, never an imported archive. Either side can disconnect. Two sites in the same Cloudflare
-  account can connect too.
+  an hour or two. Sites exchange posts and comments as ActivityStreams too. Only posts written on
+  afterwrd are shared, never an imported archive. Either of you can press *Remove friend* on the other's page,
+  which ends it all at once. If a friend's site stops answering for a day, Home stops mentioning it and *Friends*
+  says so instead, so you can remove them. Two sites in the same Cloudflare account can connect too.
 - **Groups.** Each group is its own small site: *Groups → Start a group* makes it a Worker of its own, with its own
   database, in your Cloudflare account (with the token remembered for updates, or one you paste; it needs to edit
   Workers and D1). It runs afterwrd in group mode: it holds the group and nothing else, and no one signs in to it.
@@ -208,7 +209,7 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
 - **Comments.** You and your friends (from their own sites) can comment under a post or photo; comments show
   straight away. Friends can delete their own, and you can delete any. *Notifications* lists comments on your
   posts and photos, and comments on friends' posts and photos you've commented on too, with a count in the menu
-  of those that are new to you. Comments are kept when you import again, and stay if you disconnect, until you
+  of those that are new to you. Comments are kept when you import again, and stay if you remove a friend, until you
   delete them.
 - **Keeping up, quietly.** When you post or comment, your site sends your friends' sites a short note (a new post
   to all of them; a comment only to those who commented on the same thing), in batches of 40, trying again for a

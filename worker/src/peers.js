@@ -60,7 +60,7 @@ export async function callSite(origin, path, { key, body, timeout = TIMEOUT_MS }
       body: body && JSON.stringify(body),
     });
   } catch {
-    throw new Error(`Couldn't reach ${host(origin)}.`);
+    throw Object.assign(new Error(`Couldn't reach ${host(origin)}.`), { status: 0 }); // status: what their site answered
   }
   let data = {};
   try {
@@ -69,7 +69,9 @@ export async function callSite(origin, path, { key, body, timeout = TIMEOUT_MS }
   // Whatever else a site answers (null, a list, a number) counts as saying nothing.
   if (!data || typeof data !== "object" || Array.isArray(data)) data = {};
   if (!response.ok) {
-    throw new Error(typeof data.error === "string" ? data.error.slice(0, 300) : `${host(origin)} answered ${response.status}.`);
+    const error = new Error(typeof data.error === "string" ? data.error.slice(0, 300) : `${host(origin)} answered ${response.status}.`);
+    error.status = response.status;
+    throw error;
   }
   return data;
 }

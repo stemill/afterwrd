@@ -7,6 +7,7 @@ import {
 } from "./format.js";
 import { eventDay, eventFormValues, eventWhen, finishedAt } from "../calendar.js";
 import { asset, FAVICON, icon, ownerMain, ownerMenu, siteHeader } from "../nav.js";
+import { gone } from "../feed.js";
 import { host } from "../peers.js";
 import { SITE_ID } from "../posts.js";
 import { html, raw } from "./html.js";
@@ -808,6 +809,7 @@ ${friends.length ? html`<ul class="friend-list">
       <span><strong>${c.name}</strong><span class="meta">${host(c.origin)} · friends since ${fmtDate(c.connected_at)}</span></span>
     </a>
     <nav class="friend-tabs"><a href="${friendBase(c)}/posts">Posts</a><a href="${friendBase(c)}/photos">Photos</a></nav>
+    ${friendSilence(c) && html`<div class="meta silent">${friendSilence(c)} ${removeFriend(c, "chip")}</div>`}
     ${c.person ? linkForm(c, html`<span class="meta">On Facebook as ${fbLink(c.person)}</span>
         <input type="hidden" name="unlink" value="1"><button class="link">Unlink</button>`)
       : c.suggestion ? linkForm(c, html`<span>Is this <strong>${c.suggestion.name}</strong> from your Facebook download?</span>
@@ -894,6 +896,20 @@ ${facebook.length > 0 && html`
 </script>`}`);
 }
 
+/** Remove a friend: both sites forget each other (connect.js). `look` is the button's class. */
+function removeFriend(c, look) {
+  return html`<form method="post" action="/_admin/connections/${c.id}/disconnect" class="inline"
+    data-ask="Remove ${c.name} as a friend? You'll stop seeing each other's posts and photos. Comments already made stay where they are."
+    onsubmit="return confirm(this.dataset.ask)"><button class="${look}">Remove friend</button></form>`;
+}
+
+/** Why a friend's site isn't being heard from, once it's gone quiet (feed.js), or null. */
+function friendSilence(c) {
+  if (c.said_no) return html`Their site says you're no longer connected, so ${c.name} may have removed you as a friend.`;
+  if (!gone(c)) return null;
+  return html`Their site hasn't answered since ${fmtDate(c.reached_at ?? c.connected_at)}. It may be offline, or gone for good.`;
+}
+
 function friendHead(ctx, c, tab) {
   return html`
 <p class="crumbs"><a href="/friend">Friends</a> /</p>
@@ -902,7 +918,7 @@ ${c.cover && html`<section class="profile"><div class="cover"><img src="${c.cove
   <h1 class="friend-name">${c.avatar && html`<img class="avatar-small" src="${c.avatar.thumbSrc}" alt="">`}${c.name}</h1>
   ${c.facebook && has(ctx, "friends") && html`<a class="chip" href="/people/${c.facebook.id}">${raw(icon("friends"))}<span>Your Facebook history together</span></a>`}
 </div>
-<p class="meta">${host(c.origin)} · a friend you're connected with. Only you see this here.</p>
+<div class="meta">${host(c.origin)} · a friend you're connected with. Only you see this here. ${removeFriend(c, "link")}</div>
 <nav class="tabs">
   ${[["posts", "Posts"], ["photos", "Photos"]].map(([key, label]) =>
     html`<a href="${friendBase(c)}/${key}" ${key === tab && raw('aria-current="page"')}>${label}</a>`)}
@@ -981,7 +997,7 @@ export function friendPhotoPage(ctx, c, m) {
 export function friendProblem(ctx, c, message) {
   return page(ctx, c.name, html`
 ${friendHead(ctx, c, "")}
-<p class="notice">Couldn't load this from ${c.name}'s site: ${message}</p>`);
+<p class="notice">${friendSilence(c) ?? html`Couldn't load this from ${c.name}'s site: ${message}`}</p>`);
 }
 
 

@@ -4,7 +4,7 @@ import { groupPostId } from "../../public/static/activity.js";
 import { FINISHED_SQL, icsFile } from "../calendar.js";
 import { connectedToken } from "../cloudflare.js";
 import { findTarget, latestComments, loadThreads, newCount, photoKey, postKey } from "./comments.js";
-import { connectionById, loadFeed, markMine, rememberPicture } from "../feed.js";
+import { connectionById, loadFeed, markMine, noteAnswer, rememberPicture } from "../feed.js";
 import * as friend from "../friends.js";
 import { MAX_GROUP_PHOTOS, MAX_MEMBERS } from "../groups.js";
 import { whereAmI } from "../groupsites.js";
@@ -485,8 +485,11 @@ async function fromFriend(ctx, id, load) {
   if (!connection) return null;
   connection.facebook = await facebookSelf(ctx.db, connection);
   try {
-    return await load(connection);
+    const page = await load(connection);
+    await noteAnswer(ctx.db, connection).run();
+    return page;
   } catch (error) {
+    await noteAnswer(ctx.db, connection, error).run();
     return views.friendProblem(ctx, connection, error.message);
   }
 }

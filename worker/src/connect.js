@@ -174,7 +174,9 @@ export async function handleConnections(request, env, url) {
         db.prepare("DELETE FROM friend_links WHERE connection_id = ?").bind(connection.id),
       ]);
     }
-    return json({ ok: true });
+    // From a form (Remove friend on their page, or on Friends), back to Friends; from this site's script, JSON.
+    const form = /form/.test(request.headers.get("Content-Type") ?? "");
+    return form ? Response.redirect(`${url.origin}/friend`, 303) : json({ ok: true });
   }
   return new Response("Not found", { status: 404 });
 }
@@ -260,8 +262,8 @@ function connectionsPage(connections) {
 <h1>Connected sites</h1>
 <p class="meta">Connect with friends who have their own afterwrd site, and you become friends: you'll each see the
 other's new posts on <a href="/">Home</a>, and can read each other's posts and photos (everything you've published)
-on your own site: press their name. Your comments are kept on their site, as part of their archive. Disconnecting
-ends all of it at once.</p>
+on your own site: press their name. Your comments are kept on their site, as part of their archive. Removing a
+friend ends all of it at once.</p>
 
 <div class="actions-row">
   <button class="chip primary" id="make">Make a Connect link</button>
@@ -286,7 +288,7 @@ ${connections.length ? `<table class="numbers">
     <th><a href="/friend/${c.id}/posts">${escape(c.name)}</a></th>
     <td><a href="${escape(c.origin)}" target="_blank" rel="noopener noreferrer">${escape(host(c.origin))}</a></td>
     <td>${day(c.connected_at)}</td>
-    <td><button class="chip" data-disconnect="${c.id}" data-name="${escape(c.name)}">Disconnect</button></td>
+    <td><button class="chip" data-disconnect="${c.id}" data-name="${escape(c.name)}">Remove friend</button></td>
   </tr>`).join("")}</tbody>
 </table>` : `<p class="empty">You're not connected with anyone yet.</p>`}`, `${POST_SCRIPT}
   const panel = document.getElementById("link");
@@ -310,7 +312,7 @@ ${connections.length ? `<table class="numbers">
   }
   document.querySelector("main").addEventListener("click", async (e) => {
     const button = e.target.closest("button[data-disconnect]");
-    if (!button || !confirm("Disconnect from " + button.dataset.name + "? You'll stop seeing each other's posts. Comments already made stay where they are.")) return;
+    if (!button || !confirm("Remove " + button.dataset.name + " as a friend? You'll stop seeing each other's posts and photos. Comments already made stay where they are.")) return;
     try {
       await post("/_admin/connections/" + button.dataset.disconnect + "/disconnect");
       location.reload();
@@ -323,7 +325,7 @@ function confirmPage(name, origin) {
 <p class="crumbs"><a href="/_admin/connections">Connections</a> /</p>
 <h1>Connect with ${escape(name)}?</h1>
 <p>Their site is <strong>${escape(host(origin))}</strong>. Once connected you're friends: you'll each see the other's
-posts and photos on your own site, and can comment on them. Either of you can disconnect at any time, which ends all of it.</p>
+posts and photos on your own site, and can comment on them. Either of you can remove the other at any time, which ends all of it.</p>
 <p id="error" role="alert"></p>
 <div class="actions-row">
   <button class="chip primary" id="go">Connect</button>

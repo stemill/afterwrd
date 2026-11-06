@@ -238,6 +238,10 @@ Authorization: Bearer <key the other site issued>
 - This call is allowed even for a connection that hasn't been approved, so a requester can withdraw.
 - Comments already made stay on the site where they were made, and each owner keeps their own copies of what they said.
 
+If the other site couldn't be reached, it still holds the connection. Its calls are then answered `401`, which it
+should take to mean the friendship has ended. afterwrd shows this to its owner and lets them remove the friend; it
+doesn't forget the connection on its own, because a site that's broken for a while shouldn't end a friendship.
+
 Source: `src/peers.js:115-117`, `src/peers.js:128-135`, `src/connect.js:165-178`.
 
 ## 5. Friend API

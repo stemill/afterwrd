@@ -1,7 +1,7 @@
 // What a hostile friend's site might send, through the real parsing code.
 // The real friends.js and feed.js, bundled by run.sh (with a stand-in for Cloudflare's runtime) into $OUT/bundle.mjs.
 import { pathToFileURL } from "node:url";
-const { callSite, cleanFeed, icsFile, markMine, markMineInGroup, parseEvent, parseGroupPage, parseMedia, readEventForm, siteOrigin } = await import(pathToFileURL(`${process.env.OUT}/bundle.mjs`).href);
+const { callSite, cleanFeed, icsFile, loadRelease, markMine, markMineInGroup, parseEvent, parseGroupPage, parseMedia, readEventForm, siteOrigin } = await import(pathToFileURL(`${process.env.OUT}/bundle.mjs`).href);
 const B = "https://bob.example";
 const A = "https://ann.example";
 const hash = "a".repeat(64);
@@ -97,4 +97,21 @@ check("nothing in an event can add lines to a calendar file", !lines.some((l) =>
 const form = (o) => ({ get: (k) => o[k] ?? null });
 check("a form's date that doesn't exist is refused", readEventForm(form({ title: "x", start_date: "2027-02-30" })).error !== undefined);
 check("a form's time zone that isn't one falls back", readEventForm(form({ title: "x", start_date: "2027-02-03", zone: "Nowhere/Place" }), "Europe/Paris").event?.time_zone === "Europe/Paris");
+// Downloading a release when GitHub has a moment: a stand-in that fails as told, then answers.
+const { createServer } = await import("node:http");
+const plan = { "/flaky/manifest.json": [504], "/down/manifest.json": [503, 503, 503, 503], "/missing/manifest.json": [404, 404] };
+const asked = {};
+const github = createServer((req, res) => {
+  asked[req.url] = (asked[req.url] ?? 0) + 1;
+  const status = plan[req.url]?.shift() ?? 200;
+  res.statusCode = status;
+  res.end(status === 200 ? JSON.stringify({ assets: [], modules: [] }) : "no");
+});
+await new Promise((r) => github.listen(0, "127.0.0.1", r));
+const at = `http://127.0.0.1:${github.address().port}`;
+const outcome = (base) => loadRelease(`${at}/${base}`).then(() => "ok", (e) => e.message);
+check("a release still downloads after GitHub answers 504 once", await outcome("flaky") === "ok" && asked["/flaky/manifest.json"] === 2);
+check("…but gives up after three tries", await outcome("down") === "Couldn't download the release (503)." && asked["/down/manifest.json"] === 3);
+check("…and doesn't try again when it isn't there", await outcome("missing") === "Couldn't download the release (404)." && asked["/missing/manifest.json"] === 1);
+github.close();
 process.exit(failed ? 1 : 0);

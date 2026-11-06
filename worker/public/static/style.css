@@ -292,6 +292,8 @@ img.who { object-fit: cover; padding: 0; }
 .friend-tabs a:hover { text-decoration: none; box-shadow: inset 0 0 0 1.5px var(--accent); }
 .fb-link { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; font-size: 0.9rem; }
 .fb-link input[name=name]:not([type=hidden]) { flex: 1; min-width: 10rem; font: inherit; padding: 0.45rem 0.9rem; border: 1px solid var(--border); border-radius: 999px; background: var(--sunken); color: var(--text); }
+form.inline { display: inline; margin-left: 0.3rem; }
+.silent form.inline { display: block; margin: 0.5rem 0 0; }
 .fb-pick summary { cursor: pointer; }
 .fb-pick[open] summary { margin-bottom: 0.5rem; }
 #fb-people tr[hidden] { display: none; }

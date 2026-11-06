@@ -372,7 +372,7 @@ await ann.setViewport({ width: 1280, height: 900 });
 await ann.goto(`${A}/_admin/connections`);
 await ann.screenshot({ path: `${OUT}/connections.png` });
 await Promise.all([ann.waitForNavigation(), ann.click("button[data-disconnect]")]);
-check("disconnecting removes it on both sites", sql(stateA, "SELECT COUNT(*) AS n FROM connections")[0].n === 0
+check("Remove friend removes it on both sites", sql(stateA, "SELECT COUNT(*) AS n FROM connections")[0].n === 0
   && sql(stateB, "SELECT COUNT(*) AS n FROM connections")[0].n === 0);
 check("the old key stops working", (await peer("/_peer/feed", keyForB)).status === 401);
 check("Ann keeps her copies of what she said after disconnecting", sql(stateA, "SELECT site FROM comments_elsewhere").some((c) => c.site === B));
@@ -457,6 +457,45 @@ check("sites that can't be reached are summed up in one line", notices.length ==
 check("the friends column shows a dozen, then a link to the rest", (await ann.$$(".mini-friends li")).length === 12
   && (await ann.$eval('aside.side a[href="/friend"]', (a) => a.textContent).catch(() => "")) === "All 46 friends");
 sql(stateA, "DELETE FROM connections WHERE id < 0");
+
+// Friends whose sites stop answering. Gail's hasn't for two days (and was asked just now); Ned's only just stopped.
+sql(stateA, `INSERT INTO connections (id, origin, name, their_key, key_hash, created_at, connected_at, approved_at, reached_at,
+  missing_since, feed_checked_at) VALUES
+  (9001, 'https://gail.invalid', 'Gone Gail', '${"k".repeat(43)}', 'hash-gail', 1700000000, 1700000000, 1700000000, 1760000000,
+    strftime('%s','now') - 172800, strftime('%s','now')),
+  (9002, 'https://ned.invalid', 'New Ned', '${"k".repeat(43)}', 'hash-ned', 1700000000, 1700000000, 1700000000, NULL, NULL, NULL)`);
+const gailAsked = sql(stateA, "SELECT feed_checked_at AS t FROM connections WHERE id = 9001")[0].t;
+await ann.goto(`${A}/`);
+const homeNotices = (await ann.$$eval("p.notice", (l) => l.map((p) => p.textContent))).join(" | ");
+check("Home mentions a friend's site that's just stopped answering", homeNotices.includes("Couldn't load New Ned's posts"), homeNotices);
+check("…but not one that's been quiet for a day", !homeNotices.includes("Gail"), homeNotices);
+check("…which is asked at most once an hour", sql(stateA, "SELECT feed_checked_at AS t FROM connections WHERE id = 9001")[0].t === gailAsked);
+check("Ned's site is noted as not answering", sql(stateA, "SELECT missing_since FROM connections WHERE id = 9002")[0].missing_since > 0);
+await ann.goto(`${A}/friend`);
+const gailCard = await ann.$$eval(".friend-list li", (l) => l.find((li) => li.textContent.includes("Gone Gail"))?.querySelector(".silent")?.textContent ?? "");
+check("Friends says Gail's site has gone quiet, and since when", /hasn't answered since/.test(gailCard) && gailCard.includes("2025"), gailCard);
+check("…with Remove friend beside it, and nothing like it for Cara",
+  (await ann.$$eval(".friend-list li", (l) => l.filter((li) => li.querySelector(".silent button")).length)) === 1);
+await ann.screenshot({ path: `${OUT}/friends-quiet.png`, fullPage: true });
+await Promise.all([ann.waitForNavigation(), ann.$$eval(".friend-list li", (l) => l.find((li) => li.textContent.includes("Gone Gail")).querySelector(".silent button").click())]);
+check("Remove friend forgets Gail, back on Friends", new URL(ann.url()).pathname === "/friend"
+  && sql(stateA, "SELECT COUNT(*) AS n FROM connections WHERE id = 9001")[0].n === 0);
+sql(stateA, "DELETE FROM connections WHERE id >= 9000");
+
+// Cara removed Ann while Ann's site couldn't be told: Cara's site now says Ann's isn't connected.
+const caraId = sql(stateA, `SELECT id FROM connections WHERE origin = '${C}'`)[0].id;
+sql(stateC, "DELETE FROM connections");
+await ann.goto(`${A}/`);
+check("Home says nothing about a friend who's removed you",
+  !(await ann.$$eval("p.notice", (l) => l.map((p) => p.textContent).join(" "))).includes("Cara"));
+check("…and remembers their site said no", sql(stateA, `SELECT said_no FROM connections WHERE id = ${caraId}`)[0].said_no === 1);
+await ann.goto(`${A}/friend/${caraId}/posts`);
+const caraNotice = await ann.$eval("p.notice", (p) => p.textContent).catch(() => "");
+check("her page says she may have removed you", caraNotice.includes("Cara Example may have removed you as a friend"), caraNotice);
+await ann.screenshot({ path: `${OUT}/friend-removed-you.png` });
+await Promise.all([ann.waitForNavigation(), ann.click("main form.inline button")]);
+check("Remove friend on her page forgets her", new URL(ann.url()).pathname === "/friend"
+  && sql(stateA, "SELECT COUNT(*) AS n FROM connections")[0].n === 0 && sql(stateA, "SELECT COUNT(*) AS n FROM friend_links")[0].n === 0);
 
 check("no script errors", errors.length === 0, errors.join(" | "));
 await browser.close();

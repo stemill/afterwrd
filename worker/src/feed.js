@@ -17,6 +17,10 @@ import { INBOX_JOIN } from "./notify.js";
 // first, keeping a few places for the friends asked longest ago, so a quiet friend or a missed note still turns up.
 const SITES = 40;
 const TAKING_TURNS = 5;
+// A friend's site that hasn't answered for a day (or says this site isn't connected) stops being mentioned on Home,
+// and Friends says so instead, with a way to remove them (views.js). It's still asked, but once an hour at most.
+export const QUIET_SECONDS = 86_400;
+const QUIET_ASK_SECONDS = 3600;
 const TARGET_RE = /^(post-\d+-[0-9a-f]{8}|photo-[0-9a-f]{64})$/;
 
 export const connectionById = (db, id) => db.prepare("SELECT * FROM connections WHERE id = ? AND connected_at IS NOT NULL AND approved_at IS NOT NULL")
@@ -44,8 +48,26 @@ export async function markMine(db, connectionId, target, comments, ownOrigin) {
     : c.from === ownOrigin ? [] : [{ ...c, mine: false }]));
 }
 
+/** Whether a friend's site has gone quiet, or says this site isn't connected any more: shown on Friends, not Home. */
+export const gone = (c, at = now()) => Boolean(c.said_no || (c.missing_since && c.missing_since <= at - QUIET_SECONDS));
+
+/**
+ * Notes how a friend's site just answered (`error`: what was thrown, if anything) on `connection` itself, and returns
+ * the statement that keeps it. Only callSite's errors (which carry a status; 0 if it couldn't be reached) say the
+ * site isn't answering; 401 means it doesn't know this site's key: they removed it.
+ */
+export function noteAnswer(db, connection, error = null, at = now()) {
+  Object.assign(connection, error?.status !== undefined
+    ? { missing_since: connection.missing_since ?? at, said_no: error.status === 401 ? 1 : 0 }
+    : { reached_at: at, missing_since: null, said_no: 0 });
+  return db.prepare("UPDATE connections SET reached_at = ?, missing_since = ?, said_no = ? WHERE id = ?")
+    .bind(connection.reached_at ?? null, connection.missing_since, connection.said_no, connection.id);
+}
+
 /** Which friends' sites Home asks this time (see SITES). */
-async function sitesToAsk(db, connections) {
+async function sitesToAsk(db, all) {
+  const at = now();
+  const connections = all.filter((c) => !gone(c, at) || (c.feed_checked_at ?? 0) <= at - QUIET_ASK_SECONDS);
   if (connections.length <= SITES) return connections;
   const { results: lately } = await db.prepare(`SELECT i.connection_id AS id, MAX(i.created_at) AS latest FROM inbox i ${INBOX_JOIN}
     WHERE i.kind = 'post' GROUP BY i.connection_id ORDER BY latest DESC LIMIT ?`).bind(SITES - TAKING_TURNS).all();
@@ -63,12 +85,15 @@ export async function loadFeed(db, ownOrigin) {
       const feed = await callSite(connection.origin, "/_peer/feed", { key: connection.their_key });
       return { connection, feed: cleanFeed(feed, connection.origin) };
     } catch (error) {
-      return { connection, error: error.message };
+      return { connection, error };
     }
   }));
   const checked = now();
-  if (asking.length) {
-    await db.batch(asking.map((c) => db.prepare("UPDATE connections SET feed_checked_at = ? WHERE id = ?").bind(checked, c.id)));
+  if (replies.length) {
+    await db.batch(replies.flatMap(({ connection, error }) => [
+      db.prepare("UPDATE connections SET feed_checked_at = ? WHERE id = ?").bind(checked, connection.id),
+      noteAnswer(db, connection, error, checked),
+    ]));
   }
   // Keep names up to date if a friend changes theirs.
   const renamed = replies.filter((r) => r.feed?.name && r.feed.name !== r.connection.name);
@@ -86,7 +111,10 @@ export async function loadFeed(db, ownOrigin) {
     }
   }
   posts.sort((a, b) => b.created_at - a.created_at);
-  return { posts, connections, unreachable: replies.filter((r) => r.error) };
+  // Home only mentions a friend's site that's just stopped answering; one that's gone quiet is on Friends instead.
+  const unreachable = replies.filter((r) => r.error && !gone(r.connection, checked))
+    .map((r) => ({ connection: r.connection, error: r.error.message }));
+  return { posts, connections, unreachable };
 }
 
 export async function handleFeed(request, env, url) {

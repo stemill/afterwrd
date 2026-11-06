@@ -4,3 +4,4 @@ export { markMine } from "../../src/feed.js";
 export { markMine as markMineInGroup, parseGroupPage } from "../../src/membership.js";
 export { callSite, siteOrigin } from "../../src/peers.js";
 export { icsFile, parseEvent, readEventForm } from "../../src/calendar.js";
+export { loadRelease } from "../../src/deploy.js";
