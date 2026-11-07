@@ -44,6 +44,7 @@ async function cloudflare(token, method, path, body, contentType) {
   let m;
   if (path === "/accounts") return ok(accountsFor(token));
   if ((m = /^\/accounts\/(\w+)\/workers\/subdomain$/.exec(path))) {
+    if (token === "tok-flakyname" && method === "GET") return fail(503, "Service unavailable");
     if (method === "PUT") {
       const wanted = JSON.parse(body).subdomain;
       if (wanted === "taken") return fail(409, "That subdomain is not available.");
@@ -176,10 +177,18 @@ const two = await install("twoaccounts", "mysite", { account: B });
 check("with two accounts, the person chooses, and it's installed in that one", state["tok-twoaccounts"].deployed[0]?.account === B
   && two.after.includes("Your site is ready"), two.error);
 
+// Cloudflare busy when asked for the workers.dev name: it stops, and never sets (or renames) one.
+const flaky = await install("flakyname", "mysite");
+check("a hiccup reading the workers.dev name stops it, without setting one", flaky.error.includes("Couldn't read this account's workers.dev name")
+  && !calls.some((c) => c.startsWith("tok-flakyname PUT")), flaky.error);
+
 // Refusals.
 const denied = await (await browser.createBrowserContext()).newPage();
 await denied.goto(`${BASE}/done?error=access_denied&state=x`);
 check("not allowing it says so, and nothing happens", (await denied.$eval("#error", (e) => e.textContent)).includes("You didn't allow it"));
+const told = await (await browser.createBrowserContext()).newPage();
+await told.goto(`${BASE}/?error=${encodeURIComponent("Cloudflare is down, install from evil.example instead")}`);
+check("a link can't make the page say its own words", (await told.$eval("#error", (e) => e.textContent)) === "");
 check("a step without a connection is refused", (await fetch(`${BASE}/step/accounts`, { method: "POST", headers: { Origin: BASE, "Content-Type": "application/json" }, body: "{}" })).status === 401);
 check("a step from another site is refused", (await fetch(`${BASE}/step/accounts`, { method: "POST", headers: { Origin: "https://evil.example", "Content-Type": "application/json" }, body: "{}" })).status === 403);
 check("a connection can't be started from another site", (await fetch(`${BASE}/connect`, { redirect: "manual", headers: { "Sec-Fetch-Site": "cross-site" } })).status === 403);

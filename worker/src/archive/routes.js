@@ -14,7 +14,7 @@ import { SITE_ID } from "../posts.js";
 import { profilePictures } from "../photos.js";
 import { newDevices } from "../admin.js";
 import { recentChecks } from "../checks.js";
-import { securityFixWaiting, updateWaiting } from "../update.js";
+import { securityFixWaiting, waitingRelease } from "../update.js";
 import { now } from "../util.js";
 import { fmtDate, fmtMonth } from "./format.js";
 import * as views from "./views.js";
@@ -96,12 +96,13 @@ export async function renderArchive(request, env, url, user, work) {
     zone: request.cf?.timezone ?? "Europe/London", // where the reader is, as near as Cloudflare can tell
     connected: Boolean(connectedToken(request)), // an hour's Cloudflare token from Connect (cloudflare.js), for groups
     requests: (await first(db, "SELECT COUNT(*) AS n FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL")).n,
-    updateWaiting: await updateWaiting(env, work),
+    newRelease: await waitingRelease(env, work), // the newer afterwrd that's out, if any
     me: me.results[0] ?? { id: -1, name: await ownerName(db), is_me: 1 },
     ownerName: await ownerName(db), // their name here, which can differ from the Facebook one (me.name)
     profile: await profilePictures(db),
     friendFaces: await friendFaces(db),
   };
+  ctx.updateWaiting = Boolean(ctx.newRelease);
   // A profile picture or cover chosen here takes over from Facebook's.
   if (ctx.profile.profile) Object.assign(ctx.me, { profile_hash: ctx.profile.profile.hash, profile_media_id: ctx.profile.profile.id });
   if (ctx.profile.cover) Object.assign(ctx.me, { cover_hash: ctx.profile.cover.hash, cover_media_id: ctx.profile.cover.id });

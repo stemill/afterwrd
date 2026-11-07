@@ -33,6 +33,9 @@ const BINDINGS = [{ type: "assets", name: "ASSETS" }, { type: "d1", name: "DB", 
 const exchanges = [];
 const asked = [];
 const auditFor = (token) => [
+  { action: { type: "create", time: "2026-11-07T18:01:50Z", description: "Create Workers Subdomain" }, actor: { context: "oauth" }, resource: { product: "workers", type: "subdomain" } },
+  ...(token === "tok-tampered" ? [{ action: { type: "update", time: "2026-11-07T19:10:00Z", description: "Update Workers Subdomain" },
+    actor: { context: "oauth" }, resource: { product: "workers", type: "subdomain" } }] : []),
   { action: { type: "view", time: "2026-11-07T18:00:00Z", description: "View" }, actor: { context: "oauth" }, resource: { product: "workers", type: "scripts" } },
   { action: { type: "update", time: "2026-11-07T18:01:00Z", description: "LOGIN" }, actor: { context: "api" }, resource: { product: "", type: "user" } },
   { action: { type: "create", time: "2026-11-07T18:02:00Z", description: "Create D1 Database" }, actor: { context: "oauth" }, resource: { product: "d1", type: "database" } },
@@ -80,6 +83,12 @@ const server = createServer(async (req, res) => {
   if (api === `/accounts/${ACCOUNT}/workers/scripts/localhost/script-settings`) {
     return send(200, { success: true, result: { logpush: false, tags: [], observability: { enabled: false },
       tail_consumers: token === "tok-setup" ? [{ service: "copy-everything" }] : [] } });
+  }
+  if (api === `/accounts/${ACCOUNT}/workers/scripts/other/deployments`) {
+    return send(200, { success: true, result: { deployments: [{ id: "d2", versions: [{ version_id: "v-other", percentage: 100 }] }] } });
+  }
+  if (api === `/accounts/${ACCOUNT}/workers/scripts/other/versions/v-other`) {
+    return send(200, { success: true, result: { id: "v-other", resources: { bindings: [{ type: "d1", name: "DB", id: token === "tok-backdoor" ? "x" : "its-own" }] } } });
   }
   if (api === `/accounts/${ACCOUNT}/workers/scripts/localhost/deployments`) {
     return send(200, { success: true, result: { deployments: [{ id: "d1", versions: [{ version_id: "v-1", percentage: 100 }] }] } });
@@ -165,7 +174,7 @@ check("the code is swapped with the PKCE secret that matches the challenge", exc
   && b64url(createHash("sha256").update(exchange.code_verifier ?? "").digest()) === good.relay.searchParams.get("challenge"));
 check("a genuine site is reported as exactly the release", good.after.includes("running exactly afterwrd 9.9.9"), good.after.slice(0, 300));
 check("…connected to exactly what afterwrd uses", good.after.includes("connected to exactly what afterwrd uses"), good.after.slice(0, 500));
-check("…and its account as only doing what afterwrd does, over both pages of the log", good.after.includes("did only what installing, updating and groups do (4 changes)"), good.after.slice(0, 600));
+check("…and its account as only doing what afterwrd does, over both pages of the log", good.after.includes("did only what installing, updating and groups do (5 changes)"), good.after.slice(0, 600));
 check("the audit log is read newest first, page by page", audits.some((a) => a.direction === "desc" && a.cursor === "page-3"));
 check("the result names the Worker and the end of the account id, not the account's name", good.after.includes("Worker localhost") && good.after.includes("abcdef")
   && !good.after.includes("someone@example.com"));
@@ -202,6 +211,13 @@ check("tampered code is reported", bad.after.includes("is not the published afte
 check("…and changes afterwrd doesn't make, escaped", bad.after.includes("Create DNS Record <img src=x onerror=alert(1)>") && bad.after.includes("someone-else")
   && (await bad.friend.$$("main img")).length === 0, bad.after.slice(0, 900));
 check("…without keeping the names of other things in their account", !bad.after.includes("secret.example"));
+
+check("…including a later change to the account's workers.dev name", bad.after.includes("Update Workers Subdomain"), bad.after.slice(0, 900));
+
+// --- another Worker on the site's database ------------------------------------------------------------------------
+const backdoor = await runCheck("backdoor");
+check("another Worker connected to the site's database is reported, whatever it's called", backdoor.after.includes("Another Worker in the account is connected to its database")
+  && backdoor.after.includes(": other."), backdoor.after.slice(0, 600));
 
 // --- genuine code, set up to leak ----------------------------------------------------------------------------------
 const setup = await runCheck("setup", "http://localhost:8798");
@@ -248,7 +264,7 @@ check("…and leaves the link usable", (await fetch(`${failed.link}/start`, { me
 await owner.goto(`${BASE}/friend`);
 const listed = await owner.$$eval(".checks > li", (l) => l.map((li) => li.textContent.replace(/\s+/g, " ")));
 const count = (word) => listed.filter((t) => t.includes(word)).length;
-check("Friends lists the checks with a verdict each", count("check again later") === 1 && count("all good") === 2 && count("needs a look") === 3 && count("couldn't check") === 1,
+check("Friends lists the checks with a verdict each", count("check again later") === 1 && count("all good") === 2 && count("needs a look") === 4 && count("couldn't check") === 1,
   `${listed.length}: ${listed.map((t) => t.slice(0, 60)).join(" | ")}`);
 check("…with no image injected from Cloudflare's answers", (await owner.$$(".checks img")).length === 0);
 

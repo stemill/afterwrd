@@ -23,6 +23,11 @@ const HOME = "https://install.afterwrd.app";
 const AUTHORIZE = "https://dash.cloudflare.com/oauth2/auth";
 const START = "__Host-install_start";
 const TOKEN = "__Host-install_token";
+const ERRORS = {
+  denied: "You didn't allow it, so nothing was installed.",
+  expired: "That connection expired or wasn't started here. Connect again.",
+  failed: "Cloudflare didn't finish connecting. Connect again.",
+};
 const NAME_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
 
@@ -61,7 +66,7 @@ async function route(request, here) {
   const { url } = here;
   if (url.protocol === "http:" && !here.testing) return Response.redirect(`https://${url.host}${url.pathname}${url.search}`, 301);
   if (request.method === "GET" && url.pathname === "/") {
-    return new Response(page(Boolean(readCookie(request, TOKEN)), url.searchParams.get("go") === "1", url.searchParams.get("error")),
+    return new Response(page(Boolean(readCookie(request, TOKEN)), url.searchParams.get("go") === "1", ERRORS[url.searchParams.get("error")] ?? null),
       { headers: { "Content-Type": "text/html; charset=utf-8" } });
   }
   if (request.method === "GET" && url.pathname === "/connect") return connect(request, here);
@@ -99,18 +104,19 @@ async function connect(request, { home }) {
 
 async function done(request, { url, env, home }) {
   const [state, verifier] = (readCookie(request, START) ?? "").split(".");
-  const back = (error) => withCookie(Response.redirect(`${url.origin}/?error=${encodeURIComponent(error)}`, 303), clear(START, "Lax"));
+  // Only a word goes in the address, and the page shows fixed words for it: a link can't make this page say anything else.
+  const back = (error) => withCookie(Response.redirect(`${url.origin}/?error=${error}`, 303), clear(START, "Lax"));
   if (url.searchParams.get("error")) {
-    return back(url.searchParams.get("error") === "access_denied" ? "You didn't allow it, so nothing was installed." : "Cloudflare couldn't connect.");
+    return back(url.searchParams.get("error") === "access_denied" ? "denied" : "failed");
   }
-  if (!state || !verifier || url.searchParams.get("state") !== state) return back("That connection expired or wasn't started here. Connect again.");
+  if (!state || !verifier || url.searchParams.get("state") !== state) return back("expired");
   const code = url.searchParams.get("code") ?? "";
-  if (!CODE_RE.test(code)) return back("Cloudflare didn't send a code.");
+  if (!CODE_RE.test(code)) return back("failed");
   let data;
   try {
     data = await exchangeCode(env, code, verifier, url.origin, `${home}/done`);
-  } catch (error) {
-    return back(error.message);
+  } catch {
+    return back("failed");
   }
   const seconds = Math.max(60, Math.min(Number(data.expires_in) || 3600, 3600) - 60);
   // On from here with a page of our own rather than a redirect: the browser arrived from Cloudflare's site, so a
@@ -139,9 +145,14 @@ const releases = ({ testing, env }) => (testing && env.RELEASES_ROOT) || `https:
 /** The account's workers.dev name (the part between a site's name and workers.dev), or null if it hasn't one yet. */
 async function workersDev(token, account) {
   try {
-    return (await api(token, `/accounts/${account}/workers/subdomain`))?.subdomain || null;
-  } catch {
-    return null;
+    const name = (await api(token, `/accounts/${account}/workers/subdomain`))?.subdomain;
+    if (typeof name !== "string" || !name) throw new Error("Cloudflare gave an unexpected answer about this account's workers.dev name.");
+    return name;
+  } catch (error) {
+    // Only Cloudflare saying there isn't one counts as none: anything else (busy, down, unexpected) stops here, so a
+    // hiccup can never lead to renaming a name that exists, which would move every site in the account.
+    if (error.status === 404) return null;
+    throw new Error(`Couldn't read this account's workers.dev name: ${error.message.replace(/^Cloudflare said: /, "")} Try again.`);
   }
 }
 
@@ -180,10 +191,7 @@ const STEPS = {
         + "from an earlier try, delete it in Cloudflare (Workers & Pages) and try again.");
     }
     if ((await databaseInUse(token, account, site))?.tables) throw new Error(databaseTakenMessage(site));
-    const latest = await fetch(`${releases(here)}/latest/download/manifest.json`, { headers: { "User-Agent": "afterwrd" } });
-    const version = latest.ok ? (await latest.json().catch(() => ({}))).version : null;
-    if (!VERSION_RE.test(version ?? "")) throw new Error("Couldn't find afterwrd's latest release on GitHub. Try again in a minute.");
-    return { version, site: siteAddress(here, site, domain) };
+    return { version: await latestVersion(here), site: siteAddress(here, site, domain) };
   },
 
   async assets(token, { account, name, version }, here) {
@@ -210,8 +218,16 @@ const STEPS = {
   finish() {}, // handled in route: drops the token
 };
 
+// The latest release only: the version comes back from the page, so it's checked against GitHub's latest again.
+async function latestVersion(here) {
+  const latest = await fetch(`${releases(here)}/latest/download/manifest.json`, { headers: { "User-Agent": "afterwrd" } });
+  const version = latest.ok ? (await latest.json().catch(() => ({}))).version : null;
+  if (!VERSION_RE.test(version ?? "")) throw new Error("Couldn't find afterwrd's latest release on GitHub. Try again in a minute.");
+  return version;
+}
+
 async function release(here, version) {
-  if (!VERSION_RE.test(String(version ?? ""))) throw new Error("Unknown release.");
+  if (!VERSION_RE.test(String(version ?? "")) || version !== await latestVersion(here)) throw new Error("A newer afterwrd has just come out. Start again.");
   return loadRelease(`${releases(here)}/download/v${version}`);
 }
 

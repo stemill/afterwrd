@@ -101,6 +101,19 @@ sql(`INSERT OR REPLACE INTO settings (key, value) VALUES ('latest_release', '${J
 check("Home says an update fixes a security problem", (await alerts(phone)).some((t) => t.includes("99.0.0 fixes a security problem")), (await alerts(phone)).join(" | "));
 await phone.goto(`${BASE}/_admin/update`);
 check("…and so does the Update page", (await phone.$eval("main", (m) => m.textContent)).includes("It fixes a security problem"));
+// An ordinary update: a quiet line on Home, and the mark on every page, even one that was already open.
+sql(`INSERT OR REPLACE INTO settings (key, value) VALUES ('latest_release', '${JSON.stringify({ version: "99.0.2", checked: nowSeconds,
+  latest: { tag: "v99.0.2", version: "99.0.2", notes: "Made up.", page: "https://example.com/" } })}')`);
+const homeLines = async () => { await phone.goto(`${BASE}/`); return phone.$$eval(".stream > .notice", (n) => n.map((x) => x.textContent.replace(/\s+/g, " ").trim())); };
+check("Home says quietly when a new version is out", (await homeLines()).some((t) => t.startsWith("afterwrd 99.0.2 is out")), (await homeLines()).join(" | "));
+const ownerCookie = (await phone.cookies()).find((c) => c.name === "__Host-session").value;
+const live = await (await fetch(`${BASE}/_live?since=0`, { headers: { Cookie: `__Host-session=${ownerCookie}` } })).json();
+check("the live check reports it", live.update === "99.0.2", JSON.stringify(live));
+await phone.goto(`${BASE}/_admin`);
+await phone.waitForFunction(() => document.querySelector('.menu a[href="/_admin/update"]')?.textContent.includes("Update available"), { timeout: 10000 })
+  .catch(() => {});
+check("an owner page gains the mark by itself, dot included", (await phone.$eval('.menu a[href="/_admin/update"]', (a) => a.textContent)).includes("Update available")
+  && (await phone.$$("details.me summary .dot")).length === 1);
 sql("DELETE FROM settings WHERE key = 'latest_release'");
 
 await phone.goto(`${BASE}/_admin`);

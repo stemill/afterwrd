@@ -28,7 +28,7 @@ const PERMISSIONS = [{ key: "workers_scripts", type: "edit" }, { key: "d1", type
 const TOKEN_URL = "https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys="
   + encodeURIComponent(JSON.stringify(PERMISSIONS)) + "&accountId=*&zoneId=all&name=afterwrd%20update";
 const TOKENS_PAGE = "https://dash.cloudflare.com/profile/api-tokens";
-const CHECK_SECONDS = 6 * 3600; // how often the mark on the Update button looks for a new release
+const CHECK_SECONDS = 3600; // how often the mark on the Update button (and Home's line) looks for a new release
 const FRESH_SECONDS = 300; // how long the Update page trusts its last answer from GitHub
 
 export async function handleUpdate(request, env, url, owner) {
@@ -136,6 +136,9 @@ async function latestRelease(db) {
     // can say so on Home, even if later releases fixed nothing of the kind.
     if (typeof fix === "string" && TAG_RE.test(`v${fix}`) && !newer(fix, version)) latest.securityFix = fix;
   } catch (error) {
+    // Noted as checked, so a GitHub that's down or slow is asked again in an hour, not on every page and poll.
+    await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('latest_release', ?)")
+      .bind(JSON.stringify({ ...known, checked: now() })).run().catch(() => {});
     return known.latest ?? { error: error.message };
   }
   await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('latest_release', ?)")
@@ -149,18 +152,21 @@ const knownRelease = async (db) => {
 };
 
 /**
- * Whether a newer release is out, for a mark on the owner's Update button. Uses the copy of the latest version kept
- * in settings and refreshed, after the page is sent (`work.waitUntil`), at most every six hours.
+ * The newer release that's out, if there is one (else null), for a mark on the owner's Update button and a line on
+ * Home. Uses the copy of the latest version kept in settings, refreshed at most hourly, after the page is sent
+ * (`work.waitUntil`); a page that's open gets the news within 30 seconds from live.js asking /_live.
  */
-export async function updateWaiting(env, work) {
+export async function waitingRelease(env, work) {
   const known = await knownRelease(env.DB);
   if (!known.checked || now() - known.checked > CHECK_SECONDS) {
     const refresh = latestRelease(env.DB).catch(() => {});
     if (work?.waitUntil) work.waitUntil(refresh);
     else await refresh;
   }
-  return Boolean(known.version && TAG_RE.test(`v${known.version}`) && newer(known.version, VERSION));
+  return known.version && TAG_RE.test(`v${known.version}`) && newer(known.version, VERSION) ? known.version : null;
 }
+
+export const updateWaiting = async (env, work) => Boolean(await waitingRelease(env, work));
 
 /** The latest release this site knows of, and the newest one that fixed a security problem (for checks.js). */
 export async function knownLatest(db) {

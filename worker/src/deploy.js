@@ -1,11 +1,13 @@
 // Installing or updating afterwrd in someone's own Cloudflare account, through Cloudflare's API with a token they
-// give us. Used by the site's Update page (src/update.js) and by the installer (installer/installer.js, which
-// the release script bundles this file into). Nothing here stores the token.
+// give us. Used by the site's Update page (src/update.js), the Deploy-page installer (installer/installer.js, which
+// the release script bundles this file into) and the installer at install.afterwrd.app (central/index.js). Nothing
+// here stores the token.
 //
 // A release is a folder of files published at `base` (a GitHub release): manifest.json lists every code module
 // and site file with its SHA-256, and each file is published under its hash. Every file is checked against
 // its hash before it's used, so a release can't be swapped piecemeal; the manifest itself is checked against a
-// pinned hash when the caller has one (the installer does).
+// pinned hash when the caller has one (the Deploy-page installer does; the Update page and install.afterwrd.app take
+// the release from GitHub as published, so trust rests on GitHub's release, as the rebuild check in SECURITY.md covers).
 
 export const API = "https://api.cloudflare.com/client/v4";
 
@@ -114,7 +116,9 @@ export async function databaseInUse(token, account, name, call = api) {
   if (!found) return null;
   const answer = await call(token, `/accounts/${account}/d1/database/${found.uuid}/query`, { method: "POST",
     body: JSON.stringify({ sql: "SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\'" }) });
-  return { ...found, tables: Number(answer?.[0]?.results?.[0]?.n ?? 0) };
+  const tables = Number(answer?.[0]?.results?.[0]?.n);
+  // An answer in a shape not expected is taken as "has things in it": never take over a database by mistake.
+  return { ...found, tables: Number.isFinite(tables) ? tables : 1 };
 }
 
 export const databaseTakenMessage = (name) => `There's already a database called "${name}" in this Cloudflare account with `

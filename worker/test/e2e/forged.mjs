@@ -145,7 +145,7 @@ github.close();
     const call = async (token, path, init = {}) => {
       calls.push(`${init.method ?? "GET"} ${path}`);
       if (path.includes("/d1/database?name=")) return databases.map(({ uuid, name }) => ({ uuid, name }));
-      if (path.endsWith("/query")) return [{ results: [{ n: databases[0].tables }], success: true }];
+      if (path.endsWith("/query")) return databases[0].tables === "odd" ? [{ meta: {} }] : [{ results: [{ n: databases[0].tables }], success: true }];
       if (init.method === "POST") return { uuid: "new", name: "afterwrd" };
       throw new Error(`unexpected ${path}`);
     };
@@ -158,6 +158,8 @@ github.close();
     && !empty.calls.some((c) => c === "POST /accounts/a/d1/database"));
   const used = fake([{ uuid: "old", name: "afterwrd", tables: 12 }]);
   const refused = await findOrCreateDatabase("t", "a", "afterwrd", used.call).then(() => null, (e) => e.message);
+  const odd = fake([{ uuid: "odd", name: "afterwrd", tables: "odd" }]);
+  check("an answer in an unexpected shape counts as having things in it", await findOrCreateDatabase("t", "a", "afterwrd", odd.call).then(() => false, () => true));
   check("one with things in it is refused, and nothing is made or deleted", /already a database called "afterwrd"/.test(refused ?? "")
     && used.calls.every((c) => c.startsWith("GET ") || c.endsWith("/query")));
 }

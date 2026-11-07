@@ -310,6 +310,12 @@ and the friends they've chosen. This page explains how, and how to check it for 
   <h2>What it can't protect against</h2>
   <p>Being honest about the edges:</p>
   <ul>
+    <li><b>The hour while installing or updating.</b> Whatever installs or updates your site is allowed to change Workers and
+    databases in your account for that hour, and Cloudflare can't cut it short. A check by a friend's site afterwards
+    catches changes to your site's code, its setup, other Workers connected to its database, and changes logged in your
+    account's audit log; but a change made straight to the database itself may not show up anywhere. That's why
+    access is only ever asked for an hour at a time, and why it's worth installing into a Cloudflare account used for
+    nothing else.</li>
     <li><b>Your Cloudflare account.</b> Anyone who gets into it can read your database and change your Worker. Use a
     strong password and two-factor authentication there, and ideally an account used for nothing else.</li>
     <li><b>Your devices.</b> A passkey is as safe as the phone or computer it's on. If one is lost, remove its passkey from

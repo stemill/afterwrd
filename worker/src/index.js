@@ -76,7 +76,7 @@ async function route(request, env, work) {
   // Connecting to Cloudflare, for updating and groups (an hour's token in a cookie; cloudflare.js).
   if (url.pathname.startsWith("/_cloudflare/")) return (await handleCloudflare(request, env, url)) ?? new Response("Not found", { status: 404 });
   if (url.pathname === "/_comments" || url.pathname.startsWith("/_comments/")) return handleComments(request, env, url, user);
-  if (url.pathname === "/_live") return handleLive(request, env, url, user);
+  if (url.pathname === "/_live") return handleLive(request, env, url, user, work);
   if (url.pathname.startsWith("/_feed/")) return handleFeed(request, env, url);
   if (url.pathname.startsWith("/_groups/")) return handleGroupActions(request, env, url);
   if (!reading) return new Response("Method not allowed", { status: 405 });

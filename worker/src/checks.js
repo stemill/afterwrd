@@ -43,6 +43,7 @@ const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 const WORKERS_DEV = /^[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev$/;
 const VERSION_RE = /name: "afterwrd-worker",\s*version: "(\d+\.\d+\.\d+)"/;
 const AUDIT_PAGE = 500;
+const OTHER_WORKERS = 8; // other Workers looked at (two calls each, within the free plan's 50 a request)
 // The bindings afterwrd gives a personal site (src/deploy.js deployVersion), and the secrets it may have.
 const BINDINGS = ["assets ASSETS", "d1 DB", "durable_object_namespace MEDIA MediaStore", "durable_object_namespace OUTBOX Outbox"];
 const SECRETS = new Set(["SETUP_CODE", "UPDATE_TOKEN"]);
@@ -244,11 +245,12 @@ export async function checkSite(token, site, env, here, { latest = {} } = {}, fe
   const found = [];
   for (const account of ((await getJSON("/accounts")).result ?? []).slice(0, 5)) {
     if (typeof account?.id !== "string" || !/^[0-9a-f]{32}$/.test(account.id)) continue;
-    const worker = ((await getJSON(`/accounts/${account.id}/workers/scripts`)).result ?? []).find((w) => w?.id === script);
-    if (worker) found.push({ account: account.id, worker });
+    const workers = (await getJSON(`/accounts/${account.id}/workers/scripts`)).result ?? [];
+    const worker = workers.find((w) => w?.id === script);
+    if (worker) found.push({ account: account.id, worker, others: workers.filter((w) => typeof w?.id === "string" && w.id !== script) });
   }
   if (found.length !== 1) return { ...result, problem: found.length ? "several" : "missing" };
-  const { account, worker } = found[0];
+  const { account, worker, others } = found[0];
   const at = `/accounts/${account}/workers/scripts/${script}`;
   result.account = account.slice(-6);
   result.created = Math.floor(Date.parse(worker.created_on) / 1000) || null;
@@ -316,6 +318,26 @@ export async function checkSite(token, site, env, here, { latest = {} } = {}, fe
       const missing = BINDINGS.filter((b) => !have.includes(b));
       if (extra.length) problems.push(`It's connected to things afterwrd doesn't use: ${extra.slice(0, 8).join(", ")}.`);
       if (missing.length) problems.push(`It's missing parts afterwrd needs: ${missing.join(", ")}.`);
+      // Any other Worker connected to this site's database could read and change everything in it, whatever it's
+      // called (a name like a group's included), so each one's bindings are looked at too.
+      const database = (detail.resources?.bindings ?? []).find((b) => b?.type === "d1" && b?.name === "DB");
+      const databaseId = database?.id ?? database?.database_id;
+      if (databaseId) {
+        const sharing = [];
+        for (const other of others.slice(0, OTHER_WORKERS)) {
+          try {
+            const live = ((await getJSON(`/accounts/${account}/workers/scripts/${encodeURIComponent(other.id)}/deployments`)).result?.deployments ?? [])[0]?.versions ?? [];
+            for (const v of live) {
+              const bindings = (await getJSON(`/accounts/${account}/workers/scripts/${encodeURIComponent(other.id)}/versions/${encodeURIComponent(v.version_id)}`)).result?.resources?.bindings ?? [];
+              if (bindings.some((b) => b?.type === "d1" && (b.id ?? b.database_id) === databaseId)) { sharing.push(text(other.id, 60)); break; }
+            }
+          } catch {
+            sharing.push(`${text(other.id, 60)} (couldn't be read)`);
+          }
+        }
+        if (sharing.length) problems.push(`Another Worker in the account is connected to its database, so it could read and change everything in it: ${sharing.join(", ")}. afterwrd never does that.`);
+        if (others.length > OTHER_WORKERS) problems.push(`The account has more Workers than this check looks at (${others.length}), so it couldn't make sure none of them is connected to its database.`);
+      }
       const runtime = detail.resources?.script_runtime ?? {};
       if (manifest && (runtime.compatibility_date !== manifest.compatibility_date
         || [...(runtime.compatibility_flags ?? [])].sort().join() !== [...(manifest.compatibility_flags ?? [])].sort().join())) {
@@ -344,15 +366,17 @@ export async function checkSite(token, site, env, here, { latest = {} } = {}, fe
 
 // What afterwrd does in an account through Connect: installing and updating its site, starting and deleting groups
 // (Workers named after the site), and the installer removing itself.
-function expected(e, script) {
+function expected(e, script, created) {
   if (e.context !== "oauth") return false;
+  const when = Math.floor(Date.parse(e.time) / 1000);
   const ours = e.resource === script || e.resource.startsWith(`${script}-`) || e.resource.startsWith("afterwrd-installer-");
   switch (`${e.type} ${e.what}`) {
     case "create workers/scripts.assets-upload-session": case "update workers/scripts": case "delete workers/scripts":
     case "create workers/scripts.subdomain": return ours;
     case "create d1/database": case "delete d1/database": return true;
-    // A brand-new account's workers.dev name, set by the installer at install.afterwrd.app.
-    case "create workers/subdomain": case "update workers/subdomain": return true;
+    // A brand-new account's workers.dev name, set by the installer at install.afterwrd.app just before it made the
+    // site. Changed any later, it would move every site in the account off its address, so it's flagged.
+    case "create workers/subdomain": case "update workers/subdomain": return Boolean(created && when && when <= created + 300);
     default: return false;
   }
 }
@@ -371,7 +395,7 @@ async function readAuditPage(access, env, here, result, cursor, fetcher = fetch)
     const e = { time: text(raw.action?.time, 40), type: text(raw.action?.type, 20), description: text(raw.action?.description, 100),
       what: `${product}/${text(raw.resource?.type, 60)}`, resource: text(raw.resource?.id, 100), context };
     result.audit.count++;
-    if (expected(e, result.script) || result.audit.unexpected.length >= 40) continue;
+    if (expected(e, result.script, result.created) || result.audit.unexpected.length >= 40) continue;
     // Only Workers' and databases' names are kept: the rest of someone's account is theirs.
     if (product !== "workers" && product !== "d1") e.resource = "";
     result.audit.unexpected.push(e);

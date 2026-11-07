@@ -48,7 +48,7 @@ export const FAVICON = `<link rel="icon" href="data:image/svg+xml,${encodeURICom
  * behind the person's picture, with Sign out last (a small form, so another site can't sign people out with a link);
  * `current`: the key of the page you're on; `face`: { initial, picture? } for the picture.
  */
-export function siteHeader({ main, menu, current, face = {} }) {
+export function siteHeader({ main, menu, current, face = {}, updateKnown = true }) {
   const badge = (b) => (b === true ? '<span class="dot" aria-hidden="true"></span>'
     : b ? `<span class="count">${Number(b)}<span class="hidden"> new</span></span>` : "");
   const link = ({ key, label, href, badge: b }) =>
@@ -58,7 +58,8 @@ export function siteHeader({ main, menu, current, face = {} }) {
     ? `<img src="${escape(face.picture)}" alt="">`
     : face.initial ? escape(face.initial) : icon("profile");
   // data-now is when the page was made, so live.js can ask what's new since (see live.js).
-  return `<header class="site" data-now="${now()}"><div class="bar">
+  // data-ask-soon: this page doesn't know whether an update is waiting, so live.js asks right away.
+  return `<header class="site" data-now="${now()}"${updateKnown ? "" : " data-ask-soon"}><div class="bar">
   <a class="brand" href="/" aria-label="afterwrd, home">${LOGO}</a>
   <nav class="main" aria-label="Main">${main.map(link).join("")}</nav>
   <details class="me">
@@ -104,5 +105,5 @@ export const ownerMenu = ({ memories = true, updateWaiting = false } = {}) => [
 
 /** The header for the owner's own pages (People, Import, Update…), which sit behind the picture. */
 export function ownerHeader(current) {
-  return siteHeader({ main: ownerMain(), menu: ownerMenu(), current });
+  return siteHeader({ main: ownerMain(), menu: ownerMenu(), current, updateKnown: false });
 }

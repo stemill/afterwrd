@@ -51,6 +51,17 @@
     }
     bar.querySelector("span").textContent = text;
   }
+  // A newer afterwrd: the dot on the picture, and "Update available" behind it.
+  function markUpdate(version) {
+    const link = header.querySelector('.menu a[href="/_admin/update"]');
+    if (!version || !link || link.querySelector(".dot")) return;
+    link.querySelector("span").textContent = "Update available";
+    const dot = () => Object.assign(document.createElement("span"), { className: "dot" });
+    link.append(dot());
+    const summary = header.querySelector("details.me summary");
+    if (summary && !summary.querySelector(".dot")) summary.append(dot());
+  }
+
   const plural = (n, word) => `${n} new ${word}${n === 1 ? "" : "s"}`;
 
   async function check() {
@@ -66,6 +77,7 @@
     } catch { return; }
     setCount(header.querySelector('a[href="/activity"]'), news.notifications);
     setCount(header.querySelector('a[href="/friend"]'), news.requests);
+    markUpdate(news.update);
     const parts = [];
     if (location.pathname === "/" && news.posts) parts.push(plural(news.posts, "post") + " from friends");
     if (news.comments) parts.push(plural(news.comments, "comment"));
@@ -74,6 +86,7 @@
   }
 
   setInterval(check, EVERY);
+  if (header.hasAttribute("data-ask-soon")) setTimeout(check, 1500);
   document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - last > EVERY) check(); });
   window.afterwrdLive = { check }; // for the tests
 })();
