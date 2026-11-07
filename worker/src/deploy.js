@@ -9,10 +9,15 @@
 
 export const API = "https://api.cloudflare.com/client/v4";
 
+// Where the API calls below go: Cloudflare's, except when the installer at install.afterwrd.app is being tested on
+// this computer against a stand-in (central/index.js sets it per request, and only for a localhost address).
+let apiBase = API;
+export const useApiBase = (base) => { apiBase = base || API; };
+
 export async function api(token, path, init = {}) {
   const headers = { Authorization: `Bearer ${token}` };
   if (typeof init.body === "string") headers["Content-Type"] = "application/json";
-  const response = await fetch(`${API}${path}`, { ...init, headers });
+  const response = await fetch(`${apiBase}${path}`, { ...init, headers });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.success === false) {
     const message = data.errors?.map((e) => e.message).join("; ") || `HTTP ${response.status}`;
@@ -37,7 +42,7 @@ export const accountIds = async (token) => (await api(token, "/accounts")).map((
 /** The account (of those the token can see) that has a Worker called `script`, and that Worker's settings. */
 export async function findWorker(token, script) {
   for (const account of await api(token, "/accounts")) {
-    const response = await fetch(`${API}/accounts/${account.id}/workers/scripts/${script}/settings`, {
+    const response = await fetch(`${apiBase}/accounts/${account.id}/workers/scripts/${script}/settings`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (response.ok) return { account: account.id, settings: (await response.json()).result };

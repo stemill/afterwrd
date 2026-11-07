@@ -15,6 +15,7 @@ data/
 # Cloudflare Worker
 worker/node_modules/
 worker/.wrangler/
+worker/central/.wrangler/
 worker/release/
 worker/generated/
 

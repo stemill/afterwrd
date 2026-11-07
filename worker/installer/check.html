@@ -70,9 +70,9 @@ same browser, with the account you installed into.</p>
   <h2>1. What should be there</h2>
   <ul>
     <li><b><a href="https://dash.cloudflare.com/?to=/:account/workers-and-pages" target="_blank" rel="noopener">Workers &amp; Pages</a></b>:
-    your site, under the name you chose (<code>afterwrd</code> unless you changed it). Nothing called
-    <code>afterwrd-installer-…</code>: the installer removes itself once your site is running. Each group you start later
-    appears here as a Worker of its own.</li>
+    your site, under the name you chose (<code>afterwrd</code> unless you changed it). If you used Cloudflare's Deploy page,
+    nothing called <code>afterwrd-installer-…</code>: that installer removes itself once your site is running. Each group you
+    start later appears here as a Worker of its own.</li>
     <li><b><a href="https://dash.cloudflare.com/?to=/:account/workers/d1" target="_blank" rel="noopener">D1</a></b>: one database with
     your site's name (and later one per group).</li>
     <li>Nothing else you didn't make yourself. afterwrd doesn't use scheduled (cron) triggers, custom domains, or any
@@ -83,19 +83,20 @@ same browser, with the account you installed into.</p>
 <section id="log">
   <h2>2. What the audit log should show</h2>
   <p>Open the <b><a href="https://dash.cloudflare.com/?to=/:account/audit-log" target="_blank" rel="noopener">audit log</a></b>
-  and look at the minutes around when you installed. First, Cloudflare's Deploy page making the installer (marked
-  <i>Dashboard</i>). Then what the installer did with the permission you allowed, each marked <b>OAuth</b> in the
-  <i>Actor Context</i> column, in this order:</p>
+  and look at the minutes around when you installed. What the installer did with the permission you allowed is
+  marked <b>OAuth</b> in the <i>Actor Context</i> column (the file uploads aren't marked), in this order:</p>
   <ol class="flow">
+    <li>For a brand-new account only: the account's workers.dev name being set</li>
     <li>Create Worker Assets Upload Session</li>
     <li>Upload Worker Assets (a few times)</li>
     <li>Create D1 Database</li>
     <li>Upload Worker</li>
     <li>Update Worker Script Subdomain</li>
-    <li>Delete Worker (the installer removing itself)</li>
   </ol>
-  <p>An update from your site's Update page leaves the same kind of trail, without the last three, and a group
-  being started leaves its own (with the group's name). Anything else marked <b>OAuth</b> around then, such as changes
+  <p>If you used Cloudflare's Deploy page instead, it starts with the Deploy page making the installer (marked
+  <i>Dashboard</i>) and ends with one more: Delete Worker, the installer removing itself.</p>
+  <p>An update from your site's Update page leaves a shorter trail (the upload session, the file uploads and Upload
+  Worker), and a group being started leaves its own (with the group's name). Anything else marked <b>OAuth</b> around then, such as changes
   to other Workers, DNS, members or API tokens, wasn't afterwrd. If there's a long list of page views, filter with
   <i>Action Type is not view</i>.</p>
   <p class="meta">Cloudflare's log says an app you allowed did these things, but not which app. That's why the

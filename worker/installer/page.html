@@ -71,37 +71,43 @@ talks to, how signing in and friends work, and how to check all of it in the pub
     own that's only afterwrd. Otherwise, <a href="https://dash.cloudflare.com/login" target="_blank" rel="noopener">sign in</a>.</p>
   </li>
   <li>
-    <h2>Install on Cloudflare</h2>
-    <p>Once you're signed in, this opens Cloudflare with afterwrd's installer ready to deploy. Leave the name as it is
-    (you'll choose your site's address in a moment) and press <b>Deploy</b>.</p>
-    <a class="button primary" href="__DEPLOY_LINK__" target="_blank" rel="noopener">Install on Cloudflare</a>
-    <p class="meta">If Cloudflare asks you to create an account, you aren't signed in in this browser:
-    <a href="https://dash.cloudflare.com/login" target="_blank" rel="noopener">sign in</a>, then press the button again.</p>
-    <details class="by-hand">
-      <summary>If the button doesn't work, do it by hand</summary>
-      <ol>
-        <li>Go to <a href="https://dash.cloudflare.com/?to=/:account/workers-and-pages" target="_blank" rel="noopener">Workers &amp; Pages</a>
-          (<span class="path">Compute → Workers &amp; Pages</span> in the left-hand menu), press <span class="path">Create application</span>,
-          then <span class="path">Start with Hello World</span>. Change the <b>Worker name</b> to <code>afterwrd</code>, leave
-          <b>Protect with Cloudflare Access</b> off and press <b>Deploy</b>.</li>
-        <li>Copy the installer, then in your new Worker press <b>Edit code</b>, select everything in the editor
-          (<kbd>⌘A</kbd> or <kbd>Ctrl+A</kbd>), paste over it and press <b>Deploy</b>.<br>
-          <button class="button" id="copy">Copy installer</button></li>
-      </ol>
-      <details>
-        <summary>See the installer (afterwrd __VERSION__)</summary>
-        <textarea id="installer" readonly spellcheck="false">__INSTALLER_HTML__</textarea>
-      </details>
-    </details>
-  </li>
-  <li>
-    <h2>Open your Worker and follow the installer</h2>
-    <p>Press <b>Visit</b> (on a phone, it's in the <b>⋯</b> menu at the top). The installer walks you through the rest: your site's address (<code>afterwrd</code> unless you
-    choose otherwise), <b>Connect Cloudflare</b> (press <b>Allow</b> on Cloudflare's page; it lasts an hour and nothing is
-    kept), then a passkey for you (your face, fingerprint or device PIN; no password). Then you're in: write a post, add
-    photos, and invite friends from <b>Friends</b>.</p>
+    <h2>Install</h2>
+    <p>Once you're signed in to Cloudflare in this browser, press <b>Install</b>. Choose your site's name, press
+    <b>Connect Cloudflare</b> and, on Cloudflare's page, <b>Allow</b> (it lets the installer make your site, for an hour;
+    nothing is kept). A couple of minutes later your site is ready: make yourself its owner with a passkey (your face,
+    fingerprint or device PIN; no password). Then you're in: write a post, add photos, and invite friends from
+    <b>Friends</b>. It all works on a phone.</p>
+    <a class="button primary" href="https://install.afterwrd.app/">Install</a>
     <p class="meta">Careful? <a href="/check/">Check your install</a> before you start: in your Cloudflare dashboard, or
     by asking a friend with afterwrd to check it (<b>Update → Ask a friend to check my site</b>).</p>
+    <details class="by-hand" id="by-hand">
+      <summary>Prefer not to use afterwrd's installer? Use Cloudflare's own Deploy page</summary>
+      <p>This puts the installer in your own account first, so nothing of afterwrd's touches your connection to
+      Cloudflare. It's easiest on a computer.</p>
+      <ol>
+        <li><a href="__DEPLOY_LINK__" target="_blank" rel="noopener">Open Cloudflare's Deploy page</a> with afterwrd's
+          installer ready. Leave the name as it is and press <b>Deploy</b>. (If Cloudflare asks you to create an account,
+          you aren't signed in in this browser.)</li>
+        <li>Press <b>Visit</b> (on a phone, it's in the <b>⋯</b> menu at the top). The installer asks for your site's
+          address, then <b>Connect Cloudflare</b> and <b>Allow</b>, installs afterwrd and removes itself.</li>
+      </ol>
+      <details>
+        <summary>Or by hand, if the Deploy page doesn't work</summary>
+        <ol>
+          <li>Go to <a href="https://dash.cloudflare.com/?to=/:account/workers-and-pages" target="_blank" rel="noopener">Workers &amp; Pages</a>
+            (<span class="path">Compute → Workers &amp; Pages</span> in the left-hand menu), press <span class="path">Create application</span>,
+            then <span class="path">Start with Hello World</span>. Change the <b>Worker name</b> to <code>afterwrd</code>, leave
+            <b>Protect with Cloudflare Access</b> off and press <b>Deploy</b>.</li>
+          <li>Copy the installer, then in your new Worker press <b>Edit code</b>, select everything in the editor
+            (<kbd>⌘A</kbd> or <kbd>Ctrl+A</kbd>), paste over it and press <b>Deploy</b>. Then open the Worker's address.<br>
+            <button class="button" id="copy">Copy installer</button></li>
+        </ol>
+        <details>
+          <summary>See the installer (afterwrd __VERSION__)</summary>
+          <textarea id="installer" readonly spellcheck="false">__INSTALLER_HTML__</textarea>
+        </details>
+      </details>
+    </details>
   </li>
   <li class="optional">
     <h2>Bring your Facebook years <span class="meta">(optional, any time)</span></h2>

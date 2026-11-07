@@ -60,10 +60,12 @@ it's public (see [SECURITY.md](SECURITY.md)).
 
 ## Install your own
 
-**Easiest: use the install page, <https://afterwrd.app/>.** Make your Cloudflare account (step 1 below) and stay
-signed in, then press *Install on Cloudflare*: it opens Cloudflare's Deploy page with the installer filled in. Press
-*Deploy* (the name doesn't matter), press *Visit*, and carry on from step 4: the installer asks for your site's
-address, connects to your Cloudflare account, puts afterwrd there and removes itself. By hand, the steps in full:
+**Easiest: use the install page, <https://afterwrd.app/>, on a phone or a computer.** Make your Cloudflare account
+(step 1 below) and stay signed in, then press *Install*: afterwrd's installer at <https://install.afterwrd.app/> asks
+for your site's name, connects to your Cloudflare account (you press *Allow* on Cloudflare's page; it lasts an hour and
+nothing is kept), puts afterwrd there, and sends you to your new site to make yourself its owner. It runs in the
+maintainer's Cloudflare account, so it's one more thing to trust: if you'd rather not, the install page also offers
+Cloudflare's own Deploy page, which puts the installer in your account instead. By hand, the steps in full:
 
 You need a free Cloudflare account and a few minutes on a computer. Bringing your Facebook years is optional, and
 can be done any time.

@@ -65,7 +65,8 @@ const server = createServer(async (req, res) => {
   if (api === "/accounts") return send(200, { success: true, result: [{ id: ACCOUNT, name: "someone@example.com's Account" }] });
   if (api === `/accounts/${ACCOUNT}/workers/scripts`) {
     const list = [{ id: "other", etag: "x", created_on: "2026-11-01T00:00:00Z", modified_on: "2026-11-01T00:00:00Z" }];
-    if (token !== "tok-missing") list.push({ id: "localhost", etag: "y", created_on: "2026-11-07T18:02:00Z", modified_on: "2026-11-07T18:02:30Z" });
+    if (token !== "tok-missing") list.push({ id: "localhost", etag: "y", created_on: "2026-11-07T18:02:00Z",
+      modified_on: token === "tok-recent" ? new Date(Date.now() - 600000).toISOString() : "2026-11-07T18:02:30Z" });
     return send(200, { success: true, result: list });
   }
   if (api === `/accounts/${ACCOUNT}/workers/scripts/localhost/subdomain`) return send(200, { success: true, result: { enabled: true, previews_enabled: false } });
@@ -208,6 +209,11 @@ check("a Worker whose requests are copied elsewhere is reported", setup.after.in
 check("…as is a setting afterwrd doesn't use, named but not shown", setup.after.includes("plain_text OAUTH_TOKEN_URL") && !setup.after.includes("evil.example/token"));
 check("…and files handed out without the code checking them", setup.after.includes("without its code checking them first (/static/style.css)"));
 
+// --- changed within the hour ---------------------------------------------------------------------------------------
+const recent = await runCheck("recent");
+check("a site changed less than an hour ago is asked to be checked again later", recent.after.includes("less than an hour before this check")
+  && recent.after.includes("ask for another check after"), recent.after.slice(0, 500));
+
 // --- out of date ------------------------------------------------------------------------------------------------
 const latest = JSON.stringify({ version: "10.0.0", checked: Math.floor(Date.now() / 1000),
   latest: { tag: "v10.0.0", version: "10.0.0", notes: "", page: "https://example.com/", securityFix: "10.0.0" } });
@@ -242,7 +248,7 @@ check("…and leaves the link usable", (await fetch(`${failed.link}/start`, { me
 await owner.goto(`${BASE}/friend`);
 const listed = await owner.$$eval(".checks > li", (l) => l.map((li) => li.textContent.replace(/\s+/g, " ")));
 const count = (word) => listed.filter((t) => t.includes(word)).length;
-check("Friends lists the checks with a verdict each", count("all good") === 2 && count("needs a look") === 3 && count("couldn't check") === 1,
+check("Friends lists the checks with a verdict each", count("check again later") === 1 && count("all good") === 2 && count("needs a look") === 3 && count("couldn't check") === 1,
   `${listed.length}: ${listed.map((t) => t.slice(0, 60)).join(" | ")}`);
 check("…with no image injected from Cloudflare's answers", (await owner.$$(".checks img")).length === 0);
 

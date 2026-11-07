@@ -2,7 +2,7 @@
 # afterwrd's end-to-end tests: real local copies of the site (wrangler dev) driven by Chrome, with a virtual
 # passkey authenticator. See README.md.
 #   npm run test:e2e                     everything except upgrade
-#   npm run test:e2e -- <suite>…         some: core fresh albums update feed groups checks forged
+#   npm run test:e2e -- <suite>…         some: core fresh albums update feed groups checks central forged
 #   npm run test:e2e -- upgrade v0.17.0  an older release's site (0.17.0 or later), upgraded in place to this code
 set -uo pipefail
 
@@ -36,6 +36,7 @@ cp "$WORKER/package.json" "$OUT/package.json.saved"
 restore() {
   pkill -f "wrangler dev --port 87" 2>/dev/null
   pkill -f "wrangler dev --name afterwrd-87" 2>/dev/null
+  pkill -f "wrangler dev -c central" 2>/dev/null
   sleep 1
   cp "$OUT/package.json.saved" "$WORKER/package.json"
   rm -rf "$WORKER/.wrangler/state"
@@ -86,10 +87,20 @@ three_sites() { # $1: the suite, run against three sites, each with its own data
   done
   wait_for 8787 && wait_for 8788 && wait_for 8789 && { [ "${2:-}" != group ] || wait_for 8790; }
   suite "$1" "$OUT/fake-export.zip" "$PHOTOS" "$OUT/stateA" "$OUT/stateB" "$OUT/stateC" "$OUT/stateG"
-  pkill -f "wrangler dev --name afterwrd-87" 2>/dev/null; sleep 2
+  pkill -f "wrangler dev --name afterwrd-87" 2>/dev/null
+  pkill -f "wrangler dev -c central" 2>/dev/null; sleep 2
 }
 run_feed() { three_sites feed.mjs; }
 run_groups() { three_sites groups.mjs group; }
+run_central() { # the installer at install.afterwrd.app, on 8791, with stand-ins on 8797 and 8799 (central.mjs runs them)
+  stop
+  (cd "$WORKER" && "$WRANGLER" dev -c central/wrangler.jsonc --port 8791 --ip 127.0.0.1 --infer-origin-from-routes=false --var ALLOW_LOCAL_SITES:1 \
+    --var OAUTH_TOKEN_URL:http://127.0.0.1:8799/token --var CLOUDFLARE_API_URL:http://127.0.0.1:8799/client/v4 \
+    --var RELEASES_ROOT:http://127.0.0.1:8799/releases --var TEST_SITE_URL:http://127.0.0.1:8797 > "$OUT/central.log" 2>&1 &)
+  wait_for 8791
+  suite central.mjs
+  pkill -f "wrangler dev -c central" 2>/dev/null; sleep 1
+}
 run_checks() { # one site, with stand-ins for Cloudflare and GitHub on 8799 (checks.mjs runs them)
   fresh --var ALLOW_LOCAL_SITES:1 --var OAUTH_TOKEN_URL:http://127.0.0.1:8799/token \
     --var CLOUDFLARE_API_URL:http://127.0.0.1:8799/client/v4 --var RELEASES_URL:http://127.0.0.1:8799/releases
@@ -116,10 +127,10 @@ run_upgrade() { # $1: an older release tag
   git -C "$WORKER" worktree remove --force "$OUT/old"
 }
 
-if [ $# -eq 0 ]; then set -- core fresh albums update feed groups checks forged; fi
+if [ $# -eq 0 ]; then set -- core fresh albums update feed groups checks central forged; fi
 while [ $# -gt 0 ]; do
   case "$1" in
-    core|fresh|albums|update|feed|groups|checks|forged|screenshots) "run_$1" ;;
+    core|fresh|albums|update|feed|groups|checks|central|forged|screenshots) "run_$1" ;;
     upgrade) shift; run_upgrade "${1:?give an older release tag, e.g. v0.12.0}" ;;
     *) echo "Unknown suite: $1" >&2; FAILED=1 ;;
   esac

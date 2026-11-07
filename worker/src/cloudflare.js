@@ -113,9 +113,7 @@ export function testingHere(env, origin) {
  * what to ask Cloudflare for from that path, so a check can never be given more).
  */
 export async function relayLink(to) {
-  const verifier = random(48);
-  const state = random(24);
-  const challenge = base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+  const { verifier, state, challenge } = await pkce();
   const relay = new URL(RELAY);
   relay.searchParams.set("to", to);
   relay.searchParams.set("state", state);
@@ -123,14 +121,22 @@ export async function relayLink(to) {
   return { verifier, state, relay };
 }
 
+/** A fresh PKCE secret, its challenge (what Cloudflare is shown) and a state to match the return against. */
+export async function pkce() {
+  const verifier = random(48);
+  const state = random(24);
+  const challenge = base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+  return { verifier, state, challenge };
+}
+
 /** Swaps Cloudflare's one-time code for the token (sending the PKCE secret); throws with a message to show. */
-export async function exchangeCode(env, code, verifier, origin) {
+export async function exchangeCode(env, code, verifier, origin, redirectUri = RELAY) {
   // When testing on this computer, a stand-in for Cloudflare's token endpoint.
   const endpoint = testingHere(env, origin) && env.OAUTH_TOKEN_URL ? env.OAUTH_TOKEN_URL : TOKEN_ENDPOINT;
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: RELAY, client_id: CLIENT_ID, code_verifier: verifier }),
+    body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirectUri, client_id: CLIENT_ID, code_verifier: verifier }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || typeof data.access_token !== "string") {

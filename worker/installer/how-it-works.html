@@ -88,10 +88,11 @@ and the friends they've chosen. This page explains how, and how to check it for 
     internet. Every call in afterwrd goes to one of three places: Cloudflare (its sign-in and its API, for installing and
     updating), GitHub (downloading releases and checking for new ones), or a site you've connected with. There are
     no analytics, no error-reporting services, no embedded scripts from anyone else, and no fonts fetched from elsewhere.</li>
-    <li><b>Compare the installer with the release.</b> The installer this page offers is the file
-    <code>installer.js</code> from the <a href="__RELEASE_PAGE__">published release __VERSION__</a>, which GitHub builds
-    from a tagged commit. The installer carries a fingerprint (a SHA-256 hash) of that release's manifest, and refuses
-    any file that doesn't match it.</li>
+    <li><b>Read the installers.</b> The installer at install.afterwrd.app is <code>worker/central/index.js</code> in the
+    repository: it checks every file it installs against the release's manifest, and keeps nothing. The one for
+    Cloudflare's Deploy page is the file <code>installer.js</code> from the <a href="__RELEASE_PAGE__">published release
+    __VERSION__</a>, which GitHub builds from a tagged commit and which carries the fingerprint (a SHA-256 hash) of that
+    release's manifest. Either way, you can check afterwards what was installed: <a href="/check/">Check your install</a>.</li>
     <li><b>Rebuild it yourself.</b> Releases are reproducible: building a release's tag on your own computer gives exactly
     the same files, so the same fingerprint. GitHub also signs a record of each build (who built it, from which commit),
     kept in Sigstore's public log where it can't be quietly changed. <a href="__REPO_PAGE__/blob/main/SECURITY.md#check-it-yourself">Check
@@ -253,14 +254,20 @@ and the friends they've chosen. This page explains how, and how to check it for 
 
 <section id="install">
   <h2>Installing and updating</h2>
-  <p>The installer is a small Worker you deploy first. To create your site's database and upload afterwrd into your
-  account it needs Cloudflare's permission, which it asks for through Cloudflare's own sign-in for apps: you press
+  <p>The installer at <a href="https://install.afterwrd.app/">install.afterwrd.app</a> is a small Worker run by afterwrd's
+  maintainer: it's what lets you install from a phone, without Cloudflare's code editor. It stores nothing, logs
+  nothing, and its code is in the repository with everything else. Because it's run by someone else, it's one more thing
+  to trust while you install, which is why <a href="/check/">Check your install</a> and a friend's check exist. If you'd
+  rather not use it, the install page also offers Cloudflare's own Deploy page, which puts a copy of the installer in
+  your own account instead and removes it afterwards.</p>
+  <p>Either way, to create your site's database and upload afterwrd into your
+  account the installer needs Cloudflare's permission, which it asks for through Cloudflare's own sign-in for apps: you press
   <b>Connect Cloudflare</b>, Cloudflare shows what afterwrd is asking for (making, changing and deleting Workers, which Cloudflare
-  calls <i>Workers Admin</i>; making, changing and deleting databases; reading the account's workers.dev name) and you press <b>Allow</b>. Cloudflare then gives your installer a token that lasts an hour,
-  kept only in a cookie on that page, used only against Cloudflare's API over HTTPS, and never shown, logged or sent
-  anywhere else. afterwrd never asks for permission to make longer-lived tokens. The installer downloads the release from
-  GitHub and checks every file against the fingerprint built into it, so what's installed is exactly the published
-  release and can't be swapped on the way. Then it removes itself.</p>
+  calls <i>Workers Admin</i>; making, changing and deleting databases; reading the account's workers.dev name) and you press <b>Allow</b>. Cloudflare then gives the installer a token that lasts an hour,
+  kept only in a cookie in your own browser, used only against Cloudflare's API over HTTPS, and never stored, shown,
+  logged or sent anywhere else. Revoking it in Cloudflare doesn't end it early, so the hour is the real limit. afterwrd never asks for permission to make longer-lived tokens. The installer downloads the release from
+  GitHub and checks every file against the release's list of fingerprints, so what's installed is exactly the published
+  release and can't be swapped on the way.</p>
   <p>On the way, Cloudflare sends your browser through <a href="/connect/">afterwrd.app/connect/</a>, the one address
   registered for afterwrd. That's a static page with no server behind it (this whole site is files on GitHub Pages):
   it shows you which site is being connected and asks you to continue, sends you to Cloudflare, and on the way back

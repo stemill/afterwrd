@@ -252,6 +252,7 @@ export async function checkSite(token, site, env, here, { latest = {} } = {}, fe
   const at = `/accounts/${account}/workers/scripts/${script}`;
   result.account = account.slice(-6);
   result.created = Math.floor(Date.parse(worker.created_on) / 1000) || null;
+  result.modified = Math.floor(Date.parse(worker.modified_on) / 1000) || null;
   try {
     if (!(await getJSON(`${at}/subdomain`)).result?.enabled) problems.push("Its workers.dev address is switched off, so this Worker isn't the one answering there.");
   } catch {
@@ -350,6 +351,8 @@ function expected(e, script) {
     case "create workers/scripts.assets-upload-session": case "update workers/scripts": case "delete workers/scripts":
     case "create workers/scripts.subdomain": return ours;
     case "create d1/database": case "delete d1/database": return true;
+    // A brand-new account's workers.dev name, set by the installer at install.afterwrd.app.
+    case "create workers/subdomain": case "update workers/subdomain": return true;
     default: return false;
   }
 }
@@ -403,6 +406,10 @@ export function resultHtml(r, whose = "theirs", by = null) {
     for (const p of r.problems ?? []) say(false, escape(p));
     if (!(r.problems ?? []).length && r.code === "matches") say(true, "It's connected to exactly what afterwrd uses, and hands out its files only through its code.");
     if (r.newer) lines.push(`<p class="meta">afterwrd ${escape(r.newer)} is out: worth updating.</p>`);
+    if (recent(r)) {
+      lines.push(`<p class="check-bad">⏳ ${Your} site was installed or updated less than an hour before this check. Access given to an
+        installer or an update lasts an hour and can't be cut short, so ask for another check after <b>${escape(when(r.modified + HOUR))}</b>.</p>`);
+    }
     const a = r.audit;
     if (a) {
       const odd = a.unexpected ?? [];
@@ -419,10 +426,16 @@ export function resultHtml(r, whose = "theirs", by = null) {
   return lines.join("\n");
 }
 
-/** One word for the Friends page. */
+// Changed less than an hour before the check: whoever was given access for the install or update still had it.
+const HOUR = 3600;
+const recent = (r) => Boolean(r.modified && r.checkedAt - r.modified < HOUR);
+
+/** A few words for the Friends page. */
 export function verdict(r) {
   if (!r) return null;
   if (r.problem) return "couldn't check";
-  if (r.code === "matches" && !(r.problems ?? []).length && r.audit?.complete && !r.audit.error && !(r.audit.unexpected ?? []).length) return "all good";
+  if (r.code === "matches" && !(r.problems ?? []).length && r.audit?.complete && !r.audit.error && !(r.audit.unexpected ?? []).length) {
+    return recent(r) ? "check again later" : "all good";
+  }
   return "needs a look";
 }
