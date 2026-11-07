@@ -2,6 +2,12 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "afterwrd",
 	"main": "src/index.js",
+	// Records each static file's hash for the code to check (scripts/asset-hashes.mjs, src/static.js); runs before
+	// every build, and again when public/ changes under `wrangler dev`.
+	"build": {
+		"command": "node scripts/asset-hashes.mjs",
+		"watch_dir": ["src", "public"]
+	},
 	"compatibility_date": "2026-10-01",
 	// global_fetch_strictly_public: calls to a friend's site go out over the internet even when it's in the same
 	// Cloudflare account (otherwise Cloudflare answers 404), so two people sharing an account can connect.

@@ -2,6 +2,7 @@
 // another, signing out everywhere), and every other owner page is routed from here. Only the owner signs in, so
 // no one else needs a way in: friends see each other from their own sites (connect.js).
 // scripts/owner.mjs makes the first device link for a new site from the terminal.
+import { handleCheckAdmin } from "./checks.js";
 import { handleConnections } from "./connect.js";
 import { handleExport } from "./export.js";
 import { asset, FAVICON, ownerHeader } from "./nav.js";
@@ -24,6 +25,7 @@ export async function handleAdmin(request, env, url, owner) {
   if (url.pathname === "/_admin/update" || url.pathname.startsWith("/_admin/update/")) {
     return handleUpdate(request, env, url, owner);
   }
+  if (url.pathname.startsWith("/_admin/checks/")) return handleCheckAdmin(request, env, url);
   if (url.pathname === "/_admin/posts" || url.pathname.startsWith("/_admin/posts/")) return handlePosts(request, env, url);
   if (/^\/_admin\/(photos|albums|profile)(\/|$)/.test(url.pathname)) return handlePhotos(request, env, url);
   if (url.pathname === "/_admin/export" || url.pathname.startsWith("/_admin/export/")) return handleExport(request, env, url);

@@ -17,6 +17,7 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NOTICES_PATH, notices, runtimePackages } from "./notices.mjs";
+import { assetHashes } from "./asset-hashes.mjs";
 
 const worker = fileURLToPath(new URL("..", import.meta.url));
 const args = process.argv.slice(2);
@@ -111,6 +112,15 @@ if (securityFix !== undefined && !(/^\d+\.\d+\.\d+$/.test(securityFix) && !newer
   throw new Error(`afterwrd.securityFix in package.json (${securityFix}) must be a version no newer than ${version}.`);
 }
 
+// The code checks every static file against the hashes built into it (src/static.js): they must be exactly the
+// files being published, or every site would refuse them.
+const built = readFileSync(join(worker, "generated", "asset-hashes.json"), "utf8");
+if (built !== assetHashes() || built !== `${JSON.stringify(Object.fromEntries(assets.map((a) => [a.path, a.sha256])
+  .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))), null, 2)}\n`) {
+  console.error("The static file hashes built into the code don't match public/. Build again.");
+  process.exit(1);
+}
+
 const manifest = {
   name: "afterwrd",
   version,
@@ -180,6 +190,11 @@ mkdirSync(join(site, "how-it-works"), { recursive: true });
 writeFileSync(join(site, "how-it-works", "index.html"), readFileSync(join(worker, "installer", "how-it-works.html"), "utf8")
   .replaceAll("__VERSION__", version)
   .replaceAll("__RELEASE_PAGE__", repo ? `https://github.com/${repo}/releases/tag/v${version}` : base)
+  .replaceAll("__REPO_PAGE__", repo ? `https://github.com/${repo}` : base));
+// "Check your install", at /check/.
+mkdirSync(join(site, "check"), { recursive: true });
+writeFileSync(join(site, "check", "index.html"), readFileSync(join(worker, "installer", "check.html"), "utf8")
+  .replaceAll("__VERSION__", version)
   .replaceAll("__REPO_PAGE__", repo ? `https://github.com/${repo}` : base));
 // GitHub Pages keeps a custom domain in a CNAME file beside the page; the release replaces the whole branch, so
 // it's written here every time or the domain would be dropped.

@@ -562,3 +562,13 @@ table.numbers tbody tr:hover { background: var(--raised); }
   background: var(--raised); color: var(--text); box-shadow: 0 6px 24px rgb(0 0 0 / 0.35); font-weight: 600; font-size: 0.92rem; }
 .live-bar button { font: inherit; font-weight: 800; border: 0; border-radius: 999px; padding: 0.35rem 0.9rem;
   background: var(--button); color: var(--on-button); cursor: pointer; }
+
+/* Checking a friend's site (Friends page; src/checks.js) */
+.checks .check-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.8rem; }
+.checks details { margin-top: 0.5rem; }
+.check-result p { margin: 0.4rem 0; }
+.check-good { color: var(--moss); }
+.check-bad { color: var(--danger); }
+.check-good b, .check-bad b { color: var(--text); }
+.check-files { margin: 0 0 0.5rem; padding-left: 1.2rem; color: var(--muted); font-size: 0.85rem; word-break: break-word; }
+.friend-tabs button.link { margin-left: auto; }

@@ -162,6 +162,14 @@ export async function updateWaiting(env, work) {
   return Boolean(known.version && TAG_RE.test(`v${known.version}`) && newer(known.version, VERSION));
 }
 
+/** The latest release this site knows of, and the newest one that fixed a security problem (for checks.js). */
+export async function knownLatest(db) {
+  const latest = (await knownRelease(db)).latest;
+  return { version: latest?.version ?? null, securityFix: latest?.securityFix ?? null };
+}
+
+export { newer };
+
 /** The release that fixed a security problem, if this site is older than it, for a notice on Home; else null. */
 export async function securityFixWaiting(db) {
   const fix = (await knownRelease(db)).latest?.securityFix;

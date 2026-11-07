@@ -59,6 +59,12 @@ check("session cookie is __Host-, HttpOnly, Secure", Boolean(cookie && cookie.ht
 const csp = (await fetch(`${BASE}/_auth/login`)).headers.get("content-security-policy") ?? "";
 check("CSP blocks plugins, <base> and foreign form posts", ["object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'"].every((d) => csp.includes(d)), csp);
 check("CSP lets pages call only this site", csp.includes("connect-src 'self'"), csp);
+const font = await fetch(`${BASE}/static/fonts/nunito.woff2`);
+const fontTag = font.headers.get("etag");
+check("static files are sent with their release hash as ETag", font.status === 200 && /^"[0-9a-f]{64}"$/.test(fontTag ?? ""), `${font.status} ${fontTag}`);
+check("…and a copy the browser already has is confirmed with 304", (await fetch(`${BASE}/static/fonts/nunito.woff2`, { headers: { "If-None-Match": fontTag } })).status === 304);
+const css = await fetch(`${BASE}/static/style.css`, { headers: { Cookie: `__Host-session=${cookie.value}` } });
+check("the stylesheet is served to the owner", css.status === 200 && (await css.text()).includes("--accent-strong"));
 const loginOptions = await (await fetch(`${BASE}/_auth/login/options`, { method: "POST", headers: { Origin: BASE } })).json();
 check("signing in asks the device to check it's you", loginOptions.userVerification === "required", loginOptions.userVerification);
 

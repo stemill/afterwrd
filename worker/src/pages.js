@@ -162,6 +162,45 @@ export function messagePage(message, link = { href: "/_auth/login", label: "Go t
   return page("afterwrd", `<p>${escape(message)}</p><a class="button" href="${link.href}">${escape(link.label)}</a>`);
 }
 
+// Opened from a check link (checks.js): a friend's site asking to check this person's site, read-only, through
+// Cloudflare. `result` is what a finished check found, already HTML.
+export function checkLinkPage({ owner, site, fixed, result, reading = false }) {
+  const style = `<style>
+  .check-good { color: #a8d49a; } .check-bad { color: #ff8070; }
+  .check-good, .check-bad { margin: 0 0 14px; } .check-good b, .check-bad b { color: var(--text); }
+  .check-files { margin: -6px 0 16px; padding-left: 1.2rem; color: var(--muted); font-size: 0.9rem; word-break: break-word; }
+  .meta { font-size: 0.9rem; } main { max-width: 520px; }
+</style>`;
+  if (result && !reading) return page("Site check", `${style}<h1>What ${escape(owner)}'s site found</h1>\n${result}`);
+  return page("Check my site", `${style}
+${reading ? `<p class="check-bad">This check didn't finish. Start it again:</p>` : ""}
+<h1>${escape(owner)} would like to check your site</h1>
+<p>${escape(owner)}'s afterwrd site will look at your Cloudflare account, read-only, for a moment. It downloads the code
+your afterwrd site is running and compares it with the published release, and reads your account's log of changes
+for anything afterwrd doesn't do. Cloudflare asks you to allow this. It can't change anything, and the access isn't kept.</p>
+<form id="check">
+  ${fixed ? `<p>Your site: <b>${escape(new URL(site).host)}</b></p>`
+    : `<input name="site" value="${escape(site ? new URL(site).host : "")}" placeholder="e.g. jo.example.workers.dev" required autocomplete="url" inputmode="url" aria-label="Your site's address">`}
+  <p id="error" role="alert"></p>
+  <button>Check my site</button>
+</form>
+<p class="meta" style="margin-top: 20px">Best done before you start using a new site, and again after updates.
+<a href="https://afterwrd.app/check/">More about checking</a>.</p>`, `
+  document.getElementById("check").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const button = e.target.querySelector("button");
+    button.disabled = true;
+    document.getElementById("error").textContent = "";
+    try {
+      const { relay } = await post(location.pathname + "/start", { site: e.target.site?.value.trim() });
+      location.assign(relay);
+    } catch (err) {
+      document.getElementById("error").textContent = err.message;
+      button.disabled = false;
+    }
+  });`);
+}
+
 // Opened from a Connect link (connect.js). Sends the friend on to their own site to confirm, carrying the link.
 export function connectLinkPage(name) {
   return page("Connect", `

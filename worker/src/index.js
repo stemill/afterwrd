@@ -19,6 +19,8 @@ import { ensureSchema } from "./migrate.js";
 import { handlePeer } from "./peers.js";
 import { messagePage } from "./pages.js";
 import { signedFor } from "./share.js";
+import { serveStatic } from "./static.js";
+import { handleCheck } from "./checks.js";
 import { html } from "./util.js";
 import { handleLive } from "./live.js";
 
@@ -56,6 +58,8 @@ async function route(request, env, work) {
   if (url.pathname.startsWith("/_peer/")) return handlePeer(request, env, url);
   // A group the owner's in, calling with the key this site gave it.
   if (url.pathname.startsWith("/_member/")) return handleMember(request, env, url);
+  // A friend checking their site at this site's invitation (checks.js): they aren't signed in here.
+  if (url.pathname.startsWith("/_check/")) return handleCheck(request, env, url);
   const reading = request.method === "GET" || request.method === "HEAD";
   const [, top, rest] = url.pathname.split("/");
   // The fonts are public, so the sign-in pages can use them too; they're open-licensed and say nothing about the site.
@@ -100,14 +104,6 @@ async function routeGroup(request, env, url) {
   if (request.method === "GET" && /^\/static\/fonts\/[\w-]+\.woff2$/.test(url.pathname)) return serveStatic(request, env);
   return html(messagePage("This is an afterwrd group. Its members open it from their own afterwrd sites.",
     { href: "https://afterwrd.app/", label: "About afterwrd" }), 404);
-}
-
-async function serveStatic(request, env) {
-  const asset = await env.ASSETS.fetch(request);
-  if (asset.status === 404) return new Response("Not found", { status: 404 });
-  const response = new Response(asset.body, asset);
-  response.headers.set("Cache-Control", "private, no-cache");
-  return response;
 }
 
 // A file's address is its contents' hash, so it can be cached for good (or, through a signed link, while it lasts).

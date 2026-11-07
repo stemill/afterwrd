@@ -13,6 +13,7 @@ import { ownerName } from "../peers.js";
 import { SITE_ID } from "../posts.js";
 import { profilePictures } from "../photos.js";
 import { newDevices } from "../admin.js";
+import { recentChecks } from "../checks.js";
 import { securityFixWaiting, updateWaiting } from "../update.js";
 import { now } from "../util.js";
 import { fmtDate, fmtMonth } from "./format.js";
@@ -529,7 +530,7 @@ async function friendsIndex(ctx) {
   }));
   // Requests show only what their site said when it connected: nothing is fetched from a site you haven't approved,
   // so a stranger can't slow this page down or see when you look at it.
-  return views.friendsIndexPage(ctx, { friends, facebook, requests: requests.results });
+  return views.friendsIndexPage(ctx, { friends, facebook, requests: requests.results, checks: await recentChecks(db) });
 }
 
 /** Who a friend on afterwrd is in the owner's Facebook download, if the owner has linked them. */

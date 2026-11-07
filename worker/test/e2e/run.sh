@@ -2,7 +2,7 @@
 # afterwrd's end-to-end tests: real local copies of the site (wrangler dev) driven by Chrome, with a virtual
 # passkey authenticator. See README.md.
 #   npm run test:e2e                     everything except upgrade
-#   npm run test:e2e -- <suite>…         some: core fresh albums update feed groups forged
+#   npm run test:e2e -- <suite>…         some: core fresh albums update feed groups checks forged
 #   npm run test:e2e -- upgrade v0.17.0  an older release's site (0.17.0 or later), upgraded in place to this code
 set -uo pipefail
 
@@ -90,9 +90,15 @@ three_sites() { # $1: the suite, run against three sites, each with its own data
 }
 run_feed() { three_sites feed.mjs; }
 run_groups() { three_sites groups.mjs group; }
+run_checks() { # one site, with stand-ins for Cloudflare and GitHub on 8799 (checks.mjs runs them)
+  fresh --var ALLOW_LOCAL_SITES:1 --var OAUTH_TOKEN_URL:http://127.0.0.1:8799/token \
+    --var CLOUDFLARE_API_URL:http://127.0.0.1:8799/client/v4 --var RELEASES_URL:http://127.0.0.1:8799/releases
+  suite checks.mjs; stop
+}
 run_screenshots() { three_sites screenshots.mjs group; } # the README's pictures, in docs/screenshots (not a test)
 run_forged() {
   echo "== forged"
+  node "$WORKER/scripts/asset-hashes.mjs" # the static file hashes src/static.js bundles
   "$WORKER/node_modules/.bin/esbuild" "$HERE/unit-entry.js" --bundle --format=esm --platform=node --loader:.json=json \
     --loader:.sql=text --alias:cloudflare:workers="$HERE/workers-stub.js" --outfile="$OUT/bundle.mjs" --log-level=error
   (cd "$HERE" && node forged.mjs) | grep -v '^PASS'; [ "${PIPESTATUS[0]}" = 0 ] || FAILED=1
@@ -110,10 +116,10 @@ run_upgrade() { # $1: an older release tag
   git -C "$WORKER" worktree remove --force "$OUT/old"
 }
 
-if [ $# -eq 0 ]; then set -- core fresh albums update feed groups forged; fi
+if [ $# -eq 0 ]; then set -- core fresh albums update feed groups checks forged; fi
 while [ $# -gt 0 ]; do
   case "$1" in
-    core|fresh|albums|update|feed|groups|forged|screenshots) "run_$1" ;;
+    core|fresh|albums|update|feed|groups|checks|forged|screenshots) "run_$1" ;;
     upgrade) shift; run_upgrade "${1:?give an older release tag, e.g. v0.12.0}" ;;
     *) echo "Unknown suite: $1" >&2; FAILED=1 ;;
   esac

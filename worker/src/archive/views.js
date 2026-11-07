@@ -1,5 +1,6 @@
 // Page templates, ported from afterwrd/templates. `ctx` carries me, the published sections, the signed-in user
 // and the request URL.
+import { resultHtml, verdict } from "../checks.js";
 import { connectLink } from "../cloudflare.js";
 import { MAX_COMMENT } from "./comments.js";
 import {
@@ -10,6 +11,7 @@ import { asset, FAVICON, icon, ownerMain, ownerMenu, siteHeader } from "../nav.j
 import { gone } from "../feed.js";
 import { host } from "../peers.js";
 import { SITE_ID } from "../posts.js";
+import { now } from "../util.js";
 import { html, raw } from "./html.js";
 
 // Memories: everything from the Facebook download, each shown if the owner published that section.
@@ -773,7 +775,7 @@ function remoteCard(ctx, c, p, { thread = true } = {}) {
 }
 
 /** The owner's Friends: friends on afterwrd first, then everyone from the Facebook download, in one list. */
-export function friendsIndexPage(ctx, { friends, facebook, requests = [] }) {
+export function friendsIndexPage(ctx, { friends, facebook, requests = [], checks = [] }) {
   const people = has(ctx, "friends"); // Facebook people have pages only if the friends list is published
   const fbLink = (p) => (people && p.id ? html`<a href="/people/${p.id}">${p.name}</a>` : p.name);
   const linkForm = (c, body) => html`<form method="post" action="/_admin/connections/${c.id}/facebook" class="fb-link">${body}</form>`;
@@ -808,7 +810,8 @@ ${friends.length ? html`<ul class="friend-list">
       ${friendFace(ctx, c)}
       <span><strong>${c.name}</strong><span class="meta">${host(c.origin)} · friends since ${fmtDate(c.connected_at)}</span></span>
     </a>
-    <nav class="friend-tabs"><a href="${friendBase(c)}/posts">Posts</a><a href="${friendBase(c)}/photos">Photos</a></nav>
+    <nav class="friend-tabs"><a href="${friendBase(c)}/posts">Posts</a><a href="${friendBase(c)}/photos">Photos</a>
+      <button class="link" data-check="${c.id}">Check their site</button></nav>
     ${friendSilence(c) && html`<div class="meta silent">${friendSilence(c)} ${removeFriend(c, "chip")}</div>`}
     ${c.person ? linkForm(c, html`<span class="meta">On Facebook as ${fbLink(c.person)}</span>
         <input type="hidden" name="unlink" value="1"><button class="link">Unlink</button>`)
@@ -823,6 +826,57 @@ ${friends.length ? html`<ul class="friend-list">
   <p>No friends on afterwrd yet. When a friend has their own afterwrd site, connect with them to see each other's posts and photos.</p>
   <a class="chip primary" href="/_admin/connections">${raw(icon("connections"))}<span>Connect with a friend</span></a>
 </div>`}
+
+<h2 id="checks">Checking a friend's site</h2>
+<p class="meta">Your site can check that a friend's site is genuine: exactly the published afterwrd, with nothing else done
+in their Cloudflare account. They open a link you send and allow read-only access; your site does the rest. Best
+before a new friend starts using their site, and again after updates.</p>
+<p><button class="chip" data-check="">Make a check link</button></p>
+<section class="card invite-panel" id="check-panel" hidden>
+  <h2>Send this to your friend</h2>
+  <textarea id="check-message" readonly rows="6" aria-label="Check message"></textarea>
+  <p class="row"><button class="chip primary" id="check-copy">Copy message</button>
+    <button class="chip" id="check-done">Done</button></p>
+</section>
+<p class="error" id="check-error" role="alert"></p>
+${checks.length > 0 && html`<ul class="friend-list checks">
+  ${checks.map((k) => html`<li class="card">
+    <div class="check-head"><strong>${k.site ? host(k.site) : "Not opened yet"}</strong>
+      <span class="meta">${k.friend ? html`${k.friend} · ` : ""}${k.checked_at ? html`checked ${fmtDate(k.checked_at)}`
+        : k.result ? "check not finished" : k.expires_at > now() ? html`link made ${fmtDate(k.created_at)}, not used yet` : "link expired unused"}</span>
+      ${verdict(k.result) && html`<span class="badge ${verdict(k.result) === "all good" ? "" : "badge-new"}">${verdict(k.result)}</span>`}</div>
+    ${k.result && html`<details><summary class="meta">What it found</summary><div class="check-result">${raw(resultHtml(k.result))}</div></details>`}
+    <form method="post" action="/_admin/checks/${k.id}/delete"><button class="link">Forget</button></form>
+  </li>`)}
+</ul>`}
+<script>
+  // Check a friend's site: make a one-time link (for that friend, or for whoever it's sent to) and a message to send.
+  const checkPanel = document.getElementById("check-panel");
+  document.addEventListener("click", async (e) => {
+    const button = e.target.closest("button[data-check]");
+    if (!button) return;
+    button.disabled = true;
+    document.getElementById("check-error").textContent = "";
+    try {
+      const res = await fetch("/_admin/checks/new", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(button.dataset.check ? { connection: Number(button.dataset.check) } : {}) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Something went wrong.");
+      document.getElementById("check-message").value = data.message;
+      checkPanel.hidden = false;
+      checkPanel.scrollIntoView({ block: "center" });
+    } catch (err) {
+      document.getElementById("check-error").textContent = err.message;
+    }
+    button.disabled = false;
+  });
+  document.getElementById("check-copy").addEventListener("click", async (e) => {
+    await navigator.clipboard.writeText(document.getElementById("check-message").value);
+    e.target.textContent = "Copied";
+    setTimeout(() => { e.target.textContent = "Copy message"; }, 1500);
+  });
+  document.getElementById("check-done").addEventListener("click", () => location.reload());
+</script>
 
 ${facebook.length > 0 && html`
 <h2>From your Facebook download</h2>

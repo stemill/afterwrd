@@ -73,8 +73,19 @@ log, so it can't be quietly changed later. With the [GitHub CLI](https://cli.git
 gh attestation verify manifest.json --repo stemill/afterwrd
 ```
 
-**What's running on your site** is visible in your Cloudflare dashboard (*Workers & Pages* → your Worker → *Edit
-code*).
+**Check what your site is running.** With a read-only API token (*Workers Scripts: Read*), download the code your
+site is running from Cloudflare and compare it, file by file, with a release or with your own rebuild:
+
+```sh
+read -rs CF_TOKEN && export CF_TOKEN       # paste the token; nothing shows
+node worker/scripts/check-site.mjs afterwrd --manifest worker/release/0.23.0/manifest.json
+```
+
+The code carries the SHA-256 of every static file the site serves (scripts, stylesheet, fonts) and refuses to send
+any that doesn't match. What the code can't cover is how the Worker is set up in Cloudflare (what it's connected to,
+where its logs go, whether Cloudflare hands out its files directly): the script checks only the code, while a check
+by a friend's site checks those too. [Check your install](https://afterwrd.app/check/)
+explains what else to look at in your Cloudflare dashboard after installing.
 
 ## How it's checked
 

@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Check your afterwrd install</title>
+<meta name="description" content="How to check, in your own Cloudflare dashboard, that your afterwrd site is what you installed and nothing else was done in your account.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Crect%20width%3D%2224%22%20height%3D%2224%22%20rx%3D%226%22%20fill%3D%22%23ff8a3d%22%2F%3E%3Cpath%20d%3D%22M12%204a8%208%200%201%201-4.7%2014.5L3.8%2020l1.2-3.6A8%208%200%200%201%2012%204z%22%20transform%3D%22translate(2.4%202.2)%20scale(0.8)%22%20fill%3D%22none%22%20stroke%3D%22%2316201b%22%20stroke-width%3D%223.6%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E">
+<style>
+  /* Campfire, as on the install page and the sites themselves (the fonts are the device's own here). */
+  :root { --bg: #16201b; --surface: #1f2b25; --raised: #263329; --sunken: #121a16; --text: #ede6da; --muted: #a9a092; --border: #2e3d35;
+          --accent: #ff8a3d; --accent-strong: #ffab73; --accent-soft: #2b2118; --on-accent: #16201b; --moss: #8fbf7f; color-scheme: dark;
+          --round: ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font: 900 2.5rem/1.12 var(--round); margin: 0 0 12px; letter-spacing: -0.02em; }
+  .brand { display: inline-flex; align-items: center; font: 900 1.7rem/1 var(--round); margin: 0 0 26px; letter-spacing: -0.02em; color: inherit; text-decoration: none; }
+  .brand .o { width: 0.82em; height: 0.82em; margin: 0.08em 0.01em 0; color: var(--accent); }
+  .lede { color: var(--muted); margin: 0 0 24px; font-size: 1.08rem; }
+  nav.contents { background: var(--surface); border-radius: 22px; padding: 16px 20px; margin: 0 0 28px; }
+  nav.contents ol { margin: 6px 0 0; padding-left: 1.3rem; }
+  @media (min-width: 560px) { nav.contents ol { columns: 2; gap: 24px; } }
+  nav.contents li { margin: 3px 0; break-inside: avoid; }
+  section { margin: 34px 0 0; }
+  h2 { font: 900 1.45rem/1.2 var(--round); margin: 0 0 10px; letter-spacing: -0.01em; }
+  h3 { font: 800 1.05rem/1.3 var(--round); margin: 20px 0 6px; }
+  p, li { margin: 8px 0; }
+  ul { padding-left: 1.2rem; }
+  a { color: var(--accent-strong); }
+  code { font: 0.88em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--sunken); padding: 0.1em 0.4em; border-radius: 6px; }
+  .meta { color: var(--muted); font-size: 0.9rem; }
+  .boxes { display: grid; gap: 12px; margin: 14px 0; }
+  @media (min-width: 560px) { .boxes { grid-template-columns: 1fr 1fr; } }
+  .box { background: var(--surface); border-radius: 18px; padding: 14px 16px; }
+  .box strong { display: block; font: 800 1rem var(--round); margin-bottom: 4px; }
+  .box p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+  .flow { list-style: none; padding: 0; margin: 14px 0; display: grid; gap: 8px; }
+  .flow li { background: var(--surface); border-radius: 14px; padding: 10px 14px 10px 44px; position: relative; }
+  .flow li::before { content: counter(flow); counter-increment: flow; position: absolute; left: 12px; top: 10px; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent); color: var(--on-accent); font: 800 0.8rem/22px var(--round); text-align: center; }
+  .flow { counter-reset: flow; }
+  .never { background: var(--accent-soft); border-radius: 22px; padding: 18px 20px; margin: 18px 0; }
+  .never h3 { margin-top: 0; color: var(--accent-strong); }
+  .never ul { margin: 0; }
+  .yes { color: var(--moss); font-weight: 800; }
+  .no { color: var(--accent-strong); font-weight: 800; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.95rem; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  footer { margin-top: 36px; color: var(--muted); font-size: 0.85rem; }
+  pre { background: var(--sunken); padding: 12px 14px; border-radius: 12px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  .back { display: inline-block; margin-top: 28px; padding: 11px 20px; border-radius: 999px; background: var(--raised); color: var(--text);
+    font: 800 1rem var(--round); text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+<a class="brand" href="/" aria-label="afterwrd, install page">afterw<svg class="o" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 1-4.7 14.5L3.8 20l1.2-3.6A8 8 0 0 1 12 4z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>rd</a>
+<h1>Check your install</h1>
+<p class="lede">A few minutes in your own Cloudflare dashboard, to see that your site is what you installed and that
+nothing else was done in your account. This page never touches your account: it only links to Cloudflare's own pages
+and says what you should find there. The links work on a phone too.</p>
+
+<p class="meta">Best done straight after installing, before you import anything. Sign in to Cloudflare first, in the
+same browser, with the account you installed into.</p>
+
+<section id="there">
+  <h2>1. What should be there</h2>
+  <ul>
+    <li><b><a href="https://dash.cloudflare.com/?to=/:account/workers-and-pages" target="_blank" rel="noopener">Workers &amp; Pages</a></b>:
+    your site, under the name you chose (<code>afterwrd</code> unless you changed it). Nothing called
+    <code>afterwrd-installer-…</code>: the installer removes itself once your site is running. Each group you start later
+    appears here as a Worker of its own.</li>
+    <li><b><a href="https://dash.cloudflare.com/?to=/:account/workers/d1" target="_blank" rel="noopener">D1</a></b>: one database with
+    your site's name (and later one per group).</li>
+    <li>Nothing else you didn't make yourself. afterwrd doesn't use scheduled (cron) triggers, custom domains, or any
+    other Cloudflare product.</li>
+  </ul>
+</section>
+
+<section id="log">
+  <h2>2. What the audit log should show</h2>
+  <p>Open the <b><a href="https://dash.cloudflare.com/?to=/:account/audit-log" target="_blank" rel="noopener">audit log</a></b>
+  and look at the minutes around when you installed. First, Cloudflare's Deploy page making the installer (marked
+  <i>Dashboard</i>). Then what the installer did with the permission you allowed, each marked <b>OAuth</b> in the
+  <i>Actor Context</i> column, in this order:</p>
+  <ol class="flow">
+    <li>Create Worker Assets Upload Session</li>
+    <li>Upload Worker Assets (a few times)</li>
+    <li>Create D1 Database</li>
+    <li>Upload Worker</li>
+    <li>Update Worker Script Subdomain</li>
+    <li>Delete Worker (the installer removing itself)</li>
+  </ol>
+  <p>An update from your site's Update page leaves the same kind of trail, without the last three, and a group
+  being started leaves its own (with the group's name). Anything else marked <b>OAuth</b> around then, such as changes
+  to other Workers, DNS, members or API tokens, wasn't afterwrd. If there's a long list of page views, filter with
+  <i>Action Type is not view</i>.</p>
+  <p class="meta">Cloudflare's log says an app you allowed did these things, but not which app. That's why the
+  order and the names above matter.</p>
+</section>
+
+<section id="revoke">
+  <h2>3. Take the permission back</h2>
+  <p>afterwrd doesn't need to keep access to your account: every update asks again. Under
+  <b><a href="https://dash.cloudflare.com/profile/access-management/authorization" target="_blank" rel="noopener">Connected applications</a></b>,
+  revoke afterwrd if you like. Revoking stops it being given new access; access it was already given still lasts out
+  its hour.</p>
+</section>
+
+<section id="friend">
+  <h2>Or ask a friend's site to check it</h2>
+  <p>If a friend already has an afterwrd site, theirs can do the careful part for you. They press <b>Make a check link</b>
+  on their <i>Friends</i> page and send it to you; you open it and allow read-only access when Cloudflare asks. Their
+  site then downloads your site's code from Cloudflare, compares every file with the published release, and reads
+  your audit log for anything afterwrd doesn't do. You both see what it found. It can't change anything, and the
+  access isn't kept. Best done before you start using a new site, and again after updates.</p>
+</section>
+
+<section id="wrong">
+  <h2>If something looks wrong</h2>
+  <ul>
+    <li>Don't sign in to the new site or import anything into it yet.</li>
+    <li>Revoke afterwrd under <a href="https://dash.cloudflare.com/profile/access-management/authorization" target="_blank" rel="noopener">Connected applications</a>,
+    and check your Cloudflare password and two-factor sign-in.</li>
+    <li>Delete the site's Worker and its database, and anything else you don't recognise.</li>
+    <li>Please tell us, privately: <a href="__REPO_PAGE__/security/advisories/new">report a security problem</a>.</li>
+  </ul>
+</section>
+
+<section id="deeper">
+  <h2>For technical people: compare the code</h2>
+  <p>The code running on your site can be downloaded with a <b>read-only</b> Cloudflare API token and compared, file
+  by file, with the published release or with your own rebuild of it (see <a href="__REPO_PAGE__/blob/main/SECURITY.md#check-it-yourself">Check it yourself</a>).
+  The code carries the fingerprint of every other file the site serves and refuses any that doesn't match, so
+  matching code covers those files. It doesn't cover how the Worker is set up in Cloudflare (what it's connected to,
+  where its logs go); a friend's check, above, looks at that too. Make a token with <i>Workers Scripts: Read</i> for the account, then, in a copy
+  of the repository:</p>
+  <pre><code>read -rs CF_TOKEN &amp;&amp; export CF_TOKEN   # paste the token; nothing shows
+node worker/scripts/check-site.mjs afterwrd</code></pre>
+  <p class="meta">It only reads, and prints whether each file matches. Delete the token afterwards.</p>
+</section>
+
+<a class="back" href="/">← Back to installing</a>
+
+<footer>
+  <p>afterwrd __VERSION__. Source code and releases: <a href="__REPO_PAGE__">GitHub</a>. afterwrd isn't affiliated with or
+  endorsed by Meta or Cloudflare.</p>
+</footer>
+</main>
+</body>
+</html>

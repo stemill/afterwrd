@@ -16,6 +16,7 @@ data/
 worker/node_modules/
 worker/.wrangler/
 worker/release/
+worker/generated/
 
 # Local secrets for wrangler dev
 worker/.dev.vars

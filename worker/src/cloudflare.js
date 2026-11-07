@@ -30,7 +30,7 @@ const START_COOKIE = "cf_connect";
 const TOKEN_COOKIE = "cf_token";
 const START_SECONDS = 600;
 const BACK_RE = /^\/(?![/\\])[\x21-\x7e]*$/; // a path on this site (never another site), as the browser would read it
-const CODE_RE = /^[A-Za-z0-9._~+/=-]{8,1024}$/;
+export const CODE_RE = /^[A-Za-z0-9._~+/=-]{8,1024}$/;
 
 /** The link that starts connecting, coming back to `back` (a path here) once it's done. */
 export const connectLink = (back) => `/_cloudflare/start?back=${encodeURIComponent(back)}`;
@@ -53,7 +53,7 @@ export function tokenFor(request, body = {}) {
 export async function handleCloudflare(request, env, url) {
   const path = url.pathname.slice("/_cloudflare".length);
   if (request.method === "GET" && path === "/start") return start(request, url);
-  if (request.method === "GET" && path === "/done") return html(donePage());
+  if (request.method === "GET" && path === "/done") return html(donePage("/_cloudflare/finish"));
   if (request.method !== "POST") return null;
   if (request.headers.get("Origin") !== url.origin) return json({ error: "Request from another site" }, 403);
   if (path === "/finish") return finish(request, env, await request.json().catch(() => ({})));
@@ -68,13 +68,7 @@ async function start(request, url) {
   if (from && from !== "same-origin" && from !== "none") return json({ error: "Start connecting from your own site." }, 403);
   const back = url.searchParams.get("back") ?? "/";
   if (!BACK_RE.test(back)) return json({ error: "Unexpected details." }, 400);
-  const verifier = random(48);
-  const state = random(24);
-  const challenge = base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
-  const relay = new URL(RELAY);
-  relay.searchParams.set("to", `${url.origin}/_cloudflare/done`);
-  relay.searchParams.set("state", state);
-  relay.searchParams.set("challenge", challenge);
+  const { verifier, state, relay } = await relayLink(`${url.origin}/_cloudflare/done`);
   // Lax, so the cookie comes along when the relay page sends the browser back here.
   return withCookie(Response.redirect(relay.toString(), 302),
     `${START_COOKIE}=${state}.${verifier}.${base64url(new TextEncoder().encode(back))}; Path=/; Max-Age=${START_SECONDS}; HttpOnly; Secure; SameSite=Lax`);
@@ -88,28 +82,67 @@ async function finish(request, env, body) {
   if (typeof body.state !== "string" || body.state !== state) return withCookie(json({ error: "That isn't the connection this site started. Start again." }, 400), clear);
   if (typeof body.code !== "string" || !CODE_RE.test(body.code)) return withCookie(json({ error: "Cloudflare didn't send a code." }, 400), clear);
   const back = new TextDecoder().decode(fromBase64url(backEncoded));
-  // When testing on this computer, a stand-in for Cloudflare's token endpoint.
-  const endpoint = env?.ALLOW_LOCAL_SITES === "1" && env.OAUTH_TOKEN_URL ? env.OAUTH_TOKEN_URL : TOKEN_ENDPOINT;
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ grant_type: "authorization_code", code: body.code, redirect_uri: RELAY, client_id: CLIENT_ID, code_verifier: verifier }),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || typeof data.access_token !== "string") {
-    const why = data.error_description || data.error || `HTTP ${response.status}`;
-    return withCookie(json({ error: `Cloudflare didn't finish connecting: ${why}` }, 400), clear);
+  let data;
+  try {
+    data = await exchangeCode(env, body.code, verifier, new URL(request.url).origin);
+  } catch (error) {
+    return withCookie(json({ error: error.message }, 400), clear);
   }
-  if (!CODE_RE.test(data.access_token)) return withCookie(json({ error: "Cloudflare's token isn't in a form this site can keep." }, 400), clear);
   // Kept just short of the hour Cloudflare gives it, so a step never starts with a token about to expire.
   const seconds = Math.max(60, Math.min(Number(data.expires_in) || 3600, 3600) - 60);
   const done = withCookie(json({ back: BACK_RE.test(back) ? back : "/" }), clear);
   return withCookie(done, `${TOKEN_COOKIE}=${data.access_token}; Path=/; Max-Age=${seconds}; HttpOnly; Secure; SameSite=Strict`);
 }
 
+/**
+ * Whether test stand-ins may be used: ALLOW_LOCAL_SITES set AND this site running on this computer. A setting alone
+ * isn't enough, so one added to a real site (say, by someone with access to the account) can't send Connect's codes,
+ * or a check's, to an address of their choosing.
+ */
+export function testingHere(env, origin) {
+  try {
+    return env?.ALLOW_LOCAL_SITES === "1" && ["localhost", "127.0.0.1"].includes(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A fresh PKCE secret and state, and the relay link that sends the browser to Cloudflare and back to `to` (a
+ * `/_cloudflare/done` here for full access, or `/_check/done` for a check's read-only access: the relay page picks
+ * what to ask Cloudflare for from that path, so a check can never be given more).
+ */
+export async function relayLink(to) {
+  const verifier = random(48);
+  const state = random(24);
+  const challenge = base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+  const relay = new URL(RELAY);
+  relay.searchParams.set("to", to);
+  relay.searchParams.set("state", state);
+  relay.searchParams.set("challenge", challenge);
+  return { verifier, state, relay };
+}
+
+/** Swaps Cloudflare's one-time code for the token (sending the PKCE secret); throws with a message to show. */
+export async function exchangeCode(env, code, verifier, origin) {
+  // When testing on this computer, a stand-in for Cloudflare's token endpoint.
+  const endpoint = testingHere(env, origin) && env.OAUTH_TOKEN_URL ? env.OAUTH_TOKEN_URL : TOKEN_ENDPOINT;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: RELAY, client_id: CLIENT_ID, code_verifier: verifier }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || typeof data.access_token !== "string") {
+    throw new Error(`Cloudflare didn't finish connecting: ${data.error_description || data.error || `HTTP ${response.status}`}`);
+  }
+  if (!CODE_RE.test(data.access_token)) throw new Error("Cloudflare's token isn't in a form this site can use.");
+  return data;
+}
+
 // Back from the relay: the code and state travel in the fragment (never sent to a server or kept in a log), and this
 // page posts them to /finish, which can read the cookie the fragment can't.
-function donePage() {
+export function donePage(finishPath) {
   return `<!doctype html>
 <html lang="en-GB">
 <head>
@@ -144,10 +177,23 @@ function donePage() {
       return;
     }
     try {
-      const res = await fetch("/_cloudflare/finish", { method: "POST", headers: { "Content-Type": "application/json" },
+      const res = await fetch(${JSON.stringify(finishPath)}, { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: params.get("code"), state: params.get("state") }) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Something went wrong.");
+      // A friend's check (checks.js) then reads the account's audit log, a page at a time.
+      if (data.audit) {
+        status.textContent = "Reading the account's audit log…";
+        let cursor = "";
+        for (let page = 1; ; page++) {
+          const step = await fetch("/_check/audit", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(page > 40 ? { stop: true } : { cursor }) });
+          const got = await step.json().catch(() => ({}));
+          if (!step.ok) throw new Error(got.error || "Something went wrong.");
+          if (got.done) break;
+          cursor = got.cursor;
+        }
+      }
       location.replace(data.back || "/");
     } catch (err) {
       status.textContent = "";
@@ -159,17 +205,17 @@ function donePage() {
 </html>`;
 }
 
-function withCookie(response, cookie) {
+export function withCookie(response, cookie) {
   const out = new Response(response.body, response);
   out.headers.append("Set-Cookie", cookie);
   return out;
 }
 
-function readCookie(request, name) {
+export function readCookie(request, name) {
   const found = (request.headers.get("Cookie") ?? "").split(";").map((c) => c.trim()).find((c) => c.startsWith(`${name}=`));
   return found ? found.slice(name.length + 1) : null;
 }
 
-const random = (bytes) => base64url(crypto.getRandomValues(new Uint8Array(bytes)));
+export const random = (bytes) => base64url(crypto.getRandomValues(new Uint8Array(bytes)));
 const base64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const fromBase64url = (text) => Uint8Array.from(atob(text.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));

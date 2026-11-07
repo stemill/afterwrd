@@ -1,7 +1,7 @@
 // What a hostile friend's site might send, through the real parsing code.
 // The real friends.js and feed.js, bundled by run.sh (with a stand-in for Cloudflare's runtime) into $OUT/bundle.mjs.
 import { pathToFileURL } from "node:url";
-const { callSite, cleanFeed, icsFile, loadRelease, markMine, markMineInGroup, parseEvent, parseGroupPage, parseMedia, readEventForm, siteOrigin } = await import(pathToFileURL(`${process.env.OUT}/bundle.mjs`).href);
+const { callSite, cleanFeed, icsFile, loadRelease, markMine, markMineInGroup, parseEvent, parseGroupPage, parseMedia, readEventForm, serveStatic, siteOrigin } = await import(pathToFileURL(`${process.env.OUT}/bundle.mjs`).href);
 const B = "https://bob.example";
 const A = "https://ann.example";
 const hash = "a".repeat(64);
@@ -114,4 +114,28 @@ check("a release still downloads after GitHub answers 504 once", await outcome("
 check("…but gives up after three tries", await outcome("down") === "Couldn't download the release (503)." && asked["/down/manifest.json"] === 3);
 check("…and doesn't try again when it isn't there", await outcome("missing") === "Couldn't download the release (404)." && asked["/missing/manifest.json"] === 1);
 github.close();
+
+// Static files are checked against the hashes built into the code before they're sent (src/static.js).
+{
+  const { createHash } = await import("node:crypto");
+  const real = Buffer.from("body { color: green; }");
+  const hashes = { "/static/style.css": createHash("sha256").update(real).digest("hex") };
+  let stored = real;
+  let reads = 0;
+  const env = { ASSETS: { fetch: async () => { reads++; return new Response(stored, { headers: { "Content-Type": "text/css" } }); } } };
+  const get = (path, headers = {}, method = "GET") => serveStatic(new Request(`https://site.example${path}`, { method, headers }), env, hashes);
+  const ok = await get("/static/style.css?v=1");
+  const etag = ok.headers.get("ETag");
+  check("a static file matching the release is sent, with its hash as ETag", ok.status === 200 && (await ok.text()) === real.toString()
+    && etag === `"${hashes["/static/style.css"]}"` && ok.headers.get("Content-Type") === "text/css");
+  reads = 0;
+  const again = await get("/static/style.css", { "If-None-Match": `W/${etag}` });
+  check("…and a browser's checked copy is confirmed without reading the file again", again.status === 304 && reads === 0);
+  check("HEAD sends no body", (await (await get("/static/style.css", {}, "HEAD")).text()) === "");
+  stored = Buffer.from("body { color: green; } @import url(https://evil.example/x.css);");
+  const changed = await get("/static/style.css");
+  check("a changed static file is refused", changed.status === 500 && !(await changed.text()).includes("evil"));
+  check("…even when the browser offers another ETag", (await get("/static/style.css", { "If-None-Match": '"0000"' })).status === 500);
+  check("a file not in the release isn't sent", (await get("/static/extra.js")).status === 404 && (await get("/static/constructor")).status === 404);
+}
 process.exit(failed ? 1 : 0);
