@@ -111,12 +111,15 @@ same browser, with the account you installed into.</p>
 </section>
 
 <section id="friend">
-  <h2>Or ask a friend's site to check it</h2>
-  <p>If a friend already has an afterwrd site, theirs can do the careful part for you. They press <b>Make a check link</b>
-  on their <i>Friends</i> page and send it to you; you open it and allow read-only access when Cloudflare asks. Their
-  site then downloads your site's code from Cloudflare, compares every file with the published release, and reads
-  your audit log for anything afterwrd doesn't do. You both see what it found. It can't change anything, and the
-  access isn't kept. Best done before you start using a new site, and again after updates.</p>
+  <h2>Or ask a friend to check it</h2>
+  <p>If a friend has an afterwrd site, theirs can do the careful part for you. On your new site, go to <i>Friends</i> and
+  press <b>Ask a friend to check my site</b>: it writes a message for you to send them, however you usually would. They
+  paste it into their own <i>Friends</i> page and send you back a link. You open it and allow read-only access when
+  Cloudflare asks. Their site then downloads your site's code from Cloudflare, compares every file with the published
+  release, checks how it's set up, and reads your account's log for anything afterwrd doesn't do. You both see what it
+  found. It can't change anything, and the access isn't kept.</p>
+  <p class="meta">The request goes by message rather than between the two sites on purpose: if your site had been
+  tampered with, it couldn't fake the check.</p>
 </section>
 
 <section id="wrong">

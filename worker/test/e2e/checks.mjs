@@ -122,16 +122,16 @@ const cookie = (await owner.cookies()).find((c) => c.name === "__Host-session").
 const asOwner = (path, body, origin = BASE) => fetch(BASE + path, { method: "POST", redirect: "manual",
   headers: { Cookie: `__Host-session=${cookie}`, Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) });
 
-async function makeLink() {
-  const res = await asOwner("/_admin/checks/new", {});
+async function makeLink(what = {}) {
+  const res = await asOwner("/_admin/checks/new", what);
   const body = await res.text();
   if (!res.ok) throw new Error(`Making a check link: HTTP ${res.status} ${body.slice(0, 200)}`);
   return JSON.parse(body);
 }
 
 // One check, the friend's way: open the link, give their site, (relay), come back with Cloudflare's code.
-async function runCheck(code, site = FRIEND_SITE) {
-  const { link: checkLink, message } = await makeLink();
+async function runCheck(code, site = FRIEND_SITE, fixed = false) {
+  const { link: checkLink, message } = await makeLink(fixed ? { site } : {});
   const friend = await person(false);
   let relay = null;
   await friend.setRequestInterception(true);
@@ -143,7 +143,7 @@ async function runCheck(code, site = FRIEND_SITE) {
   });
   await friend.goto(checkLink);
   const before = await friend.$eval("main", (m) => m.textContent);
-  await friend.type("input[name=site]", site);
+  if (!fixed) await friend.type("input[name=site]", site);
   await Promise.all([friend.waitForFunction(() => document.title === "relay stand-in"), friend.click("#check button")]);
   if (!relay?.searchParams.get("to")) throw new Error(`relay: ${relay}`);
   await friend.goto(`${relay.searchParams.get("to")}#${new URLSearchParams({ code: `${code}.one-time-code`, state: relay.searchParams.get("state") })}`);
@@ -168,10 +168,28 @@ check("…and its account as only doing what afterwrd does, over both pages of t
 check("the audit log is read newest first, page by page", audits.some((a) => a.direction === "desc" && a.cursor === "page-3"));
 check("the result names the Worker and the end of the account id, not the account's name", good.after.includes("Worker localhost") && good.after.includes("abcdef")
   && !good.after.includes("someone@example.com"));
+check("…and says first which site was checked, and which site checked it", good.after.includes("Ann Example's site checked yours")
+  && good.after.includes("Site checked: localhost:8788") && good.after.includes("Checked by: Ann Example's site (localhost:8787)"), good.after.slice(0, 300));
 check("the token was used only against the stand-in API", asked.filter((a) => a.startsWith("tok-match ")).length >= 8);
 check("no cookie holds the token afterwards", !(await good.friend.cookies()).some((c) => c.name === "cf_check" || c.name === "cf_check_run"));
 const again = await fetch(`${good.checkLink}/start`, { method: "POST", headers: { Origin: BASE, "Content-Type": "application/json" }, body: JSON.stringify({ site: FRIEND_SITE }) });
 check("a used link can't start another check", again.status === 409);
+
+// --- asking for a check, by message ---------------------------------------------------------------------------
+await owner.goto(`${BASE}/friend`);
+await owner.click("#ask-check");
+const ask = await owner.$eval("#ask-message", (t) => t.value);
+check("\"Ask a friend to check my site\" writes a message naming this site", ask.includes("localhost:8787") && ask.includes("Make a check link"), ask);
+const pasted = await makeLink({ site: "Could you check that my afterwrd site is genuine? It's at afterwrd.bob-example.workers.dev. Thank you!" });
+const pastedPage = await (await fetch(pasted.link)).text();
+check("a link made from a pasted message is for the site it names", pastedPage.includes("Your site: <b>afterwrd.bob-example.workers.dev</b>")
+  && !pastedPage.includes('name="site"'));
+await fetch(`${pasted.link}/start`, { method: "POST", headers: { Origin: BASE, "Content-Type": "application/json" }, body: JSON.stringify({ site: FRIEND_SITE }) });
+check("…and the person opening it can't point it at another site", sql("SELECT site FROM site_checks ORDER BY id DESC LIMIT 1")[0].site === "https://afterwrd.bob-example.workers.dev");
+check("a message without an afterwrd address is refused", (await asOwner("/_admin/checks/new", { site: "Could you check my site please?" })).status === 400);
+check("…as is a preview or lookalike address", (await asOwner("/_admin/checks/new", { site: "v2.afterwrd.bob.workers.dev or afterwrd.bob.workers.dev.evil.example" })).status === 400);
+const fixedRun = await runCheck("match", FRIEND_SITE, true);
+check("a check through a link made for a site runs on that site", fixedRun.after.includes("running exactly afterwrd 9.9.9"), fixedRun.after.slice(0, 200));
 
 // --- a tampered site, with other things done in the account -------------------------------------------------------
 const bad = await runCheck("tampered");
@@ -220,7 +238,7 @@ check("…and leaves the link usable", (await fetch(`${failed.link}/start`, { me
 await owner.goto(`${BASE}/friend`);
 const listed = await owner.$$eval(".checks > li", (l) => l.map((li) => li.textContent.replace(/\s+/g, " ")));
 const count = (word) => listed.filter((t) => t.includes(word)).length;
-check("Friends lists the checks with a verdict each", count("all good") === 1 && count("needs a look") === 3 && count("couldn't check") === 1,
+check("Friends lists the checks with a verdict each", count("all good") === 2 && count("needs a look") === 3 && count("couldn't check") === 1,
   `${listed.length}: ${listed.map((t) => t.slice(0, 60)).join(" | ")}`);
 check("…with no image injected from Cloudflare's answers", (await owner.$$(".checks img")).length === 0);
 

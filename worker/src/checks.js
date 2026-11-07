@@ -53,16 +53,24 @@ export async function handleCheckAdmin(request, env, url) {
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
   const body = await request.json().catch(() => ({}));
   if (url.pathname === "/_admin/checks/new") {
+    // For a friend (from their card), for a site whose address (or whole "please check" message) was pasted, or,
+    // with neither, for whichever site the person opening it names.
     const connection = body.connection == null ? null : Number(body.connection);
     let friend = null;
+    let site = null;
     if (connection !== null) {
       friend = await env.DB.prepare("SELECT id, name, origin FROM connections WHERE id = ? AND approved_at IS NOT NULL").bind(connection).first();
       if (!friend) return json({ error: "That isn't one of your friends." }, 404);
+      site = friend.origin;
+    } else if (typeof body.site === "string" && body.site.trim()) {
+      site = siteIn(body.site, env, url.origin);
+      if (!site) return json({ error: "Couldn't find an afterwrd site's address (something.their-name.workers.dev) in that." }, 400);
+      friend = await env.DB.prepare("SELECT id FROM connections WHERE origin = ? AND approved_at IS NOT NULL").bind(site).first();
     }
     const token = randomToken();
-    const made = await env.DB.prepare(`INSERT INTO site_checks (token_hash, connection_id, site, created_at, expires_at)
-      SELECT ?1, ?2, ?3, ?4, ?5 WHERE (SELECT COUNT(*) FROM site_checks WHERE checked_at IS NULL AND expires_at > ?4) < ?6`)
-      .bind(await sha256(token), friend?.id ?? null, friend?.origin ?? null, now(), now() + LINK_SECONDS, OPEN_LINKS).run();
+    const made = await env.DB.prepare(`INSERT INTO site_checks (token_hash, connection_id, site, site_fixed, created_at, expires_at)
+      SELECT ?1, ?2, ?3, ?4, ?5, ?6 WHERE (SELECT COUNT(*) FROM site_checks WHERE checked_at IS NULL AND expires_at > ?5) < ?7`)
+      .bind(await sha256(token), friend?.id ?? null, site, site ? 1 : 0, now(), now() + LINK_SECONDS, OPEN_LINKS).run();
     if (!made.meta.changes) return json({ error: `You have ${OPEN_LINKS} check links nobody has used yet; wait for those first.` }, 429);
     const link = `${url.origin}/_check/${token}`;
     const me = await ownerName(env.DB);
@@ -105,11 +113,28 @@ export async function handleCheck(request, env, url) {
   }
   if (request.method === "GET" && !match[2]) {
     const result = check.result ? JSON.parse(check.result) : null;
-    return html(checkLinkPage({ owner: await ownerName(env.DB), site: check.site, fixed: Boolean(check.connection_id),
-      result: result ? resultHtml(result, "yours") : null, reading: Boolean(result && !check.checked_at) }));
+    const owner = await ownerName(env.DB);
+    const by = { name: owner, host: url.host };
+    return html(checkLinkPage({ owner, checker: url.host, site: check.site, fixed: Boolean(check.site_fixed),
+      result: result ? resultHtml(result, "yours", by) : null, reading: Boolean(result && !check.checked_at) }));
   }
   if (request.method === "POST" && match[2]) return start(env, url, check, token, await request.json().catch(() => ({})));
   return new Response("Not found", { status: 404 });
+}
+
+/**
+ * The afterwrd site an address, link or whole message names: the first something.their-name.workers.dev in it (or,
+ * when testing on this computer, an http://localhost address). Null if there isn't one.
+ */
+export function siteIn(text, env, here) {
+  const words = String(text ?? "").trim().slice(0, 2000);
+  const found = /(?<![\w.-])([a-z0-9-]+\.[a-z0-9-]+\.workers\.dev)(?![\w-]|\.[\w-])/i.exec(words)?.[1];
+  if (found && WORKERS_DEV.test(found.toLowerCase())) return `https://${found.toLowerCase()}`;
+  if (testingHere(env, here)) {
+    const local = siteOrigin(words, env);
+    if (local?.startsWith("http://")) return local;
+  }
+  return null;
 }
 
 const findCheck = async (db, token) => db.prepare("SELECT * FROM site_checks WHERE token_hash = ? AND expires_at > ?")
@@ -119,13 +144,9 @@ const clearRun = `${RUN_COOKIE}=; Path=/_check; Max-Age=0; HttpOnly; Secure; Sam
 
 async function start(env, url, check, token, body) {
   if (check.checked_at) return json({ error: "This site has already been checked with this link." }, 409);
-  // A link made for a friend checks their site; otherwise the person says where theirs is.
-  let site = check.connection_id ? check.site : siteOrigin(/^https?:\/\//.test(body.site ?? "") ? body.site : `https://${body.site ?? ""}`, env);
-  const local = testingHere(env, url.origin) && site?.startsWith("http://");
-  if (!site || (!local && !WORKERS_DEV.test(new URL(site).hostname))) {
-    return json({ error: "That doesn't look like an afterwrd site's address (something.your-name.workers.dev)." }, 400);
-  }
-  site = new URL(site).origin;
+  // A link made for a site checks that site; otherwise the person says where theirs is.
+  const site = check.site_fixed ? check.site : siteIn(body.site, env, url.origin);
+  if (!site) return json({ error: "That doesn't look like an afterwrd site's address (something.your-name.workers.dev)." }, 400);
   // Starting again (after a step failed) begins afresh.
   await env.DB.prepare("UPDATE site_checks SET site = ?, result = NULL WHERE id = ? AND checked_at IS NULL").bind(site, check.id).run();
   const { verifier, state, relay } = await relayLink(`${url.origin}/_check/done`);
@@ -360,11 +381,13 @@ async function readAuditPage(access, env, here, result, cursor, fetcher = fetch)
 const when = (seconds) => new Date(seconds * 1000).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) + " UTC";
 
 /** What a check found, as HTML (everything from Cloudflare escaped). `whose`: "yours" for the person checked, else "theirs". */
-export function resultHtml(r, whose = "theirs") {
+export function resultHtml(r, whose = "theirs", by = null) {
   const site = escape(r.site ? new URL(r.site).host : "");
   const your = whose === "yours" ? "your" : "their";
   const Your = whose === "yours" ? "Your" : "Their";
-  const lines = [];
+  // Which site was checked, and by whom, first: with one person playing both parts it's easy to lose track.
+  const lines = [`<p class="check-who">Site checked: <b>${site}</b>${r.account ? ` <span class="meta">(Worker ${escape(r.script ?? "")}, Cloudflare account ending ${escape(r.account)})</span>` : ""}`
+    + (by ? `<br>Checked by: <b>${escape(by.name)}'s site</b> <span class="meta">(${escape(by.host)})</span>` : "") + "</p>"];
   const say = (good, words) => lines.push(`<p class="check-${good ? "good" : "bad"}">${good ? "✓" : "✗"} ${words}</p>`);
   if (r.problem === "missing") say(false, `No Worker called <b>${escape(r.script)}</b> in the Cloudflare account that was allowed. Was it the account ${site} is in?`);
   else if (r.problem === "several") say(false, `More than one account that was allowed has a Worker called <b>${escape(r.script)}</b>. Check again, allowing only the account ${site} is in.`);
@@ -392,7 +415,7 @@ export function resultHtml(r, whose = "theirs") {
       }
     }
   }
-  lines.push(`<p class="meta">Worker <b>${escape(r.script ?? "")}</b>${r.account ? ` in the Cloudflare account ending <b>${escape(r.account)}</b>` : ""} · checked ${escape(when(r.checkedAt))}, read-only. The access Cloudflare gave was used for this check and not kept.</p>`);
+  lines.push(`<p class="meta">Checked ${escape(when(r.checkedAt))}, read-only. The access Cloudflare gave was used for this check and not kept.</p>`);
   return lines.join("\n");
 }
 

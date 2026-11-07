@@ -237,6 +237,7 @@ ${connectPart(connected, "/_admin/update?go=update", "to change this site's Work
 <p id="error" role="alert"></p>
 <section id="done" class="card" hidden>
   <p><b>Updated to ${escape(latest.version)}.</b></p>
+  <p class="meta">If a friend has afterwrd, it's worth <a href="/friend#checks">asking them to check your site</a> now.</p>
   <p><a class="button" href="/_admin/update">Done</a></p>
 </section>`;
   }

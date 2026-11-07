@@ -6,6 +6,7 @@ import m0002 from "../migrations/0002_groups.sql";
 import m0003 from "../migrations/0003_events.sql";
 import m0004 from "../migrations/0004_friend_answers.sql";
 import m0005 from "../migrations/0005_site_checks.sql";
+import m0006 from "../migrations/0006_check_site_fixed.sql";
 
 // Every file in migrations/, in order. A new migration needs adding here too.
 const MIGRATIONS = [
@@ -14,6 +15,7 @@ const MIGRATIONS = [
   ["0003_events.sql", m0003],
   ["0004_friend_answers.sql", m0004],
   ["0005_site_checks.sql", m0005],
+  ["0006_check_site_fixed.sql", m0006],
 ];
 
 let ready = null;

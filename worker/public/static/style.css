@@ -567,8 +567,12 @@ table.numbers tbody tr:hover { background: var(--raised); }
 .checks .check-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.8rem; }
 .checks details { margin-top: 0.5rem; }
 .check-result p { margin: 0.4rem 0; }
+.check-result .check-who { color: var(--text); }
 .check-good { color: var(--moss); }
 .check-bad { color: var(--danger); }
 .check-good b, .check-bad b { color: var(--text); }
 .check-files { margin: 0 0 0.5rem; padding-left: 1.2rem; color: var(--muted); font-size: 0.85rem; word-break: break-word; }
 .friend-tabs button.link { margin-left: auto; }
+.check-form { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.5rem 0 1rem; }
+.check-form input { flex: 1 1 16rem; font: inherit; padding: 0.5rem 0.9rem; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg); color: var(--text); }

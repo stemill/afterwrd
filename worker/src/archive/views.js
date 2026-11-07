@@ -827,11 +827,29 @@ ${friends.length ? html`<ul class="friend-list">
   <a class="chip primary" href="/_admin/connections">${raw(icon("connections"))}<span>Connect with a friend</span></a>
 </div>`}
 
-<h2 id="checks">Checking a friend's site</h2>
-<p class="meta">Your site can check that a friend's site is genuine: exactly the published afterwrd, with nothing else done
-in their Cloudflare account. They open a link you send and allow read-only access; your site does the rest. Best
-before a new friend starts using their site, and again after updates.</p>
-<p><button class="chip" data-check="">Make a check link</button></p>
+<h2 id="checks">Checking sites are genuine</h2>
+<p class="meta">A friend's afterwrd site can check that yours is exactly the published afterwrd, with nothing else done in
+your Cloudflare account, and yours can do the same for them. It's best done before starting to use a new site, and
+again after updates. The request goes by message, not through the sites, so a site that had been tampered with
+couldn't fake it.</p>
+<h3>Your site</h3>
+<p><button class="chip" id="ask-check">Ask a friend to check my site</button></p>
+<section class="card invite-panel" id="ask-panel" hidden>
+  <h2>Send this to a friend with afterwrd</h2>
+  <p class="meta">Send it however you usually would. Your site doesn't contact anyone.</p>
+  <textarea id="ask-message" readonly rows="6" aria-label="Message asking for a check">Could you check that my afterwrd site is genuine? It's at ${host(ctx.url.origin)}. On your afterwrd site, go to Friends, paste this message under "A friend's site", press "Make a check link", and send me the link it makes. Thank you!</textarea>
+  <p class="row"><button class="chip primary" id="ask-copy">Copy message</button>
+    <button class="chip" id="ask-share" hidden>Share…</button>
+    <button class="chip" id="ask-done">Done</button></p>
+</section>
+<h3>A friend's site</h3>
+<p class="meta">When a friend asks, paste their message (or just their site's address) here, make a link and send it back to
+them. They open it and allow read-only access in Cloudflare; your site does the rest. Each friend's card has
+<i>Check their site</i> too.</p>
+<form class="check-form" onsubmit="return false">
+  <input id="check-site" placeholder="Their message, or their site's address" aria-label="Their message, or their site's address">
+  <button class="chip" data-check="">Make a check link</button>
+</form>
 <section class="card invite-panel" id="check-panel" hidden>
   <h2>Send this to your friend</h2>
   <textarea id="check-message" readonly rows="6" aria-label="Check message"></textarea>
@@ -859,7 +877,8 @@ ${checks.length > 0 && html`<ul class="friend-list checks">
     document.getElementById("check-error").textContent = "";
     try {
       const res = await fetch("/_admin/checks/new", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(button.dataset.check ? { connection: Number(button.dataset.check) } : {}) });
+        body: JSON.stringify(button.dataset.check ? { connection: Number(button.dataset.check) }
+          : { site: document.getElementById("check-site").value }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Something went wrong.");
       document.getElementById("check-message").value = data.message;
@@ -876,6 +895,24 @@ ${checks.length > 0 && html`<ul class="friend-list checks">
     setTimeout(() => { e.target.textContent = "Copy message"; }, 1500);
   });
   document.getElementById("check-done").addEventListener("click", () => location.reload());
+  // Asking for a check: only a message to send, nothing sent from here.
+  const askPanel = document.getElementById("ask-panel");
+  document.getElementById("ask-check").addEventListener("click", () => {
+    askPanel.hidden = false;
+    askPanel.scrollIntoView({ block: "center" });
+    document.getElementById("ask-message").select();
+  });
+  document.getElementById("ask-copy").addEventListener("click", async (e) => {
+    await navigator.clipboard.writeText(document.getElementById("ask-message").value);
+    e.target.textContent = "Copied";
+    setTimeout(() => { e.target.textContent = "Copy message"; }, 1500);
+  });
+  const askShare = document.getElementById("ask-share");
+  if (navigator.share) {
+    askShare.hidden = false;
+    askShare.addEventListener("click", () => navigator.share({ text: document.getElementById("ask-message").value }).catch(() => {}));
+  }
+  document.getElementById("ask-done").addEventListener("click", () => { askPanel.hidden = true; });
 </script>
 
 ${facebook.length > 0 && html`
