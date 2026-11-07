@@ -176,10 +176,14 @@ const again = await fetch(`${good.checkLink}/start`, { method: "POST", headers: 
 check("a used link can't start another check", again.status === 409);
 
 // --- asking for a check, by message ---------------------------------------------------------------------------
-await owner.goto(`${BASE}/friend`);
+await owner.goto(`${BASE}/_admin/update`);
 await owner.click("#ask-check");
 const ask = await owner.$eval("#ask-message", (t) => t.value);
-check("\"Ask a friend to check my site\" writes a message naming this site", ask.includes("localhost:8787") && ask.includes("Make a check link"), ask);
+check("\"Ask a friend to check my site\" on the Update page writes a message naming this site", ask.includes("localhost:8787")
+  && ask.includes("Make a check link") && await owner.$eval("#ask-panel", (p) => !p.hidden), ask);
+await owner.goto(`${BASE}/friend`);
+check("Friends has the checker's side only", (await owner.$("#ask-check")) === null && (await owner.$("#check-site")) !== null
+  && !(await owner.$eval("main", (m) => m.textContent)).includes("Check their site"));
 const pasted = await makeLink({ site: "Could you check that my afterwrd site is genuine? It's at afterwrd.bob-example.workers.dev. Thank you!" });
 const pastedPage = await (await fetch(pasted.link)).text();
 check("a link made from a pasted message is for the site it names", pastedPage.includes("Your site: <b>afterwrd.bob-example.workers.dev</b>")

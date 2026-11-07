@@ -35,7 +35,7 @@ export async function handleUpdate(request, env, url, owner) {
   const path = url.pathname.slice("/_admin/update".length);
   if (request.method === "GET" && path === "") {
     return html(updatePage(owner, await latestRelease(env.DB), {
-      connected: Boolean(connectedToken(request)), oldToken: Boolean(env.UPDATE_TOKEN), groups: await groupsBehind(env.DB), go: url.searchParams.get("go"),
+      site: url.host, connected: Boolean(connectedToken(request)), oldToken: Boolean(env.UPDATE_TOKEN), groups: await groupsBehind(env.DB), go: url.searchParams.get("go"),
     }));
   }
   if (request.method === "GET" && path === "/version") return json({ version: VERSION });
@@ -198,7 +198,7 @@ function connectPart(connected, back, what) {
 </details>`;
 }
 
-function updatePage(owner, latest, { connected, oldToken, groups, go }) {
+function updatePage(owner, latest, { site, connected, oldToken, groups, go }) {
   const available = latest.version && newer(latest.version, VERSION);
   // Groups this site made that are behind it: brought up to this version, with the same connection.
   const groupsPart = groups.length && !available ? `
@@ -237,7 +237,7 @@ ${connectPart(connected, "/_admin/update?go=update", "to change this site's Work
 <p id="error" role="alert"></p>
 <section id="done" class="card" hidden>
   <p><b>Updated to ${escape(latest.version)}.</b></p>
-  <p class="meta">If a friend has afterwrd, it's worth <a href="/friend#checks">asking them to check your site</a> now.</p>
+  <p class="meta">If a friend has afterwrd, it's worth <a href="#check">asking them to check your site</a> now.</p>
   <p><a class="button" href="/_admin/update">Done</a></p>
 </section>`;
   }
@@ -261,7 +261,8 @@ ${FAVICON}
   #error, #group-error, #forget-error { color: #d93025; }
   .security { padding: 0.6rem 0.9rem; border-left: 3px solid var(--danger); border-radius: 10px; background: var(--tint-4); }
   #done[hidden], #done [hidden] { display: none; }
-  .notes h2 { margin: 0 0 0.4rem; font-size: 1rem; }
+  .notes h2, #check h2 { margin: 0 0 0.4rem; font-size: 1rem; }
+  #ask-message { width: 100%; font: inherit; padding: 0.6rem; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); color: var(--text); }
   .notes p { margin: 0; white-space: pre-wrap; }
   .other { margin: 1rem 0; }
   .other summary { cursor: pointer; color: var(--muted); }
@@ -274,11 +275,39 @@ ${ownerHeader("update")}
 <h1>Update afterwrd</h1>
 <p class="meta">Signed in as ${escape(owner.name)}. This site is afterwrd ${escape(VERSION)}.</p>
 ${body}
+<section class="card" id="check">
+  <h2>Ask a friend to check your site</h2>
+  <p class="meta">A friend's afterwrd site can check that yours is exactly the published afterwrd, with nothing else done in
+  your Cloudflare account. Worth doing when your site is new, and after updates. This writes a message for you to send
+  them however you usually would: your site doesn't contact anyone, so a site that had been tampered with couldn't fake
+  the check.</p>
+  <p><button class="chip" id="ask-check">Ask a friend to check my site</button></p>
+  <div id="ask-panel" hidden>
+    <textarea id="ask-message" readonly rows="5" aria-label="Message asking for a check">Could you check that my afterwrd site is genuine? It's at ${escape(site)}. On your afterwrd site, go to Friends, paste this message under "Checking a friend's site", press "Make a check link", and send me the link it makes. Thank you!</textarea>
+    <p class="row"><button class="chip primary" id="ask-copy">Copy message</button>
+      <button class="chip" id="ask-share" hidden>Share…</button></p>
+  </div>
+</section>
 ${groupsPart}
 ${forget}
 </main>
 <script>
   const go = document.getElementById("go");
+  // Asking a friend for a check: only a message to send, nothing sent from here.
+  document.getElementById("ask-check").addEventListener("click", () => {
+    document.getElementById("ask-panel").hidden = false;
+    document.getElementById("ask-message").select();
+  });
+  document.getElementById("ask-copy").addEventListener("click", async (e) => {
+    await navigator.clipboard.writeText(document.getElementById("ask-message").value);
+    e.target.textContent = "Copied";
+    setTimeout(() => { e.target.textContent = "Copy message"; }, 1500);
+  });
+  const askShare = document.getElementById("ask-share");
+  if (navigator.share) {
+    askShare.hidden = false;
+    askShare.addEventListener("click", () => navigator.share({ text: document.getElementById("ask-message").value }).catch(() => {}));
+  }
   const connected = ${connected};
   const autoGo = ${JSON.stringify(go === "update" || go === "groups" ? go : null)};
   async function post(path, body) {

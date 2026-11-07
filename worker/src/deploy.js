@@ -91,10 +91,30 @@ export async function uploadAssets(token, account, script, release) {
   return jwt;
 }
 
-export async function findOrCreateDatabase(token, account, name) {
-  const found = (await api(token, `/accounts/${account}/d1/database?name=${encodeURIComponent(name)}`)).find((d) => d.name === name);
-  return found ?? api(token, `/accounts/${account}/d1/database`, { method: "POST", body: JSON.stringify({ name }) });
+/**
+ * The database a new site would use: an empty one of that name (left by an install that stopped partway) or a new
+ * one. One with tables in it is someone's data, perhaps an earlier afterwrd's, so it's never taken over: that would
+ * hand the new site the old one's owner, or break it if the old one was a different version. It's never deleted
+ * here either; the person decides.
+ */
+export async function findOrCreateDatabase(token, account, name, call = api) {
+  const found = await databaseInUse(token, account, name, call);
+  if (found?.tables) throw new Error(databaseTakenMessage(name));
+  return found ?? call(token, `/accounts/${account}/d1/database`, { method: "POST", body: JSON.stringify({ name }) });
 }
+
+/** The database called `name`, with how many tables it holds (Cloudflare's own aside), or null if there's none. */
+export async function databaseInUse(token, account, name, call = api) {
+  const found = (await call(token, `/accounts/${account}/d1/database?name=${encodeURIComponent(name)}`)).find((d) => d.name === name);
+  if (!found) return null;
+  const answer = await call(token, `/accounts/${account}/d1/database/${found.uuid}/query`, { method: "POST",
+    body: JSON.stringify({ sql: "SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\'" }) });
+  return { ...found, tables: Number(answer?.[0]?.results?.[0]?.n ?? 0) };
+}
+
+export const databaseTakenMessage = (name) => `There's already a database called "${name}" in this Cloudflare account with `
+  + "things in it, probably from an earlier afterwrd. Choose another address. Or, if you don't need what's in it, "
+  + "delete it in Cloudflare (Storage & databases → D1) and press Install again.";
 
 /** The D1 database an existing afterwrd uses, or null for a Worker that isn't afterwrd yet. */
 export function existingDatabase(settings) {

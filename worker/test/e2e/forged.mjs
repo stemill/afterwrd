@@ -1,7 +1,7 @@
 // What a hostile friend's site might send, through the real parsing code.
 // The real friends.js and feed.js, bundled by run.sh (with a stand-in for Cloudflare's runtime) into $OUT/bundle.mjs.
 import { pathToFileURL } from "node:url";
-const { callSite, cleanFeed, icsFile, loadRelease, markMine, markMineInGroup, parseEvent, parseGroupPage, parseMedia, readEventForm, serveStatic, siteOrigin } = await import(pathToFileURL(`${process.env.OUT}/bundle.mjs`).href);
+const { callSite, cleanFeed, icsFile, loadRelease, markMine, markMineInGroup, parseEvent, parseGroupPage, parseMedia, readEventForm, serveStatic, siteOrigin, findOrCreateDatabase } = await import(pathToFileURL(`${process.env.OUT}/bundle.mjs`).href);
 const B = "https://bob.example";
 const A = "https://ann.example";
 const hash = "a".repeat(64);
@@ -137,5 +137,28 @@ github.close();
   check("a changed static file is refused", changed.status === 500 && !(await changed.text()).includes("evil"));
   check("…even when the browser offers another ETag", (await get("/static/style.css", { "If-None-Match": '"0000"' })).status === 500);
   check("a file not in the release isn't sent", (await get("/static/extra.js")).status === 404 && (await get("/static/constructor")).status === 404);
+}
+// A new site's database: a leftover one with things in it is never taken over (src/deploy.js).
+{
+  const fake = (databases) => {
+    const calls = [];
+    const call = async (token, path, init = {}) => {
+      calls.push(`${init.method ?? "GET"} ${path}`);
+      if (path.includes("/d1/database?name=")) return databases.map(({ uuid, name }) => ({ uuid, name }));
+      if (path.endsWith("/query")) return [{ results: [{ n: databases[0].tables }], success: true }];
+      if (init.method === "POST") return { uuid: "new", name: "afterwrd" };
+      throw new Error(`unexpected ${path}`);
+    };
+    return { call, calls };
+  };
+  const none = fake([]);
+  check("with no database of that name, a new one is made", (await findOrCreateDatabase("t", "a", "afterwrd", none.call)).uuid === "new");
+  const empty = fake([{ uuid: "left", name: "afterwrd", tables: 0 }]);
+  check("an empty one, left by an install that stopped partway, is used", (await findOrCreateDatabase("t", "a", "afterwrd", empty.call)).uuid === "left"
+    && !empty.calls.some((c) => c === "POST /accounts/a/d1/database"));
+  const used = fake([{ uuid: "old", name: "afterwrd", tables: 12 }]);
+  const refused = await findOrCreateDatabase("t", "a", "afterwrd", used.call).then(() => null, (e) => e.message);
+  check("one with things in it is refused, and nothing is made or deleted", /already a database called "afterwrd"/.test(refused ?? "")
+    && used.calls.every((c) => c.startsWith("GET ") || c.endsWith("/query")));
 }
 process.exit(failed ? 1 : 0);

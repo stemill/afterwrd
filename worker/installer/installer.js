@@ -18,7 +18,8 @@
 //      installer a name with a random ending, so the address is chosen here instead)
 // Nothing is kept afterwards: later updates connect Cloudflare again from the site's Update page.
 import { connectedToken, connectLink, handleCloudflare, tokenFor } from "../src/cloudflare.js";
-import { api, deployVersion, existingDatabase, findOrCreateDatabase, findWorker, loadRelease, uploadAssets, workerSettings } from "../src/deploy.js";
+import { api, databaseInUse, databaseTakenMessage, deployVersion, existingDatabase, findOrCreateDatabase, findWorker, loadRelease, uploadAssets,
+  workerSettings } from "../src/deploy.js";
 
 const RELEASE = "__RELEASE_BASE__";
 const MANIFEST_SHA256 = "__MANIFEST_SHA256__";
@@ -126,6 +127,7 @@ const STEPS = {
     const upgrade = Boolean(existingDatabase(settings));
     const target = upgrade ? script : siteName(name ?? script);
     if (target !== script) await assertFree(token, account, target);
+    if (!upgrade && (await databaseInUse(token, account, target))?.tables) throw new Error(databaseTakenMessage(target));
     return { account, version: manifest.version, upgrade, target };
   },
 
