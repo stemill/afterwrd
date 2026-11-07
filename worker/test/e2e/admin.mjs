@@ -52,7 +52,10 @@ check("Your devices lists one passkey, which can't be removed", (await phone.$ev
   && JSON.stringify((await passkeys(phone)).map((k) => k.disabled)) === "[true]");
 check("no inviting other people", !(await phone.$("#invite")) && !(await phone.$("button[data-action=revoke]")));
 
+const alerts = async (page) => { await page.goto(`${BASE}/`); return page.$$eval(".notice.alert", (n) => n.map((x) => x.textContent.replace(/\s+/g, " ").trim())); };
+check("the first passkey isn't a new device", (await alerts(phone)).length === 0);
 // Add a laptop from the page.
+await phone.goto(`${BASE}/_admin`);
 await phone.click("#new-link");
 await phone.waitForSelector("#link:not([hidden])");
 const link = await phone.$eval("#link-url", (i) => i.value);
@@ -64,6 +67,41 @@ await Promise.all([laptop.waitForNavigation(), laptop.click("#go")]);
 check("the laptop is signed in as the owner", (await navLabels(laptop)).includes("Your devices"), await navLabels(laptop));
 const reuse = await (await device()).goto(link);
 check("the link only works once", reuse.status() === 404);
+
+// The phone hears that a device was added; the laptop (the new device) doesn't, and can't hide it.
+check("Home on the phone says a new device was added", (await alerts(phone)).some((t) => t.startsWith("A new device was added")), (await alerts(phone)).join(" | "));
+check("…but not on the new device itself", (await alerts(laptop)).length === 0);
+const laptopCookie = (await laptop.cookies()).find((c) => c.name === "__Host-session").value;
+const fromLaptop = (path) => fetch(BASE + path, { method: "POST", redirect: "manual",
+  headers: { Cookie: `__Host-session=${laptopCookie}`, Origin: BASE, "Content-Type": "application/json" }, body: "{}" });
+check("the new device can't say it was them", (await fromLaptop("/_admin/devices/seen")).status === 403 && (await alerts(phone)).length === 1);
+// An intruder's trick: add a second passkey from the new device, then confirm from the first. Neither can.
+const spare = await device();
+await register(spare, (await (await fromLaptop("/_admin/devices/link")).json()).link);
+const onLaptop = await alerts(laptop);
+check("the new device hears of the next one, but can't confirm it", onLaptop.length === 1 && onLaptop[0].includes("say so from one of your older devices")
+  && (await laptop.$$(".notice.alert button")).length === 0, onLaptop.join(" | "));
+check("…even by asking directly", (await fromLaptop("/_admin/devices/seen")).status === 403);
+const onPhone = await alerts(phone);
+check("the phone lists both new devices", onPhone.length === 1 && onPhone[0].startsWith("2 new devices were added"), onPhone.join(" | "));
+await Promise.all([phone.waitForNavigation(), phone.click(".notice.alert button")]);
+check("\"They were all me\" on the phone clears it", new URL(phone.url()).pathname === "/" && (await alerts(phone)).length === 0);
+// Put things back as they were: the spare passkey goes (the laptop's stays for the checks below).
+const spareKey = sql("SELECT id FROM credentials ORDER BY rowid DESC LIMIT 1")[0].id;
+const phoneCookie = (await phone.cookies()).find((c) => c.name === "__Host-session").value;
+await fetch(`${BASE}/_admin/devices/delete-passkey`, { method: "POST", headers: { Cookie: `__Host-session=${phoneCookie}`, Origin: BASE,
+  "Content-Type": "application/json" }, body: JSON.stringify({ credential: spareKey }) });
+check("the laptop, no longer new, has nothing to hear", (await alerts(laptop)).length === 0);
+
+// A release that fixes a security problem: Home says so, and so does the Update page. (A made-up release, saved as
+// if the owner's site had just checked GitHub.)
+const nowSeconds = Math.floor(Date.now() / 1000);
+sql(`INSERT OR REPLACE INTO settings (key, value) VALUES ('latest_release', '${JSON.stringify({ version: "99.0.1", checked: nowSeconds,
+  latest: { tag: "v99.0.1", version: "99.0.1", notes: "Made up.", page: "https://example.com/", securityFix: "99.0.0" } })}')`);
+check("Home says an update fixes a security problem", (await alerts(phone)).some((t) => t.includes("99.0.0 fixes a security problem")), (await alerts(phone)).join(" | "));
+await phone.goto(`${BASE}/_admin/update`);
+check("…and so does the Update page", (await phone.$eval("main", (m) => m.textContent)).includes("It fixes a security problem"));
+sql("DELETE FROM settings WHERE key = 'latest_release'");
 
 await phone.goto(`${BASE}/_admin`);
 let keys = await passkeys(phone);

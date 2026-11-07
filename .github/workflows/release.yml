@@ -13,6 +13,9 @@ on:
 
 permissions:
   contents: write # create the release and upload its files
+  id-token: write # sign the build record (Sigstore issues a short-lived certificate for this workflow run)
+  attestations: write # store the build record with the repository
+  artifact-metadata: write
 
 jobs:
   release:
@@ -41,10 +44,20 @@ jobs:
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
-      - run: npm ci
+      # Install scripts are the usual way a rogue npm package attacks a build, and none are needed: esbuild and
+      # wrangler find their programs without them, and the build comes out the same either way.
+      - run: npm ci --ignore-scripts
 
       - name: Build the release
         run: npm run release -- --base "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+
+      # A signed record that these exact files were built here, by this workflow, from the tagged commit. It's
+      # kept in Sigstore's public log, so it can't be quietly changed later. To check a release's files:
+      #   gh attestation verify manifest.json --repo stemill/afterwrd
+      - name: Sign the build record
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: worker/release/${{ env.VERSION }}/*
 
       - name: Publish it
         env:

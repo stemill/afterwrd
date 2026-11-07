@@ -92,6 +92,10 @@ and the friends they've chosen. This page explains how, and how to check it for 
     <code>installer.js</code> from the <a href="__RELEASE_PAGE__">published release __VERSION__</a>, which GitHub builds
     from a tagged commit. The installer carries a fingerprint (a SHA-256 hash) of that release's manifest, and refuses
     any file that doesn't match it.</li>
+    <li><b>Rebuild it yourself.</b> Releases are reproducible: building a release's tag on your own computer gives exactly
+    the same files, so the same fingerprint. GitHub also signs a record of each build (who built it, from which commit),
+    kept in Sigstore's public log where it can't be quietly changed. <a href="__REPO_PAGE__/blob/main/SECURITY.md#check-it-yourself">Check
+    it yourself</a> has the commands.</li>
   </ul>
   <p>Once installed, the code running on your site is visible in your own Cloudflare dashboard (<i>Workers &amp; Pages →
   your Worker → Edit code</i>). What you see there is what runs; there's no other server involved.</p>
@@ -252,7 +256,7 @@ and the friends they've chosen. This page explains how, and how to check it for 
   <p>The installer is a small Worker you deploy first. To create your site's database and upload afterwrd into your
   account it needs Cloudflare's permission, which it asks for through Cloudflare's own sign-in for apps: you press
   <b>Connect Cloudflare</b>, Cloudflare shows what afterwrd is asking for (making, changing and deleting Workers, which Cloudflare
-  calls <i>Workers Admin</i>; making databases; reading the account's workers.dev name) and you press <b>Allow</b>. Cloudflare then gives your installer a token that lasts an hour,
+  calls <i>Workers Admin</i>; making, changing and deleting databases; reading the account's workers.dev name) and you press <b>Allow</b>. Cloudflare then gives your installer a token that lasts an hour,
   kept only in a cookie on that page, used only against Cloudflare's API over HTTPS, and never shown, logged or sent
   anywhere else. afterwrd never asks for permission to make longer-lived tokens. The installer downloads the release from
   GitHub and checks every file against the fingerprint built into it, so what's installed is exactly the published
@@ -268,6 +272,12 @@ and the friends they've chosen. This page explains how, and how to check it for 
   <p>Updates work the same way, from your site's <i>Update</i> page: connect, press Allow, and your site fetches the newer
   release, checks it, and installs it over itself, keeping your passkeys, connections, photos and database. Nothing is
   remembered between updates. Updates only ever go forward: an older release can't be installed over a newer one.</p>
+  <p>What <b>Allow</b> covers, plainly: for that hour, every Worker and database in the Cloudflare account, not just
+  afterwrd's, and the account's basic settings. Not your domains, other Cloudflare services, billing or login. That's
+  why, if you use Cloudflare for anything else, it's best to make an account just for afterwrd. What you've allowed is
+  listed, and can be revoked, under <i>My Profile → Connected Applications</i>.</p>
+  <p>When an update fixes a security problem, your site says so on Home. To hear about every release, follow the
+  <a href="__REPO_PAGE__/releases.atom">releases feed</a> or <i>Watch</i> the repository on GitHub (Custom → Releases).</p>
   <p class="meta">Trust, stated plainly: an installed site trusts the GitHub repository it updates from, and the
   afterwrd.app pages, which come from the same repository. Read each release's notes and changes before updating if
   you'd rather check.</p>

@@ -26,8 +26,10 @@ export { MediaStore } from "./media.js";
 export { Outbox } from "./outbox.js";
 const HEADERS = {
   // No framing, plugins, <base> tricks or forms posting elsewhere. (Scripts aren't restricted: the pages use
-  // small inline scripts, and everything interpolated into a page is escaped.)
-  "Content-Security-Policy": "frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'",
+  // small inline scripts, and everything interpolated into a page is escaped.) Pages' own calls (fetch) go only to
+  // this site, so a library running in the page, such as zip.js reading a Facebook download, can't send what it
+  // reads anywhere else that way. Calls to Cloudflare, GitHub and friends' sites are made by the Worker, not the page.
+  "Content-Security-Policy": "connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'",
   // Other sites never learn where a visitor came from. (Not "no-referrer": that makes browsers send
   // "Origin: null" on this site's own forms, which the cross-site check then refuses.)
   "Referrer-Policy": "same-origin",

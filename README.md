@@ -69,7 +69,9 @@ You need a free Cloudflare account and a few minutes on a computer. Bringing you
 can be done any time.
 
 1. **Make a Cloudflare account** at <https://dash.cloudflare.com/sign-up>. An email address is all it asks
-   for; don't add a card.
+   for; don't add a card. If you already use Cloudflare for other things, make a new account just for afterwrd:
+   installing and updating ask for permission over every Worker and database in the account, for an hour, so in an
+   account of its own that's only afterwrd.
 2. **Create a Worker.** In the Cloudflare dashboard's left-hand menu: *Compute* → *Workers & Pages* →
    *Create application* (top right) → *Start with Hello World*. Replace the made-up *Worker name* (something
    like `blue-mud-43e4`) with `afterwrd`, or whatever you like: it becomes your address,
@@ -93,7 +95,7 @@ can be done any time.
 Connecting uses Cloudflare's own sign-in for apps: afterwrd is a registered app there, and you can see or revoke what
 you've allowed under *My Profile* → *Connected Applications*. The installer checks every file it downloads against the
 fingerprint built into it, so what's installed is exactly the published release. Cloudflare's free plan allows 5 GB of
-photos and videos.
+photos and videos. To check a release for yourself, see [Check it yourself](SECURITY.md#check-it-yourself).
 
 ### Keeping it safe
 
@@ -106,7 +108,12 @@ photos and videos.
 - **Photo locations are removed** from photos you post, and left out of a Facebook import unless you tick *Photo
   locations*; they can show where you live.
 - **Keep it up to date.** The owner's *Update* page installs a newer release, keeping your passkeys, connections
-  and archive. (Pasting a newer `installer.js` over your afterwrd Worker does the same.)
+  and archive. (Pasting a newer `installer.js` over your afterwrd Worker does the same.) Home says so when an update
+  fixes a security problem. To hear about every release, *Watch* the repository on GitHub (*Custom* → *Releases*) or
+  follow its [releases feed](https://github.com/stemill/afterwrd/releases.atom).
+- **Watch for new devices.** When a passkey is added, Home on your other devices says so for two weeks. If it
+  wasn't you, remove it in *Your devices*.
+- **Use a Cloudflare account just for afterwrd** if you use Cloudflare for anything else (see step 1).
 
 ## Browsing an export locally
 
@@ -186,8 +193,8 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   each connected site, and either of you can read the other's posts and photos (everything they've published)
   without leaving your own site: press their name. Comments you make are stored on your friend's site, with a
   copy kept on yours. Their photos and videos load straight from their site through links it signs, which last
-  an hour or two. Sites exchange posts and comments as ActivityStreams too. Only posts written on
-  afterwrd are shared, never an imported archive. Either of you can press *Remove friend* on the other's page,
+  an hour or two. Sites exchange posts and comments as ActivityStreams too. Friends see what you've
+  written on afterwrd, plus any parts of your Facebook download you chose to publish when importing. Either of you can press *Remove friend* on the other's page,
   which ends it all at once. If a friend's site stops answering for a day, Home stops mentioning it and *Friends*
   says so instead, so you can remove them. Two sites in the same Cloudflare account can connect too.
 - **Groups.** Each group is its own small site: *Groups → Start a group* makes it a Worker of its own, with its own

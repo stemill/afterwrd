@@ -41,8 +41,19 @@ export async function handleAdmin(request, env, url, owner) {
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
 
   const body = await request.json().catch(() => ({}));
-  const action = /^\/_admin\/devices\/(link|cancel-links|sign-out|delete-passkey)$/.exec(url.pathname)?.[1];
+  const action = /^\/_admin\/devices\/(link|cancel-links|sign-out|delete-passkey|seen)$/.exec(url.pathname)?.[1];
   switch (action) {
+    case "seen": {
+      // "That was me" on Home's new-device notice. Only a device whose own passkey isn't new can say so, so an
+      // intruder can't hide their passkey's notice, even by adding a second one and confirming from the first.
+      if (!(await newDevices(env.DB, owner)).canConfirm) return json({ error: "Confirm this from one of your older devices." }, 403);
+      const seen = await env.DB.prepare("SELECT MAX(created_at) AS at FROM credentials WHERE user_id = ?").bind(owner.id).first();
+      if (seen?.at) {
+        await env.DB.prepare(`INSERT INTO settings (key, value) VALUES ('devices_seen', ?1)
+          ON CONFLICT (key) DO UPDATE SET value = MAX(CAST(value AS INTEGER), ?1)`).bind(seen.at).run();
+      }
+      return Response.redirect(`${url.origin}/`, 303);
+    }
     case "link":
       return json({ link: await createDeviceLink(env, url, owner.id) });
     case "cancel-links":
@@ -64,6 +75,32 @@ export async function handleAdmin(request, env, url, owner) {
     }
   }
   return new Response("Not found", { status: 404 });
+}
+
+// How long Home mentions a newly added device, unless the owner says it was them sooner.
+const NEW_DEVICE_SECONDS = 14 * 86400;
+
+// A passkey is "new" while all of these hold: it was added in the last 14 days, it isn't the first one (made when
+// the site was set up), and the owner hasn't since said it was them (settings 'devices_seen').
+const IS_NEW = `created_at > ?2
+  AND created_at > (SELECT MIN(created_at) FROM credentials WHERE user_id = ?1)
+  AND created_at > COALESCE((SELECT CAST(value AS INTEGER) FROM settings WHERE key = 'devices_seen'), 0)`;
+
+/**
+ * For a notice on Home ("A new device was added… Not you? Remove it."): someone who got in would add their own
+ * passkey to stay in, and this makes that visible. `devices`: the new passkeys other than the one this device signed
+ * in with. `canConfirm`: whether this device may say they were all the owner's, which needs its own passkey not to be
+ * new (otherwise a new passkey could vouch for itself or for another the same person added).
+ */
+export async function newDevices(db, owner) {
+  const since = now() - NEW_DEVICE_SECONDS;
+  const [{ results: devices }, { results: own }] = await db.batch([
+    db.prepare(`SELECT id, created_at FROM credentials WHERE user_id = ?1 AND ${IS_NEW} AND id IS NOT ?3 ORDER BY created_at`)
+      .bind(owner.id, since, owner.session_credential ?? null),
+    db.prepare(`SELECT ${IS_NEW} AS new FROM credentials WHERE user_id = ?1 AND id = ?3`)
+      .bind(owner.id, since, owner.session_credential ?? null),
+  ]);
+  return { devices, canConfirm: own.length === 1 && !own[0].new };
 }
 
 // Only a hash is stored, so the link can be shown once and never again.

@@ -66,6 +66,12 @@ export async function handleUpdate(request, env, url, owner) {
     if (path === "/check") return json({ account: (await findWorker(token, script)).account });
     if (path === "/assets") return json({ jwt: await uploadAssets(token, body.account, script, await release()) });
     if (path === "/deploy") {
+      // A long-lived token an earlier version kept (UPDATE_TOKEN) goes now, while there's a fresh one to remove it
+      // with; the update itself keeps every other secret. If it can't be removed, the page still offers Forget.
+      if (env.UPDATE_TOKEN) {
+        await api(token, `/accounts/${body.account}/workers/scripts/${script}/secrets/UPDATE_TOKEN`, { method: "DELETE" })
+          .catch((error) => console.error("Couldn't remove UPDATE_TOKEN:", error.message));
+      }
       const settings = await api(token, `/accounts/${body.account}/workers/scripts/${script}/settings`);
       const databaseId = existingDatabase(settings);
       if (!databaseId) throw new Error("This Worker doesn't look like afterwrd, so it wasn't updated.");
@@ -122,10 +128,13 @@ async function latestRelease(db) {
       headers: { "User-Agent": "afterwrd" },
     });
     if (!response.ok) throw new Error(`GitHub said ${response.status}.`);
-    const { version, notes } = await response.json();
+    const { version, notes, security_fix: fix } = await response.json();
     const tag = `v${version}`;
     if (!TAG_RE.test(tag)) throw new Error("The latest release has an unexpected version.");
     latest = { tag, version, notes: typeof notes === "string" ? notes.slice(0, 3000) : "", page: `https://github.com/${REPO}/releases/tag/${tag}` };
+    // The newest release that fixed a security problem (package.json afterwrd.securityFix), so a site older than it
+    // can say so on Home, even if later releases fixed nothing of the kind.
+    if (typeof fix === "string" && TAG_RE.test(`v${fix}`) && !newer(fix, version)) latest.securityFix = fix;
   } catch (error) {
     return known.latest ?? { error: error.message };
   }
@@ -151,6 +160,12 @@ export async function updateWaiting(env, work) {
     else await refresh;
   }
   return Boolean(known.version && TAG_RE.test(`v${known.version}`) && newer(known.version, VERSION));
+}
+
+/** The release that fixed a security problem, if this site is older than it, for a notice on Home; else null. */
+export async function securityFixWaiting(db) {
+  const fix = (await knownRelease(db)).latest?.securityFix;
+  return typeof fix === "string" && TAG_RE.test(`v${fix}`) && newer(fix, VERSION) ? fix : null;
 }
 
 function newer(a, b) {
@@ -205,6 +220,7 @@ function updatePage(owner, latest, { connected, oldToken, groups, go }) {
   } else {
     body = `
 <p><b>afterwrd ${escape(latest.version)} is available.</b> <a href="${escape(latest.page)}" target="_blank" rel="noopener">On GitHub</a></p>
+${latest.securityFix && newer(latest.securityFix, VERSION) ? `<p class="security"><b>It fixes a security problem</b> (in ${escape(latest.securityFix)}), so it's worth updating soon.</p>` : ""}
 ${notes}
 <p class="meta">Updating keeps everyone's access, your archive and your photos.</p>
 ${connectPart(connected, "/_admin/update?go=update", "to change this site's Worker")}
@@ -234,6 +250,7 @@ ${FAVICON}
   #token { width: 100%; font: inherit; padding: 0.5rem; margin-top: 0.3rem; border: 1px solid var(--border); border-radius: 999px;
     background: var(--bg); color: var(--text); -webkit-text-security: disc; }
   #error, #group-error, #forget-error { color: #d93025; }
+  .security { padding: 0.6rem 0.9rem; border-left: 3px solid var(--danger); border-radius: 10px; background: var(--tint-4); }
   #done[hidden], #done [hidden] { display: none; }
   .notes h2 { margin: 0 0 0.4rem; font-size: 1rem; }
   .notes p { margin: 0; white-space: pre-wrap; }

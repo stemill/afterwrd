@@ -103,10 +103,19 @@ const notes = git.status === 0
   ? git.stdout.replace(/^Co-Authored-By:.*$/gim, "").trim().split(/\n{2,}/).map((p) => p.replace(/\s*\n\s*/g, " ")).join("\n\n").slice(0, 3000)
   : "";
 
+// The newest release that fixed a security problem: set afterwrd.securityFix in package.json to the version being
+// released when it fixes one, and leave it as it is otherwise, so sites that skip a release still hear about it.
+// Sites older than it show their owner a notice on Home (update.js securityFixWaiting).
+const securityFix = project.securityFix;
+if (securityFix !== undefined && !(/^\d+\.\d+\.\d+$/.test(securityFix) && !newerThan(securityFix, version))) {
+  throw new Error(`afterwrd.securityFix in package.json (${securityFix}) must be a version no newer than ${version}.`);
+}
+
 const manifest = {
   name: "afterwrd",
   version,
   notes,
+  ...(securityFix ? { security_fix: securityFix } : {}),
   main_module: config.main.split("/").pop(),
   compatibility_date: config.compatibility_date,
   compatibility_flags: config.compatibility_flags ?? [],
@@ -181,3 +190,9 @@ const total = [...modules, ...assets].reduce((n, f) => n + f.size, 0);
 console.log(`afterwrd ${version}: ${modules.length} code modules and ${assets.length} site files (${(total / 1e3).toFixed(0)} KB)`);
 console.log(`  ${relative(worker, out)}/  → publish at ${base}/`);
 console.log(`  installer: ${relative(worker, join(out, "installer.js"))} (manifest ${sha256(manifestBytes).slice(0, 12)}…)`);
+
+function newerThan(a, b) {
+  const [x, y] = [a, b].map((v) => v.split(".").map(Number));
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i];
+  return false;
+}

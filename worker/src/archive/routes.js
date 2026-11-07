@@ -12,7 +12,8 @@ import * as groups from "../membership.js";
 import { ownerName } from "../peers.js";
 import { SITE_ID } from "../posts.js";
 import { profilePictures } from "../photos.js";
-import { updateWaiting } from "../update.js";
+import { newDevices } from "../admin.js";
+import { securityFixWaiting, updateWaiting } from "../update.js";
 import { now } from "../util.js";
 import { fmtDate, fmtMonth } from "./format.js";
 import * as views from "./views.js";
@@ -455,6 +456,7 @@ async function home(ctx, params) {
   const friendsFeed = await loadFeed(db, ctx.url.origin);
   return views.homePage(ctx, {
     own, feed: friendsFeed, onThisDay: await onThisDay(ctx, 2), friends: friendsFeed.connections,
+    newDevices: await newDevices(db, ctx.user), securityFix: await securityFixWaiting(db),
   });
 }
 

@@ -58,6 +58,9 @@ const cookie = await session(owner);
 check("session cookie is __Host-, HttpOnly, Secure", Boolean(cookie && cookie.httpOnly && cookie.secure && cookie.path === "/"));
 const csp = (await fetch(`${BASE}/_auth/login`)).headers.get("content-security-policy") ?? "";
 check("CSP blocks plugins, <base> and foreign form posts", ["object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'"].every((d) => csp.includes(d)), csp);
+check("CSP lets pages call only this site", csp.includes("connect-src 'self'"), csp);
+const loginOptions = await (await fetch(`${BASE}/_auth/login/options`, { method: "POST", headers: { Origin: BASE } })).json();
+check("signing in asks the device to check it's you", loginOptions.userVerification === "required", loginOptions.userVerification);
 
 // --- open redirect ------------------------------------------------------------------
 for (const [next, expected] of [["/%5Cevil.example", "/"], ["/%09/evil.example", "/"], ["https://evil.example/", "/"], ["/posts?page=2", "/posts?page=2"]]) {

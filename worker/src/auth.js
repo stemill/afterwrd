@@ -21,7 +21,9 @@ export async function currentUser(request, env) {
   const token = readCookie(request, SESSION_COOKIE);
   if (!token) return null;
   return env.DB.prepare(
-    `SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ?`,
+    // session_credential: the passkey this device signed in with (null for sessions from before 0.15.0).
+    `SELECT u.*, s.credential_id AS session_credential FROM sessions s JOIN users u ON u.id = s.user_id
+     WHERE s.token_hash = ? AND s.expires_at > ?`,
   ).bind(await sha256(token), now()).first();
 }
 
@@ -104,7 +106,8 @@ async function registerOptions(env, url, { token }) {
     userID: new TextEncoder().encode(String(link.user_id)),
     attestationType: "none",
     excludeCredentials: existing.map((c) => ({ id: c.id, transports: JSON.parse(c.transports) })),
-    authenticatorSelection: { residentKey: "required", userVerification: "preferred" },
+    // The device checks it's you (face, fingerprint or PIN), not just that someone pressed it; the checks below insist too.
+    authenticatorSelection: { residentKey: "required", userVerification: "required" },
   });
   return withChallenge(env, "register", options.challenge, json(options));
 }
@@ -118,6 +121,7 @@ async function registerVerify(request, env, url, { token, response }) {
     expectedChallenge: challenge,
     expectedOrigin: url.origin,
     expectedRPID: url.hostname,
+    requireUserVerification: true,
   });
   if (!verified || !(await spendChallenge(env, challenge))) return json({ error: "The passkey couldn't be verified." }, 400);
 
@@ -143,7 +147,7 @@ async function registerVerify(request, env, url, { token, response }) {
 // --- sign-in ---------------------------------------------------------------
 
 async function loginOptions(env, url) {
-  const options = await generateAuthenticationOptions({ rpID: url.hostname, userVerification: "preferred" });
+  const options = await generateAuthenticationOptions({ rpID: url.hostname, userVerification: "required" });
   return withChallenge(env, "login", options.challenge, json(options));
 }
 
@@ -160,6 +164,7 @@ async function loginVerify(request, env, url, { response }) {
     expectedChallenge: challenge,
     expectedOrigin: url.origin,
     expectedRPID: url.hostname,
+    requireUserVerification: true,
     credential: {
       id: stored.id,
       publicKey: fromBase64Url(stored.public_key),

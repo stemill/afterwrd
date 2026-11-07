@@ -19,10 +19,10 @@ and downloads go to `out/`, which git ignores.
 
 | Suite | What it covers |
 |---|---|
-| core: `security.mjs` | setup links, cookies and headers, sign-in redirects, CSRF, device links, signing out everywhere, the import's checks |
+| core: `security.mjs` | setup links, cookies and headers (pages may only call their own site), passkeys must check it's you, sign-in redirects, CSRF, device links, signing out everywhere, the import's checks |
 | core: `comments.mjs` | the owner's comments, escaping, deleting, rate limits (even sent all at once), surviving re-import |
 | core: `posts.mjs` | the composer, photos resized and stripped of hidden details, deleting posts and their files |
-| core: `admin.mjs` | Your devices: adding a device, removing a passkey, signing out everywhere, only one owner |
+| core: `admin.mjs` | Your devices: adding a device, removing a passkey, signing out everywhere, only one owner; Home's notices for a new device (not hideable from that device) and for an update that fixes a security problem |
 | `fresh.mjs` | a brand-new site with nothing imported, then imports with only Photos or only Posts ticked |
 | `albums.mjs` | albums, adding and deleting photos, profile picture and cover |
 | `update-ui.mjs` | the Update page with an update waiting (Connect Cloudflare end to end, against a stand-in for Cloudflare's token endpoint and the relay page: the state and PKCE cookie, the code posted back, the hour's token in a cookie, and the update running with it; the pasted-token fallback), a token an old version remembered (Forget it), and up to date; no downgrades |

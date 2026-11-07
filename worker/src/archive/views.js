@@ -1541,7 +1541,10 @@ function onThisDayCard(ctx, memories) {
 const SIDE_FRIENDS = 12; // on Home; the rest are on Friends
 
 /** The owner's Home: write something, then your posts and your friends' together, newest first. */
-export function homePage(ctx, { own, feed, onThisDay, friends }) {
+/** "a", "a and b", "a, b and c". */
+const listed = (items) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
+
+export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { devices: [], canConfirm: false }, securityFix = null }) {
   const stream = [
     ...own.map((p) => ({ at: p.timestamp, card: postCard(ctx, p) })),
     ...feed.posts.map((p) => ({ at: p.created_at, card: remoteCard(ctx, p.connection, p) })),
@@ -1550,6 +1553,16 @@ export function homePage(ctx, { own, feed, onThisDay, friends }) {
 <div class="home">
   <section class="stream" aria-label="Posts">
     <h1 class="hidden">Home</h1>
+    ${securityFix && html`<p class="notice alert">afterwrd ${securityFix} fixes a security problem, and this site is older.
+      <a href="/_admin/update">Update now</a>.</p>`}
+    ${newDevices.devices.length > 0 && html`<form class="notice alert" method="post" action="/_admin/devices/seen">
+      ${newDevices.devices.length === 1
+        ? html`A new device was added to your site on ${fmtDate(newDevices.devices[0].created_at)}.`
+        : html`${newDevices.devices.length} new devices were added to your site, on ${listed([...new Set(newDevices.devices.map((d) => fmtDate(d.created_at)))])}.`}
+      Not you? <a href="/_admin">Remove ${newDevices.devices.length === 1 ? "it" : "them"} in Your devices</a>.
+      ${newDevices.canConfirm
+        ? html`<button class="link">${newDevices.devices.length === 1 ? "That was me" : "They were all me"}</button>`
+        : html`If it was you, say so from one of your older devices.`}</form>`}
     ${composer()}
     ${feed.unreachable.length > 2
       ? html`<p class="notice">Couldn't reach ${feed.unreachable.length} friends' sites just now, so their newest posts may be missing.</p>`
