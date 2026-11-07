@@ -45,7 +45,7 @@ const VERSION_RE = /name: "afterwrd-worker",\s*version: "(\d+\.\d+\.\d+)"/;
 const AUDIT_PAGE = 500;
 const OTHER_WORKERS = 8; // other Workers looked at (two calls each, within the free plan's 50 a request)
 // The bindings afterwrd gives a personal site (src/deploy.js deployVersion), and the secrets it may have.
-const BINDINGS = ["assets ASSETS", "d1 DB", "durable_object_namespace MEDIA MediaStore", "durable_object_namespace OUTBOX Outbox"];
+const BINDINGS = ["assets ASSETS", "d1 DB", "durable_object_namespace MEDIA MediaStore", "durable_object_namespace OUTBOX Outbox", "version_metadata VERSION"];
 const SECRETS = new Set(["SETUP_CODE", "UPDATE_TOKEN"]);
 
 // --- the owner's side -------------------------------------------------------------------------------------------
@@ -311,6 +311,13 @@ export async function checkSite(token, site, env, here, { latest = {} } = {}, fe
     if (serving.length !== 1 || serving[0].percentage !== 100) {
       problems.push("More than one version of it is serving visitors, so the code checked may not be the code everyone gets.");
     } else {
+      // Is this the Worker answering at the site's address? The site says which uploaded version it is (/_version);
+      // Cloudflare says which version of this Worker is serving. A Worker of the same name in another account, or one
+      // in an account that isn't the one at that address, won't match.
+      const said = await fetcher(`${site}/_version`, { redirect: "manual" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      if (said?.id !== serving[0].version_id) {
+        problems.push(`The site at ${new URL(site).host} isn't the Worker that was checked: they're different uploads. Was the right Cloudflare account allowed?`);
+      }
       const detail = (await getJSON(`${at}/versions/${encodeURIComponent(serving[0].version_id)}`)).result ?? {};
       const have = (detail.resources?.bindings ?? []).map((b) => b?.type === "durable_object_namespace"
         ? `${b.type} ${b.name} ${b.class_name}` : `${text(b?.type, 40)} ${text(b?.name, 60)}`);

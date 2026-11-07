@@ -29,7 +29,7 @@ const MANIFEST = { version: "9.9.9", compatibility_date: "2026-10-01", compatibi
   assets: [{ path: "/static/style.css" }, { path: "/static/fonts/nunito.woff2" }] };
 const BINDINGS = [{ type: "assets", name: "ASSETS" }, { type: "d1", name: "DB", id: "x" },
   { type: "durable_object_namespace", name: "MEDIA", class_name: "MediaStore" }, { type: "durable_object_namespace", name: "OUTBOX", class_name: "Outbox" },
-  { type: "secret_text", name: "SETUP_CODE" }];
+  { type: "secret_text", name: "SETUP_CODE" }, { type: "version_metadata", name: "VERSION" }];
 const exchanges = [];
 const asked = [];
 const auditFor = (token) => [
@@ -91,9 +91,9 @@ const server = createServer(async (req, res) => {
     return send(200, { success: true, result: { id: "v-other", resources: { bindings: [{ type: "d1", name: "DB", id: token === "tok-backdoor" ? "x" : "its-own" }] } } });
   }
   if (api === `/accounts/${ACCOUNT}/workers/scripts/localhost/deployments`) {
-    return send(200, { success: true, result: { deployments: [{ id: "d1", versions: [{ version_id: "v-1", percentage: 100 }] }] } });
+    return send(200, { success: true, result: { deployments: [{ id: "d1", versions: [{ version_id: token === "tok-elsewhere" ? "v-2" : "v-1", percentage: 100 }] }] } });
   }
-  if (api === `/accounts/${ACCOUNT}/workers/scripts/localhost/versions/v-1`) {
+  if (api === `/accounts/${ACCOUNT}/workers/scripts/localhost/versions/v-1` || api === `/accounts/${ACCOUNT}/workers/scripts/localhost/versions/v-2`) {
     const bindings = token === "tok-setup" ? [...BINDINGS, { type: "plain_text", name: "OAUTH_TOKEN_URL", text: "https://evil.example/token" }] : BINDINGS;
     return send(200, { success: true, result: { id: "v-1", resources: { bindings, script_runtime: { compatibility_date: "2026-10-01", compatibility_flags: ["nodejs_compat"] } } } });
   }
@@ -106,7 +106,15 @@ const server = createServer(async (req, res) => {
   return send(404, { success: false, errors: [{ code: 7003, message: "No route" }] });
 });
 await new Promise((r) => server.listen(8799, "127.0.0.1", r));
-const direct = createServer((req, res) => { res.statusCode = req.url.startsWith("/static/") ? 200 : 404; res.end(); });
+const direct = createServer((req, res) => {
+  if (req.url === "/_version") { res.setHeader("Content-Type", "application/json"); return res.end(JSON.stringify({ id: "v-1" })); }
+  res.statusCode = req.url.startsWith("/static/") ? 200 : 404; res.end();
+});
+const friendSite = createServer((req, res) => {
+  if (req.url === "/_version") { res.setHeader("Content-Type", "application/json"); return res.end(JSON.stringify({ id: "v-1" })); }
+  res.statusCode = 302; res.setHeader("Location", "/_auth/login"); res.end();
+});
+await new Promise((r) => friendSite.listen(8788, "127.0.0.1", r));
 await new Promise((r) => direct.listen(8798, "127.0.0.1", r));
 
 // --- the owner, and the friend's browser -------------------------------------------------------------------------
@@ -219,6 +227,10 @@ const backdoor = await runCheck("backdoor");
 check("another Worker connected to the site's database is reported, whatever it's called", backdoor.after.includes("Another Worker in the account is connected to its database")
   && backdoor.after.includes(": other."), backdoor.after.slice(0, 600));
 
+// --- a Worker that isn't the one at the address -------------------------------------------------------------------
+const elsewhere = await runCheck("elsewhere");
+check("a Worker that isn't the one answering at the address is reported", elsewhere.after.includes("isn't the Worker that was checked"), elsewhere.after.slice(0, 500));
+
 // --- genuine code, set up to leak ----------------------------------------------------------------------------------
 const setup = await runCheck("setup", "http://localhost:8798");
 check("a Worker whose requests are copied elsewhere is reported", setup.after.includes("copied to another Worker"), setup.after.slice(0, 600));
@@ -264,7 +276,7 @@ check("…and leaves the link usable", (await fetch(`${failed.link}/start`, { me
 await owner.goto(`${BASE}/friend`);
 const listed = await owner.$$eval(".checks > li", (l) => l.map((li) => li.textContent.replace(/\s+/g, " ")));
 const count = (word) => listed.filter((t) => t.includes(word)).length;
-check("Friends lists the checks with a verdict each", count("check again later") === 1 && count("all good") === 2 && count("needs a look") === 4 && count("couldn't check") === 1,
+check("Friends lists the checks with a verdict each", count("check again later") === 1 && count("all good") === 2 && count("needs a look") === 5 && count("couldn't check") === 1,
   `${listed.length}: ${listed.map((t) => t.slice(0, 60)).join(" | ")}`);
 check("…with no image injected from Cloudflare's answers", (await owner.$$(".checks img")).length === 0);
 
@@ -283,5 +295,6 @@ check("no script errors", errors.length === 0, errors.join(" | "));
 await browser.close();
 server.close();
 direct.close();
+friendSite.close();
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);
 process.exit(results.every(Boolean) ? 0 : 1);

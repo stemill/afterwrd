@@ -158,7 +158,7 @@ check("a new account is asked for a workers.dev name, and a taken one is turned 
 const made = state["tok-fresh"].deployed[0];
 const bindings = (made?.metadata.bindings ?? []).map((b) => `${b.type} ${b.name}`).sort().join(", ");
 check("the site is installed as a new Worker with afterwrd's database, stores, files and setup code", made?.script === "mysite"
-  && bindings === "assets ASSETS, d1 DB, durable_object_namespace MEDIA, durable_object_namespace OUTBOX, secret_text SETUP_CODE"
+  && bindings === "assets ASSETS, d1 DB, durable_object_namespace MEDIA, durable_object_namespace OUTBOX, secret_text SETUP_CODE, version_metadata VERSION"
   && made.metadata.bindings.find((b) => b.name === "DB").id === "new-database" && made.metadata.assets.jwt === "completion-jwt", bindings);
 check("…and switched on at its workers.dev address", state["tok-fresh"].enabled === `${A}/mysite`);
 const setupCode = made?.metadata.bindings.find((b) => b.name === "SETUP_CODE")?.text;

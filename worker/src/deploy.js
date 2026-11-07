@@ -148,6 +148,9 @@ export async function deployVersion(token, account, script, release, { jwt, data
       { type: "d1", name: "DB", id: databaseId },
       ...manifest.durable_objects.map((d) => ({ type: "durable_object_namespace", name: d.name, class_name: d.class_name })),
       { type: "assets", name: "ASSETS" },
+      // The ID Cloudflare gives this upload, which the site says at /_version so a friend's check can tell it's
+      // looking at the Worker that answers at the site's address (src/checks.js).
+      { type: "version_metadata", name: "VERSION" },
       ...Object.entries(secrets).map(([name, text]) => ({ type: "secret_text", name, text })),
     ],
     keep_bindings: ["secret_text"],

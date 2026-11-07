@@ -35,6 +35,9 @@
 	},
 	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["MediaStore", "Outbox"] }],
 	// Found by name, or created on first deploy. (The installer creates its own, named after the Worker.)
+	// The ID of the deployed version, which the site says at /_version (a friend's check compares it with
+	// Cloudflare's; src/checks.js). The installer and Update page add the same binding (src/deploy.js).
+	"version_metadata": { "binding": "VERSION" },
 	"d1_databases": [
 		{
 			"binding": "DB",

@@ -59,6 +59,9 @@ check("session cookie is __Host-, HttpOnly, Secure", Boolean(cookie && cookie.ht
 const csp = (await fetch(`${BASE}/_auth/login`)).headers.get("content-security-policy") ?? "";
 check("CSP blocks plugins, <base> and foreign form posts", ["object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'"].every((d) => csp.includes(d)), csp);
 check("CSP lets pages call only this site", csp.includes("connect-src 'self'"), csp);
+const version = await fetch(`${BASE}/_version`);
+const said = await version.json().catch(() => null);
+check("the site says which uploaded version it is, without signing in", version.status === 200 && said && "id" in said, JSON.stringify(said));
 const font = await fetch(`${BASE}/static/fonts/nunito.woff2`);
 const fontTag = font.headers.get("etag");
 check("static files are sent with their release hash as ETag", font.status === 200 && /^"[0-9a-f]{64}"$/.test(fontTag ?? ""), `${font.status} ${fontTag}`);

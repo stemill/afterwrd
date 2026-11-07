@@ -52,6 +52,11 @@ async function route(request, env, work) {
   await ensureSchema(env);
   const url = new URL(request.url);
   if (env.GROUP_KEY) return routeGroup(request, env, url);
+  // Which uploaded version of the Worker is answering at this address: public, as it says nothing but an ID Cloudflare
+  // made up. A friend's check (checks.js) compares it with what Cloudflare says, to be sure it read the right Worker.
+  if (url.pathname === "/_version" && request.method === "GET") {
+    return new Response(JSON.stringify({ id: env.VERSION?.id ?? null }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+  }
   if (url.pathname.startsWith("/_auth/")) return handleAuth(request, env, url);
   // A friend's Connect link, and their site's calls once connected, which carry a key instead of a session.
   if (url.pathname.startsWith("/_connect/")) return handleConnectLink(request, env, url);
