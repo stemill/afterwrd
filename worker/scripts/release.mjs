@@ -191,6 +191,11 @@ writeFileSync(join(site, "how-it-works", "index.html"), readFileSync(join(worker
   .replaceAll("__VERSION__", version)
   .replaceAll("__RELEASE_PAGE__", repo ? `https://github.com/${repo}/releases/tag/v${version}` : base)
   .replaceAll("__REPO_PAGE__", repo ? `https://github.com/${repo}` : base));
+// "How afterwrd is different from Facebook", at /compared/.
+mkdirSync(join(site, "compared"), { recursive: true });
+writeFileSync(join(site, "compared", "index.html"), readFileSync(join(worker, "installer", "compared.html"), "utf8")
+  .replaceAll("__VERSION__", version)
+  .replaceAll("__REPO_PAGE__", repo ? `https://github.com/${repo}` : base));
 // "Check your install", at /check/.
 mkdirSync(join(site, "check"), { recursive: true });
 writeFileSync(join(site, "check", "index.html"), readFileSync(join(worker, "installer", "check.html"), "utf8")

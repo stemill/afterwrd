@@ -240,7 +240,7 @@ ${escape(name)} in one step.</p>
 <p class="meta" style="margin-top: 16px">Or copy this page's address and paste it into <b>Add a friend</b> on your site.</p>
 <p class="meta" style="margin-top: 16px">Opened this inside an app, like WhatsApp or Instagram? Open it in your
 browser instead (usually in the app's ⋯ menu): passkeys often don't work inside apps.</p>`, `
-  // The installer gets this link (and the name it was made for, to suggest a Cloudflare name) after the #.
+  // The installer gets this link (and the name it was made for, to suggest an address) after the #.
   const install = document.getElementById("install");
   const carry = new URLSearchParams({ invite: location.origin + location.pathname });
   if (install.dataset.name) carry.set("name", install.dataset.name);

@@ -57,7 +57,7 @@ async function cloudflare(token, method, path, body, contentType) {
   if ((m = /^\/accounts\/(\w+)\/workers\/scripts\/([\w-]+)\/settings$/.exec(path))) return s.workers[`${m[1]}/${m[2]}`] ? ok({ bindings: [] }) : fail(404, "Not found");
   if ((m = /^\/accounts\/(\w+)\/d1\/database$/.exec(path.split("?")[0]))) {
     if (method === "POST") return ok({ uuid: "new-database", name: JSON.parse(body).name });
-    return ok(token === "tok-leftover" ? [{ uuid: "old-database", name: "mysite" }] : []);
+    return ok(token === "tok-leftover" ? [{ uuid: "old-database", name: "afterwrd" }] : []);
   }
   if (/\/d1\/database\/old-database\/query$/.test(path)) return ok([{ results: [{ n: 9 }], success: true }]);
   if ((m = /^\/accounts\/(\w+)\/workers\/scripts\/([\w-]+)\/assets-upload-session$/.exec(path))) return ok({ jwt: "session-jwt", buckets: [[MANIFEST.assets[0].hash]] });
@@ -104,7 +104,7 @@ await new Promise((r) => site.listen(8797, "127.0.0.1", r));
 
 // --- a person installing ------------------------------------------------------------------------------------------
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
-async function install(code, siteName, { domains = [], account = null, invite = null } = {}) {
+async function install(code, { domains = [], account = null, invite = null, rename = null, start = BASE } = {}) {
   const context = await browser.createBrowserContext();
   const page = await context.newPage();
   page.on("pageerror", (e) => errors.push(e.message));
@@ -124,17 +124,23 @@ async function install(code, siteName, { domains = [], account = null, invite = 
     }
     req.continue();
   });
-  await page.goto(invite ? `${BASE}/#${new URLSearchParams(invite)}` : BASE);
-  const before = await page.$eval("main", (m) => m.textContent.replace(/\s+/g, " "));
-  await page.$eval("#name", (i) => { i.value = ""; });
-  await page.type("#name", siteName);
-  await Promise.all([page.waitForFunction(() => document.title === "Allow stand-in"), page.click("#connect")]);
+  let before = "";
+  if (start === BASE) {
+    await page.goto(invite ? `${BASE}/#${new URLSearchParams(invite)}` : BASE);
+    before = await page.$eval("main", (m) => m.textContent.replace(/\s+/g, " "));
+    await Promise.all([page.waitForFunction(() => document.title === "Allow stand-in"), page.click("#connect")]);
+  } else {
+    // afterwrd.app's Install button, which goes straight to Connect: a page on another port is the same site.
+    await page.goto(start);
+    await Promise.all([page.waitForFunction(() => document.title === "Allow stand-in"), page.click("#install")]);
+  }
   await Promise.all([page.waitForNavigation(), page.click("#allow")]);
   for (const domain of domains) {
     await page.waitForSelector("#naming:not([hidden])", { timeout: 15000 });
     page.suggested ??= await page.$eval("#domain", (i) => i.value);
     await page.$eval("#domain", (i) => { i.value = ""; });
     await page.type("#domain", domain);
+    page.preview = await page.$eval(".address-preview", (b) => b.textContent);
     await page.click("#use-domain");
     await new Promise((r) => setTimeout(r, 500));
   }
@@ -144,53 +150,75 @@ async function install(code, siteName, { domains = [], account = null, invite = 
     await page.click(`input[name=account][value="${account}"]`);
     await page.click("#use-account");
   }
-  await page.waitForFunction(() => !document.getElementById("ready").hidden || document.getElementById("error").textContent, { timeout: 30000 });
-  const after = await page.$eval("main", (m) => m.textContent.replace(/\s+/g, " "));
-  return { page, allow, before, after, next: await page.$eval("#continue", (a) => a.href), error: await page.$eval("#error", (e) => e.textContent) };
+  if (rename) {
+    await page.waitForSelector("#renaming:not([hidden])", { timeout: 15000 });
+    page.taken = await page.$eval("#taken", (p) => p.textContent);
+    await page.$eval("#name", (i) => { i.value = ""; });
+    await page.type("#name", rename);
+    await page.click("#use-name");
+  }
+  // Either straight on to the new site, or stopped with an error.
+  for (let i = 0; i < 150; i++) {
+    if (page.url().startsWith(NEW_SITE)) return { page, allow, before, next: page.url(), error: "" };
+    const error = await page.$eval("#error", (e) => e.textContent).catch(() => "");
+    if (error && !(await page.$eval("#renaming", (s) => !s.hidden).catch(() => false))) return { page, allow, before, next: null, error };
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error(`Install didn't finish: ${page.url()}`);
 }
 
 // A brand-new account: no workers.dev name yet (the first one tried is taken).
-const fresh = await install("fresh", "mysite", { domains: ["taken", "ann-example"] });
-check("the page says what's needed, phone included", fresh.before.includes("works on a phone") && fresh.before.includes("Make a free Cloudflare account"));
+const fresh = await install("fresh", { domains: ["taken", "ann-example"] });
+check("the page says what's needed, phone included, and asks no names before connecting", fresh.before.includes("works on a phone")
+  && fresh.before.includes("Make a free Cloudflare account") && fresh.before.includes("confirm your address") && !fresh.before.includes("site's name"));
 check("Connect goes straight to Cloudflare, asking for what installing needs, coming back here", fresh.allow.pathname === "/oauth2/auth"
   && fresh.allow.searchParams.get("redirect_uri") === `${BASE}/done` && fresh.allow.searchParams.get("scope") === "workers-scripts.admin d1.write account-settings.read");
 const swap = exchanges.at(-1);
 check("the code is swapped with the PKCE secret matching the challenge, for the same return address", swap.code === "fresh.one-time-code"
   && swap.redirect_uri === `${BASE}/done` && b64url(createHash("sha256").update(swap.code_verifier ?? "").digest()) === fresh.allow.searchParams.get("code_challenge"));
-check("a new account is asked for a workers.dev name, and a taken one is turned down", state["tok-fresh"].domains[A] === "ann-example"
-  && calls.some((c) => c.startsWith("tok-fresh PUT /accounts/") && c.endsWith("/workers/subdomain")));
+check("a new account is asked for its address, shown in full, and a taken one is turned down", state["tok-fresh"].domains[A] === "ann-example"
+  && fresh.page.preview === "afterwrd.ann-example.workers.dev" && calls.some((c) => c.startsWith("tok-fresh PUT /accounts/") && c.endsWith("/workers/subdomain")), fresh.page.preview);
 const made = state["tok-fresh"].deployed[0];
 const bindings = (made?.metadata.bindings ?? []).map((b) => `${b.type} ${b.name}`).sort().join(", ");
-check("the site is installed as a new Worker with afterwrd's database, stores, files and setup code", made?.script === "mysite"
+check("the site is installed as a new Worker called afterwrd, with its database, stores, files and setup code", made?.script === "afterwrd"
   && bindings === "assets ASSETS, d1 DB, durable_object_namespace MEDIA, durable_object_namespace OUTBOX, secret_text SETUP_CODE, version_metadata VERSION"
   && made.metadata.bindings.find((b) => b.name === "DB").id === "new-database" && made.metadata.assets.jwt === "completion-jwt", bindings);
-check("…and switched on at its workers.dev address", state["tok-fresh"].enabled === `${A}/mysite`);
+check("…and switched on at its workers.dev address", state["tok-fresh"].enabled === `${A}/afterwrd`);
 const setupCode = made?.metadata.bindings.find((b) => b.name === "SETUP_CODE")?.text;
-check("then it's ready, with the new site's setup link", fresh.after.includes("Your site is ready") && fresh.next === `${NEW_SITE}/_auth/setup?code=${setupCode}`
-  && /^[0-9a-f]{48}$/.test(setupCode ?? ""), fresh.after.slice(0, 200));
-check("…and the token is dropped here", !(await fresh.page.cookies()).some((c) => c.name.includes("install_token")));
+check("then it goes straight on to the new site's setup link", fresh.next === `${NEW_SITE}/_auth/setup?code=${setupCode}`
+  && /^[0-9a-f]{48}$/.test(setupCode ?? ""), fresh.next);
+check("…and the token is dropped here", !(await fresh.page.cookies(BASE)).some((c) => c.name.includes("install_token")));
 check("every file came from the release, checked", calls.some((c) => c.includes("assets/upload")) && made.modules.join() === "index.js");
 
 // Invited by a friend: the invitation goes along, after the #, never to the installer's server.
 const friendLink = `http://localhost:8787/_connect/${"y".repeat(43)}`;
-const invited = await install("freshinvite", "bobsite", { domains: ["bob-smith"], invite: { invite: friendLink, name: "Bob Smith" } });
+const invited = await install("freshinvite", { domains: ["bob-smith"], invite: { invite: friendLink, name: "Bob Smith" } });
 check("an invited person is told they'll be friends in one step", invited.before.includes("A friend invited you"));
 check("…their Cloudflare name is suggested from the name they were invited by", invited.page.suggested === "bob-smith", invited.page.suggested);
 check("…and the new site's setup link carries the invitation after the #", invited.next.endsWith(`#${new URLSearchParams({ invite: friendLink })}`), invited.next);
 check("…which never reached the installer's server", !requestsSeen.some((u) => u.includes("_connect")), requestsSeen.filter((u) => u.includes("_connect")).join(" | ").slice(0, 400));
 
-// A leftover database with things in it: nothing is installed.
-const leftover = await install("leftover", "mysite");
-check("a leftover database of that name stops it before anything is uploaded", leftover.error.includes('already a database called "mysite"')
-  && !(state["tok-leftover"].deployed.length) && !calls.some((c) => c.startsWith("tok-leftover POST") && c.includes("assets-upload-session")), leftover.error);
+// A leftover database called afterwrd with things in it: asked for another name, and installed under that.
+const uploadsBefore = calls.filter((c) => c.startsWith("tok-leftover") && c.includes("assets-upload-session")).length;
+const leftover = await install("leftover", { rename: "second" });
+check("a leftover database called afterwrd asks for another name before anything is uploaded", leftover.page.taken.includes('already a database called "afterwrd"')
+  && uploadsBefore === 0 && !calls.some((c) => c.startsWith("tok-leftover") && c.includes("/scripts/afterwrd/assets-upload-session")), leftover.page.taken);
+check("…and installs under the new name", state["tok-leftover"].deployed[0]?.script === "second" && leftover.next?.startsWith(NEW_SITE), leftover.error);
+
+// Started from afterwrd.app's Install button: straight to Cloudflare, no page here first.
+const front = createServer((req, res) => { res.setHeader("Content-Type", "text/html"); res.end(`<a id="install" href="${BASE}/connect">Install</a>`); });
+await new Promise((r) => front.listen(8796, "127.0.0.1", r));
+const direct = await install("frontdoor", { start: "http://localhost:8796/" });
+check("afterwrd.app's Install button goes straight to Allow, then installs", direct.allow?.pathname === "/oauth2/auth" && direct.next?.startsWith(NEW_SITE), direct.error);
+front.close();
 
 // Two accounts: the person chooses.
-const two = await install("twoaccounts", "mysite", { account: B });
+const two = await install("twoaccounts", { account: B });
 check("with two accounts, the person chooses, and it's installed in that one", state["tok-twoaccounts"].deployed[0]?.account === B
-  && two.after.includes("Your site is ready"), two.error);
+  && two.next?.startsWith(NEW_SITE), two.error);
 
 // Cloudflare busy when asked for the workers.dev name: it stops, and never sets (or renames) one.
-const flaky = await install("flakyname", "mysite");
+const flaky = await install("flakyname");
 check("a hiccup reading the workers.dev name stops it, without setting one", flaky.error.includes("Couldn't read this account's workers.dev name")
   && !calls.some((c) => c.startsWith("tok-flakyname PUT")), flaky.error);
 
@@ -204,6 +232,7 @@ check("a link can't make the page say its own words", (await told.$eval("#error"
 check("a step without a connection is refused", (await fetch(`${BASE}/step/accounts`, { method: "POST", headers: { Origin: BASE, "Content-Type": "application/json" }, body: "{}" })).status === 401);
 check("a step from another site is refused", (await fetch(`${BASE}/step/accounts`, { method: "POST", headers: { Origin: "https://evil.example", "Content-Type": "application/json" }, body: "{}" })).status === 403);
 check("a connection can't be started from another site", (await fetch(`${BASE}/connect`, { redirect: "manual", headers: { "Sec-Fetch-Site": "cross-site" } })).status === 403);
+check("…but can from afterwrd.app (the same site)", (await fetch(`${BASE}/connect`, { redirect: "manual", headers: { "Sec-Fetch-Site": "same-site" } })).status === 302);
 const stray = await fetch(`${BASE}/done?code=stray.one-time-code&state=nope`, { redirect: "manual" });
 check("a code that this browser didn't start is refused", stray.status === 303 && (stray.headers.get("location") ?? "").includes("error=")
   && !exchanges.some((e) => e.code === "stray.one-time-code"));

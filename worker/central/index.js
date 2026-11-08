@@ -3,8 +3,9 @@
 // deployed by hand (`npx wrangler deploy -c central/wrangler.jsonc`), never from GitHub, so no Cloudflare credential
 // is kept there. It has no storage of its own.
 //
-//   GET  /             the page: a name for the site, Connect, then the steps with their progress
-//   GET  /connect      a fresh PKCE secret in a short cookie, then off to Cloudflare to press Allow
+//   GET  /             the page: a Cloudflare account, Connect, then the steps with their progress
+//   GET  /connect      a fresh PKCE secret in a short cookie, then off to Cloudflare to press Allow (afterwrd.app's
+//                      Install button comes straight here, so people who start there skip this site's first page)
 //   GET  /done         back from Cloudflare (registered on the OAuth client as a redirect address): swaps the code for
 //                      an hour's token, kept only in a cookie in the person's own browser, never stored here
 //   POST /step/<name>  one step at a time with that token: accounts, name (a workers.dev name, for a new account),
@@ -15,7 +16,7 @@
 // (afterwrd.app/check/) and a friend's check (src/checks.js) are the second key.
 import pkg from "../package.json";
 import { CLIENT_ID, CODE_RE, exchangeCode, pkce, readCookie, SCOPES, testingHere } from "../src/cloudflare.js";
-import { api, databaseInUse, databaseTakenMessage, deployVersion, findOrCreateDatabase, loadRelease, uploadAssets, useApiBase,
+import { api, databaseInUse, deployVersion, findOrCreateDatabase, loadRelease, uploadAssets, useApiBase,
   workerSettings } from "../src/deploy.js";
 
 const REPO = pkg.afterwrd.releases;
@@ -86,9 +87,10 @@ async function route(request, here) {
 // --- connecting ----------------------------------------------------------------------------------------------------
 
 async function connect(request, { home }) {
-  // Only from this page (or typed in): a connection started elsewhere would end in the steps running by themselves.
+  // Only from this page, afterwrd.app's Install button (the same site: afterwrd.app and its subdomains, which are
+  // all afterwrd's), or typed in. A connection started from anywhere else would end in the steps running by themselves.
   const from = request.headers.get("Sec-Fetch-Site");
-  if (from && from !== "same-origin" && from !== "none") return new Response("Start from install.afterwrd.app.", { status: 403 });
+  if (from && !["same-origin", "same-site", "none"].includes(from)) return new Response("Start from install.afterwrd.app.", { status: 403 });
   const { verifier, state, challenge } = await pkce();
   const auth = new URL(AUTHORIZE);
   auth.searchParams.set("response_type", "code");
@@ -180,17 +182,22 @@ const STEPS = {
     return { domain: clean };
   },
 
-  // Everything that would stop the install, before anything is uploaded; and which release it'll be.
+  // Everything that would stop the install, before anything is uploaded; and which release it'll be. The site is
+  // called afterwrd unless that's taken in this account, when the page asks for another name (`taken` says why).
   async check(token, { account, name }, here) {
     await ownAccount(token, account);
     const site = siteName(name);
     const domain = await workersDev(token, account);
     if (!domain) throw new Error("This account needs a workers.dev name first.");
+    const leftover = "(If it's left over from an earlier try and you don't need it, you could instead delete it in Cloudflare, ";
     if (await workerSettings(token, account, site)) {
-      throw new Error(`There's already a Worker called "${site}" in this Cloudflare account. Choose another name, or if it's left `
-        + "from an earlier try, delete it in Cloudflare (Workers & Pages) and try again.");
+      return { taken: `There's already a site called "${site}" in this Cloudflare account. Choose another name for this one. `
+        + `${leftover}under Workers & Pages, and keep this name.)` };
     }
-    if ((await databaseInUse(token, account, site))?.tables) throw new Error(databaseTakenMessage(site));
+    if ((await databaseInUse(token, account, site))?.tables) {
+      return { taken: `There's already a database called "${site}" with things in it in this Cloudflare account, probably from `
+        + `an earlier afterwrd. Choose another name for this site. ${leftover}under Storage & databases → D1, and keep this name.)` };
+    }
     return { version: await latestVersion(here), site: siteAddress(here, site, domain) };
   },
 
@@ -274,7 +281,8 @@ function page(connected, go, error) {
   .field { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: 8px 0; }
   input[type=text] { flex: 1 1 8em; min-width: 0; font: inherit; font-weight: 700; padding: 10px 16px; border: 1px solid var(--border);
     border-radius: 999px; background: var(--sunken); color: var(--text); }
-  .suffix { color: var(--muted); word-break: break-all; }
+  .suffix, .address-preview { color: var(--muted); word-break: break-all; }
+  .address-preview { color: var(--text); }
   label.account { display: flex; gap: 10px; align-items: center; padding: 10px 14px; margin: 6px 0; border-radius: 16px; background: var(--raised); }
   [hidden] { display: none !important; }
   #log { list-style: none; padding: 0; margin: 16px 0 0; }
@@ -295,15 +303,13 @@ function page(connected, go, error) {
 <p id="invited" class="meta" hidden>A friend invited you: once your site is ready, you'll be friends in one step.</p>
 
 <section id="start"${connected && go ? " hidden" : ""}>
-  <p>Your own afterwrd site, in your own free Cloudflare account. It takes a couple of minutes, and works on a phone.</p>
+  <p>Your own afterwrd site, in your own free Cloudflare account. It takes a few minutes, and works on a phone.</p>
   <h2>1. A Cloudflare account</h2>
   <p class="meta">Make one first, and stay signed in in this browser. An email address is all it asks for; don't add a card.
-  If you already use Cloudflare for other things, make a new account just for afterwrd.</p>
+  Cloudflare emails you a link to confirm your address: open it, then come back to this page. If you already use
+  Cloudflare for other things, make a new account just for afterwrd.</p>
   <a class="button secondary" href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">Make a free Cloudflare account</a>
-  <h2>2. Your site's name</h2>
-  <p class="field"><input type="text" id="name" value="afterwrd" autocomplete="off" spellcheck="false" autocapitalize="none" aria-label="Your site's name"><span class="suffix">.your-name.workers.dev</span></p>
-  <p class="meta">How friends will find your site. Lowercase letters, numbers and hyphens.</p>
-  <h2>3. Connect Cloudflare</h2>
+  <h2>2. Connect Cloudflare</h2>
   <p class="meta">Cloudflare asks you to allow afterwrd to make and change Workers and databases in your account, for an
   hour, so it can install your site. Nothing is kept afterwards.</p>
   <a class="button" id="connect" href="/connect">Connect Cloudflare and install</a>
@@ -316,11 +322,19 @@ function page(connected, go, error) {
 </section>
 
 <section id="naming" hidden>
-  <h2>Choose your Cloudflare name</h2>
-  <p class="meta">This account doesn't have one yet. Every site in it will be at <i>site</i>.<b>this name</b>.workers.dev,
-  so something like your own name works well. Lowercase letters, numbers and hyphens.</p>
-  <p class="field"><input type="text" id="domain" autocomplete="off" spellcheck="false" autocapitalize="none" aria-label="Your Cloudflare name"><span class="suffix">.workers.dev</span></p>
-  <button id="use-domain">Use this name</button>
+  <h2>Your address</h2>
+  <p class="meta">How friends will find your site. Your own name works well. Lowercase letters, numbers and hyphens;
+  choose carefully, as your friends' sites will know you by it.</p>
+  <p class="field"><input type="text" id="domain" placeholder="your-name" autocomplete="off" spellcheck="false" autocapitalize="none" aria-label="Your address"></p>
+  <p class="meta">Your site will be at <b class="address-preview">afterwrd.<span id="preview">your-name</span>.workers.dev</b></p>
+  <button id="use-domain">Use this address</button>
+</section>
+
+<section id="renaming" hidden>
+  <h2>Another name for this site</h2>
+  <p class="meta" id="taken"></p>
+  <p class="field"><input type="text" id="name" autocomplete="off" spellcheck="false" autocapitalize="none" aria-label="Your site's name"></p>
+  <button id="use-name">Use this name</button>
 </section>
 
 <ol id="log"></ol>
@@ -329,11 +343,8 @@ function page(connected, go, error) {
 
 <section id="ready" class="ready" hidden>
   <h2>Your site is ready</h2>
-  <p>It's at <b id="address"></b>. Next you'll make yourself its owner, with a passkey (your face, fingerprint or phone PIN).</p>
+  <p>It's at <b id="address"></b>. Taking you there to make yourself its owner, with a passkey (your face, fingerprint or phone PIN).</p>
   <a class="button" id="continue" href="/">Set up my site</a>
-  <p class="meta">Before you use it, it's worth checking: <a href="https://afterwrd.app/check/">Check your install</a>, or ask a
-  friend with afterwrd to check it (on your new site: <b>Update → Ask a friend to check my site</b>). Your Cloudflare
-  connection has been dropped here, and ends by itself within the hour.</p>
 </section>
 
 <p class="meta foot">This installer is part of afterwrd and its code is public:
@@ -352,28 +363,32 @@ with Cloudflare's own Deploy page instead</a>. <a href="https://afterwrd.app/how
     return data;
   }
   const waitFor = (button) => new Promise((resolve) => button.addEventListener("click", resolve, { once: true }));
-  // Connect takes the page away and back: the name typed is kept for the return.
-  $("connect").addEventListener("click", () => { try { sessionStorage.setItem("afterwrd-name", $("name").value.trim()); } catch {} });
   // A friend's link, brought from their site after the # (so it never reaches this installer's server): kept in this
-  // tab, and handed on to the new site the same way, which opens "Add … as a friend?" once its owner has a passkey.
+  // browser (for a day, so it survives going off to make a Cloudflare account and coming back in another tab), and
+  // handed on to the new site the same way, which opens "Add … as a friend?" once its owner has a passkey.
   const INVITE_RE = /^(https:\\/\\/[a-z0-9-]+\\.[a-z0-9-]+\\.workers\\.dev|http:\\/\\/localhost:\\d+)\\/_connect\\/[\\w-]{40,100}$/;
+  const KEPT = "afterwrd-invite";
   const brought = new URLSearchParams(location.hash.slice(1));
   try {
     if (INVITE_RE.test(brought.get("invite") ?? "")) {
-      sessionStorage.setItem("afterwrd-invite", brought.get("invite"));
-      sessionStorage.setItem("afterwrd-invite-name", (brought.get("name") ?? "").slice(0, 100));
+      localStorage.setItem(KEPT, JSON.stringify({ link: brought.get("invite"), name: (brought.get("name") ?? "").slice(0, 100), at: Date.now() }));
     }
   } catch {}
   if (location.hash) history.replaceState(null, "", location.pathname + location.search);
   let invite = null;
   let invitedAs = "";
-  try { invite = sessionStorage.getItem("afterwrd-invite"); invitedAs = sessionStorage.getItem("afterwrd-invite-name") || ""; } catch {}
+  try {
+    const kept = JSON.parse(localStorage.getItem(KEPT) || "null");
+    if (kept && Date.now() - kept.at < 86400000 && INVITE_RE.test(kept.link)) { invite = kept.link; invitedAs = String(kept.name || ""); }
+    else localStorage.removeItem(KEPT);
+  } catch {}
   if (invite) $("invited").hidden = false;
-  // A Cloudflare name to suggest, from the name the friend invited them by ("Bob Smith" → "bob-smith").
+  // An address to suggest, from the name the friend invited them by ("Bob Smith" → "bob-smith").
   const suggested = invitedAs.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  // The site is called afterwrd (its address afterwrd.<their name>.workers.dev), unless that's taken in the account.
   let name = "afterwrd";
-  try { name = sessionStorage.getItem("afterwrd-name") || name; } catch {}
-  $("name").value = name;
+  const preview = () => { $("preview").textContent = $("domain").value.trim().toLowerCase() || "your-name"; };
+  $("domain").addEventListener("input", preview);
 
   async function install() {
     $("error").textContent = "";
@@ -401,6 +416,7 @@ with Cloudflare's own Deploy page instead</a>. <a href="https://afterwrd.app/how
       while (!account.domain) {
         $("naming").hidden = false;
         if (suggested && !$("domain").value) $("domain").value = suggested;
+        preview();
         await waitFor($("use-domain"));
         try {
           account.domain = (await step("name", { account: account.id, domain: $("domain").value })).domain;
@@ -410,8 +426,23 @@ with Cloudflare's own Deploy page instead</a>. <a href="https://afterwrd.app/how
         }
       }
       $("error").textContent = "";
-      log("Checking the name and the release…");
-      const { version, site } = await step("check", { account: account.id, name });
+      log("Checking your account and the release…");
+      let checked = await step("check", { account: account.id, name });
+      while (checked.taken) {
+        $("taken").textContent = checked.taken;
+        if (!$("name").value) $("name").value = name;
+        $("renaming").hidden = false;
+        await waitFor($("use-name"));
+        name = $("name").value.trim().toLowerCase();
+        try {
+          checked = await step("check", { account: account.id, name });
+          $("error").textContent = "";
+        } catch (err) {
+          $("error").textContent = err.message;
+        }
+      }
+      $("renaming").hidden = true;
+      const { version, site } = checked;
       log("Uploading afterwrd " + version + "'s site files…");
       const { jwt } = await step("assets", { account: account.id, name, version });
       log("Creating the database and installing afterwrd…");
@@ -423,11 +454,12 @@ with Cloudflare's own Deploy page instead</a>. <a href="https://afterwrd.app/how
       }
       tick(logList.lastElementChild);
       await step("finish").catch(() => {});
-      try { sessionStorage.removeItem("afterwrd-name"); } catch {}
       $("address").textContent = new URL(site).host;
       $("continue").href = next + (invite ? "#" + new URLSearchParams({ invite }).toString() : "");
-      try { sessionStorage.removeItem("afterwrd-invite"); sessionStorage.removeItem("afterwrd-invite-name"); } catch {}
+      try { localStorage.removeItem(KEPT); } catch {}
       $("ready").hidden = false;
+      // Straight on to the new site (the button stays, in case the browser holds back the move).
+      location.assign($("continue").href);
     } catch (err) {
       $("error").textContent = err.message;
       $("again").hidden = false;

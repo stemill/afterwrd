@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>afterwrd and Facebook</title>
+<meta name="description" content="How afterwrd differs from Facebook, in plain words: who holds what you post, who sees it, and who decides what's in your feed.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Crect%20width%3D%2224%22%20height%3D%2224%22%20rx%3D%226%22%20fill%3D%22%23ff8a3d%22%2F%3E%3Cpath%20d%3D%22M12%204a8%208%200%201%201-4.7%2014.5L3.8%2020l1.2-3.6A8%208%200%200%201%2012%204z%22%20transform%3D%22translate(2.4%202.2)%20scale(0.8)%22%20fill%3D%22none%22%20stroke%3D%22%2316201b%22%20stroke-width%3D%223.6%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E">
+<style>
+  /* Campfire, as on the install page and the sites themselves (the fonts are the device's own here). */
+  :root { --bg: #16201b; --surface: #1f2b25; --raised: #263329; --sunken: #121a16; --text: #ede6da; --muted: #a9a092; --border: #2e3d35;
+          --accent: #ff8a3d; --accent-strong: #ffab73; --accent-soft: #2b2118; --on-accent: #16201b; --moss: #8fbf7f; color-scheme: dark;
+          --round: ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font: 900 2.5rem/1.12 var(--round); margin: 0 0 12px; letter-spacing: -0.02em; }
+  .brand { display: inline-flex; align-items: center; font: 900 1.7rem/1 var(--round); margin: 0 0 26px; letter-spacing: -0.02em; color: inherit; text-decoration: none; }
+  .brand .o { width: 0.82em; height: 0.82em; margin: 0.08em 0.01em 0; color: var(--accent); }
+  .lede { color: var(--muted); margin: 0 0 24px; font-size: 1.08rem; }
+  section { margin: 40px 0 0; }
+  h2 { font: 900 1.45rem/1.2 var(--round); margin: 0 0 10px; letter-spacing: -0.01em; }
+  h3 { font: 800 1.05rem/1.3 var(--round); margin: 0 0 6px; }
+  p, li { margin: 8px 0; }
+  ul { padding-left: 1.2rem; }
+  a { color: var(--accent-strong); }
+  .meta { color: var(--muted); font-size: 0.9rem; }
+  .short { background: var(--surface); border-radius: 22px; padding: 16px 20px; margin: 0 0 8px; }
+  .short ul { margin: 6px 0 0; }
+  .pair { display: grid; gap: 12px; margin: 16px 0; }
+  @media (min-width: 600px) { .pair { grid-template-columns: 1fr 1fr; } }
+  .side { background: var(--surface); border-radius: 18px; padding: 14px 16px; }
+  .side.theirs { background: var(--sunken); }
+  .side .label { display: block; font: 800 0.8rem var(--round); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 6px; }
+  .side.ours .label { color: var(--moss); }
+  .side p { margin: 4px 0; font-size: 0.95rem; }
+  figure { margin: 18px 0; }
+  figure svg { display: block; width: 100%; height: auto; }
+  figcaption { color: var(--muted); font-size: 0.88rem; margin-top: 6px; }
+  /* Diagrams */
+  .d-text { fill: var(--text); font: 700 12px system-ui, sans-serif; }
+  .d-small { fill: var(--muted); font: 11px system-ui, sans-serif; }
+  .d-title { fill: var(--muted); font: 800 11px system-ui, sans-serif; letter-spacing: 0.08em; }
+  .d-person { fill: var(--raised); stroke: var(--muted); stroke-width: 1.5; }
+  .d-hub { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+  .d-hub-text { fill: var(--accent-strong); font: 800 13px system-ui, sans-serif; }
+  .d-pipe { stroke: var(--accent); stroke-width: 1.5; opacity: 0.7; }
+  .d-site { fill: var(--raised); stroke: var(--moss); stroke-width: 2; }
+  .d-link { stroke: var(--moss); stroke-width: 2.5; }
+  .d-empty { fill: none; stroke: var(--border); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  /* Feeds */
+  .feed { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 6px; }
+  .feed li { margin: 0; border-radius: 12px; padding: 8px 10px; font-size: 0.9rem; background: var(--raised); }
+  .feed li b { display: block; font: 800 0.72rem var(--round); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .feed li.pushed { background: var(--accent-soft); }
+  .feed li.pushed b { color: var(--accent-strong); }
+  .feed li.friend b { color: var(--moss); }
+  .feed li.end { background: none; color: var(--muted); text-align: center; font-style: italic; }
+  .record { display: grid; gap: 10px; margin: 14px 0; }
+  .record div { background: var(--surface); border-radius: 16px; padding: 12px 16px; }
+  .record .when { font: 800 0.8rem var(--round); color: var(--accent-strong); letter-spacing: 0.04em; }
+  .record p { margin: 4px 0; }
+  .fair { background: var(--accent-soft); border-radius: 22px; padding: 18px 20px; margin: 18px 0; }
+  .fair h2 { color: var(--accent-strong); }
+  .fair ul { margin: 0; }
+  footer { margin-top: 36px; color: var(--muted); font-size: 0.85rem; }
+  .back { display: inline-block; margin-top: 28px; padding: 11px 20px; border-radius: 999px; background: var(--raised); color: var(--text);
+    font: 800 1rem var(--round); text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+<a class="brand" href="/" aria-label="afterwrd, install page">afterw<svg class="o" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 1-4.7 14.5L3.8 20l1.2-3.6A8 8 0 0 1 12 4z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>rd</a>
+<h1>How afterwrd is different from Facebook</h1>
+<p class="lede">Facebook is one company holding everyone's posts, photos and habits in one place, and deciding what
+each person sees. afterwrd has no company in the middle. This page explains the difference in plain words, no
+technical knowledge needed.</p>
+
+<div class="short">
+  <h3>The short version</h3>
+  <ul>
+    <li><b>What you post stays on your own site</b>, and only the friends you've said yes to can see it.</li>
+    <li><b>Your feed is only posts from those friends</b>, newest first. No adverts, no "suggested for you", nothing chosen for you.</li>
+    <li><b>Nobody makes money from you being there</b>, so nothing is built to keep you scrolling or pull you back.</li>
+  </ul>
+</div>
+
+<section id="middle">
+  <h2>Who's in the middle</h2>
+  <p>On Facebook, everything everyone does goes through one company. Your posts, your photos, who you talk to, what you
+  stop to look at and for how long: all of it lands on Meta's computers, under Meta's rules, which Meta can change.</p>
+  <p>afterwrd works more like letters between houses. Each person has their own small site, in their own free account
+  at Cloudflare (a large company that rents out computer space). Friends' sites talk to each other directly, and only
+  once both people have agreed. There's no afterwrd company holding anything, and no central copy of anyone's posts.</p>
+
+  <figure>
+    <div class="pair">
+    <svg viewBox="0 0 320 300" role="img" aria-labelledby="hub-a">
+      <title id="hub-a">Facebook: six people all connect to one large box labelled "one company", which holds everyone's posts, photos, messages and habits, and the advertisers.</title>
+      <!-- Left: everything goes through one company -->
+      <text class="d-title" x="160" y="22" text-anchor="middle">FACEBOOK</text>
+      <g>
+        <line class="d-pipe" x1="60" y1="70" x2="160" y2="160"/>
+        <line class="d-pipe" x1="160" y1="50" x2="160" y2="160"/>
+        <line class="d-pipe" x1="260" y1="70" x2="160" y2="160"/>
+        <line class="d-pipe" x1="50" y1="250" x2="160" y2="160"/>
+        <line class="d-pipe" x1="160" y1="275" x2="160" y2="160"/>
+        <line class="d-pipe" x1="270" y1="250" x2="160" y2="160"/>
+        <rect class="d-hub" x="85" y="118" width="150" height="84" rx="16"/>
+        <text class="d-hub-text" x="160" y="146" text-anchor="middle">One company</text>
+        <text class="d-small" x="160" y="166" text-anchor="middle">everyone's posts, photos,</text>
+        <text class="d-small" x="160" y="180" text-anchor="middle">messages and habits,</text>
+        <text class="d-small" x="160" y="194" text-anchor="middle">and the advertisers</text>
+        <circle class="d-person" cx="60" cy="70" r="16"/><circle class="d-person" cx="160" cy="50" r="16"/>
+        <circle class="d-person" cx="260" cy="70" r="16"/><circle class="d-person" cx="50" cy="250" r="16"/>
+        <circle class="d-person" cx="160" cy="275" r="16"/><circle class="d-person" cx="270" cy="250" r="16"/>
+      </g>
+    </svg>
+    <svg viewBox="0 0 320 300" role="img" aria-labelledby="hub-b">
+      <title id="hub-b">afterwrd: five people each have their own site; lines join only the pairs who are friends, and the middle is empty.</title>
+      <!-- Right: sites joined only between friends -->
+      <text class="d-title" x="160" y="22" text-anchor="middle">AFTERWRD</text>
+      <g>
+        <circle class="d-empty" cx="160" cy="160" r="44"/>
+        <text class="d-small" x="160" y="157" text-anchor="middle">nothing in</text>
+        <text class="d-small" x="160" y="171" text-anchor="middle">the middle</text>
+        <line class="d-link" x1="80" y1="70" x2="240" y2="70"/>
+        <line class="d-link" x1="80" y1="70" x2="60" y2="240"/>
+        <line class="d-link" x1="240" y1="70" x2="270" y2="230"/>
+        <line class="d-link" x1="60" y1="240" x2="160" y2="275"/>
+        <rect class="d-site" x="54" y="48" width="52" height="44" rx="10"/><text class="d-text" x="80" y="75" text-anchor="middle">Ann</text>
+        <rect class="d-site" x="214" y="48" width="52" height="44" rx="10"/><text class="d-text" x="240" y="75" text-anchor="middle">Bob</text>
+        <rect class="d-site" x="34" y="218" width="52" height="44" rx="10"/><text class="d-text" x="60" y="245" text-anchor="middle">Cat</text>
+        <rect class="d-site" x="134" y="239" width="52" height="44" rx="10"/><text class="d-text" x="160" y="266" text-anchor="middle">Dev</text>
+        <rect class="d-site" x="244" y="208" width="52" height="44" rx="10"/><text class="d-text" x="270" y="235" text-anchor="middle">Zoe</text>
+      </g>
+    </svg>
+    </div>
+    <figcaption>On Facebook, every person's phone talks to one company. On afterwrd, each person has their own site, and lines join only
+    people who've agreed to be friends. Dev and Zoe aren't friends, so their sites never talk.</figcaption>
+  </figure>
+</section>
+
+<section id="who-sees">
+  <h2>Who can see what you post</h2>
+  <div class="pair">
+    <div class="side theirs"><span class="label">Facebook</span>
+      <p>Your friends, depending on your settings, and sometimes friends of friends or anyone at all. Facebook's settings
+      have changed many times over the years.</p>
+      <p>And always Meta itself. By Meta's own privacy policy, what you post and do is used to decide which adverts to
+      show you and others.</p>
+    </div>
+    <div class="side ours"><span class="label">afterwrd</span>
+      <p>Only the friends you've approved. There's no "public" setting and no "friends of friends": a site can't be seen
+      at all without being signed in or being an approved friend.</p>
+      <p>Your friends' sites ask yours for your posts when your friends look, and your site checks each one is a friend
+      before answering. If you import your old Facebook posts, those stay private to you and are never shared.</p>
+    </div>
+  </div>
+  <p class="meta">A friend link only lets someone <i>ask</i> to be friends. Even if it's passed on to a stranger, they
+  see nothing until you press Approve.</p>
+</section>
+
+<section id="feed">
+  <h2>What's in your feed</h2>
+  <p>On Facebook, what you see is chosen for you. A ranking system picks and orders posts, mixed in with adverts,
+  suggestions and posts from people and pages you never followed. Its aim is what you'll engage with, which isn't
+  always what you asked for.</p>
+  <p>On afterwrd, your feed is only posts from friends you've approved, in the order they were posted. Once you've seen
+  them, that's it.</p>
+  <figure>
+    <div class="pair">
+      <div class="side theirs"><span class="label">A typical ad-funded feed</span>
+        <ul class="feed">
+          <li class="pushed"><b>Sponsored</b>An advert chosen using what you've done</li>
+          <li class="pushed"><b>Suggested for you</b>A page you've never followed</li>
+          <li class="friend"><b>A friend</b>Picked out of order, because it's getting reactions</li>
+          <li class="pushed"><b>Video for you</b>From someone you don't know</li>
+          <li class="pushed"><b>Sponsored</b>Another advert</li>
+          <li class="end">…and it keeps going</li>
+        </ul>
+      </div>
+      <div class="side ours"><span class="label">afterwrd</span>
+        <ul class="feed">
+          <li class="friend"><b>Ann · 2 hours ago</b>A friend you approved</li>
+          <li class="friend"><b>Bob · yesterday</b>A friend you approved</li>
+          <li class="friend"><b>Cat · Tuesday</b>A friend you approved</li>
+          <li class="end">That's everything</li>
+        </ul>
+      </div>
+    </div>
+    <figcaption>An illustration, not a screenshot. On afterwrd, nothing gets in unless you said yes to the person.</figcaption>
+  </figure>
+</section>
+
+<section id="money">
+  <h2>Who pays for it, and what that means</h2>
+  <div class="pair">
+    <div class="side theirs"><span class="label">Facebook</span>
+      <p>Advertising. Meta's own annual reports say almost all of its money comes from adverts. Meta says it doesn't sell
+      your data; what it sells is the chance to show adverts to people, chosen using what it knows about them.</p>
+      <p>More time spent means more adverts seen, and notifications, endless scrolling and autoplaying videos
+      all bring people back and keep them there.</p>
+      <p>It doesn't stop at Facebook either. Many other websites and apps send Meta information about what their visitors
+      do, using Meta's own tools such as the <a href="https://www.facebook.com/business/tools/meta-pixel">Meta Pixel</a>.
+      You can see some of what's been sent about you in your Facebook settings, under
+      <a href="https://www.facebook.com/off_facebook_activity/">Your activity off Meta technologies</a>.</p>
+    </div>
+    <div class="side ours"><span class="label">afterwrd</span>
+      <p>Nobody. Your site runs on Cloudflare's free plan, and the code is free and public. There are no adverts, and no
+      one earns anything from how long you stay.</p>
+      <p>So there's nothing to pull you back. afterwrd never sends notifications to your phone or emails to tempt you in.
+      While you have it open, it quietly tells you when something new arrives; when you close it, it leaves you alone.</p>
+      <p>No trackers, no analytics, and nothing loaded from other companies. Your site talks only to Cloudflare, to
+      GitHub (for updates) and to your friends' sites.</p>
+    </div>
+  </div>
+</section>
+
+<section id="record">
+  <h2>A few things on the public record</h2>
+  <p>Not opinions: each of these comes from a regulator, a published paper or Meta itself.</p>
+  <div class="record">
+    <div><span class="when">2014</span>
+      <p>A scientific paper revealed that, for a week in 2012, Facebook had changed what some users saw in their feeds,
+      showing fewer happy or fewer sad posts, to see whether it changed what they posted themselves. It did. The people
+      in it weren't asked individually.
+      <a href="https://europepmc.org/articles/PMC4066473">The paper</a>.</p></div>
+    <div><span class="when">2018</span>
+      <p>Meta said the information of up to 87 million people may have been improperly shared with Cambridge Analytica, a
+      political consultancy, mostly gathered through a quiz app that collected details of the people who took it and of
+      their friends. <a href="https://about.fb.com/news/2018/04/restricting-data-access/">Meta's own announcement</a>.</p></div>
+    <div><span class="when">2019</span>
+      <p>The US Federal Trade Commission fined Facebook $5 billion for breaking an earlier promise about users' privacy.
+      <a href="https://www.ftc.gov/news-events/news/press-releases/2019/07/ftc-imposes-5-billion-penalty-sweeping-new-privacy-restrictions-facebook">The FTC's announcement</a>.</p></div>
+    <div><span class="when">2023</span>
+      <p>European regulators fined Meta €1.2 billion over how it moved European users' data to the United States.
+      <a href="https://www.edpb.europa.eu/news/news/2023/12-billion-euro-fine-facebook-result-edpb-binding-decision_en">The European Data Protection Board's announcement</a>.</p></div>
+  </div>
+</section>
+
+<section class="fair" id="fair">
+  <h2>To be fair</h2>
+  <ul>
+    <li><b>afterwrd is small.</b> Your friends need their own afterwrd site to be friends with you, so it's for the people
+    you actually know, not for reaching everyone.</li>
+    <li><b>It's your responsibility.</b> There's no company to recover your site if you lose access. Your Cloudflare
+    account is the key, so look after it.</li>
+    <li><b>Cloudflare runs the computers.</b> Your site sits in your account under Cloudflare's terms, like a flat you
+    rent. afterwrd keeps your posts away from everyone else, but it doesn't hide them from your landlord.</li>
+    <li><b>Friends are still people.</b> Anything you share with a friend, they can save or screenshot, the same as anywhere.</li>
+    <li><b>Facebook does things afterwrd doesn't</b>: Marketplace, big public groups, finding people you've lost touch
+    with. afterwrd is for keeping up with the people you already know.</li>
+  </ul>
+</section>
+
+<p>Want the details? <a href="/how-it-works/">How it works</a> explains exactly where your site runs and what it talks
+to, and you can check every word of it in the public code.</p>
+
+<a class="back" href="/">← Back to installing</a>
+
+<footer>
+  <p>About Facebook, this page relies on Meta's own published information and public records, as of November 2026.
+  afterwrd __VERSION__. Source code and releases: <a href="__REPO_PAGE__">GitHub</a>. afterwrd isn't affiliated with or
+  endorsed by Meta or Cloudflare. Facebook and Meta are trademarks of Meta Platforms, Inc.</p>
+</footer>
+</main>
+</body>
+</html>

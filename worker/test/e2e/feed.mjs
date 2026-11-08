@@ -466,7 +466,9 @@ check("Home asks at most 40 sites, Cara first as she's posted lately",
   sql(stateA, "SELECT COUNT(*) AS n FROM connections WHERE feed_checked_at IS NOT NULL")[0].n <= 40
   && (await feedCards(ann)).some((c) => c.who === "Cara Example"));
 const notices = await ann.$$eval("p.notice", (l) => l.map((p) => p.textContent));
-check("sites that can't be reached are summed up in one line", notices.length === 1 && /Couldn't reach 39 friends' sites/.test(notices[0]), notices.join(" | "));
+const reachNotices = notices.filter((n) => /Couldn't (reach|load)/.test(n));
+check("sites that can't be reached are summed up in one line", reachNotices.length === 1 && /Couldn't reach 39 friends' sites/.test(reachNotices[0]), notices.join(" | "));
+check("a site in its first week suggests getting it checked", notices.some((n) => n.startsWith("Your site is new") && n.includes("check it yourself")));
 check("the friends column shows a dozen, then a link to the rest", (await ann.$$(".mini-friends li")).length === 12
   && (await ann.$eval('aside.side a[href="/friend"]', (a) => a.textContent).catch(() => "")) === "All 46 friends");
 sql(stateA, "DELETE FROM connections WHERE id < 0");

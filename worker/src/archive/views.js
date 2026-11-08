@@ -1604,7 +1604,7 @@ const SIDE_FRIENDS = 12; // on Home; the rest are on Friends
 /** "a", "a and b", "a, b and c". */
 const listed = (items) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
 
-export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { devices: [], canConfirm: false }, securityFix = null, asking = [] }) {
+export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { devices: [], canConfirm: false }, securityFix = null, asking = [], newSite = false }) {
   const stream = [
     ...own.map((p) => ({ at: p.timestamp, card: postCard(ctx, p) })),
     ...feed.posts.map((p) => ({ at: p.created_at, card: remoteCard(ctx, p.connection, p) })),
@@ -1630,6 +1630,9 @@ export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { de
       <span class="row"><button class="chip primary" formaction="/_admin/connections/${r.id}/approve?back=home">Approve</button>
         <button class="chip" formaction="/_admin/connections/${r.id}/decline?back=home" onclick="return confirm('Decline? Their site will be told no.')">Decline</button></span>
     </form>`)}
+    ${newSite && html`<p class="notice">Your site is new. Before you share much, it's worth checking it's exactly the
+      published afterwrd: <a href="/_admin/update#check">ask a friend with afterwrd to check it</a>, or
+      <a href="https://afterwrd.app/check/">check it yourself</a>.</p>`}
     ${composer()}
     ${feed.unreachable.length > 2
       ? html`<p class="notice">Couldn't reach ${feed.unreachable.length} friends' sites just now, so their newest posts may be missing.</p>`

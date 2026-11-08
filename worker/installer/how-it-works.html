@@ -59,7 +59,8 @@
 <h1>How it works</h1>
 <p class="lede">afterwrd is a social network with no company in the middle. Each person's site runs in their own
 Cloudflare account, holds only their own data, and talks to nothing but Cloudflare, the place it gets updates from,
-and the friends they've chosen. This page explains how, and how to check it for yourself.</p>
+and the friends they've chosen. This page explains how, and how to check it for yourself. (For the short,
+non-technical version, see <a href="/compared/">how afterwrd is different from Facebook</a>.)</p>
 
 <nav class="contents" aria-label="Contents">
   <strong>On this page</strong>
@@ -130,7 +131,7 @@ and the friends they've chosen. This page explains how, and how to check it for 
     <thead><tr><th>Your site calls</th><th>When</th><th>What's sent</th></tr></thead>
     <tbody>
       <tr><td>Cloudflare (its sign-in, then its API)</td><td>Installing, updating, and making or deleting a group</td><td>The release's files, and the hour's token Cloudflare gave when you pressed Allow (over HTTPS, to Cloudflare only)</td></tr>
-      <tr><td>GitHub (afterwrd's releases)</td><td>Installing, updating, and a check for a newer version at most every six hours</td><td>Nothing about you: it's a download</td></tr>
+      <tr><td>GitHub (afterwrd's releases)</td><td>Installing, updating, and a check for a newer version about once an hour</td><td>Nothing about you: it's a download</td></tr>
       <tr><td>A friend's afterwrd site</td><td>Only once you've both connected: when you open Home or their page, when you comment, and when you post or reply</td><td>The key for that connection, your comments on their posts, and a short note when there's something new (the start of a new post, or of a comment on something they've commented on too)</td></tr>
     </tbody>
   </table>
