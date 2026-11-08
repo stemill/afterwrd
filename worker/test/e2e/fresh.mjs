@@ -22,10 +22,15 @@ const cdp = await page.createCDPSession();
 await cdp.send("WebAuthn.enable");
 await cdp.send("WebAuthn.addVirtualAuthenticator", { options: { protocol: "ctap2", transport: "internal",
   hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } });
-await page.goto(`${BASE}/_auth/setup?code=local-test-setup-code`);
+const broughtLink = `http://localhost:8788/_connect/${"x".repeat(43)}`; // a friend's link, as the installer hands it on
+await page.goto(`${BASE}/_auth/setup?code=local-test-setup-code#${new URLSearchParams({ invite: broughtLink })}`);
 await page.type("#name", "New Owner");
 await Promise.all([page.waitForNavigation(), page.click("#go")]);
 await Promise.all([page.waitForNavigation(), page.click("#go")]);
+const landed = new URL(page.url());
+check("a friend's link brought from the installer opens straight after the passkey", landed.pathname === "/_admin/connections/new"
+  && landed.searchParams.get("link") === broughtLink, page.url());
+await page.goto(`${BASE}/`);
 
 const nav = () => page.$$eval("header.site nav.main a", (l) => l.map((a) => a.querySelector("span").textContent).join(","));
 const texts = () => page.$$eval("main article.card .text", (l) => l.map((t) => t.textContent));

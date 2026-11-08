@@ -782,19 +782,19 @@ export function friendsIndexPage(ctx, { friends, facebook, requests = [], checks
   return page(ctx, "Friends", html`
 <div class="feed-head">
   <h1>Friends</h1>
-  <a class="chip primary" href="/_admin/connections">${raw(icon("connections"))}<span>Connect with a friend</span></a>
+  <a class="chip primary" href="/_admin/connections">${raw(icon("connections"))}<span>Add a friend</span></a>
 </div>
 <p class="meta">Only you see this page.</p>
 
 ${requests.length > 0 && html`
-<h2>Asking to connect</h2>
-<p class="meta">Someone used one of your Connect links. Nothing is shared until you approve. Links can be passed on, and
+<h2>Asking to be friends</h2>
+<p class="meta">Someone used one of your friend links. Nothing is shared until you approve. Links can be passed on, and
 anyone can call their site anything, so check the address is one you expect; if not, decline.</p>
 <ul class="friend-list requests">
   ${requests.map((r) => html`<li class="card">
     <span class="friend-link"><span class="who who-${r.id % 6}" aria-hidden="true">${initial(r.name)}</span>
       <span><strong>${host(r.origin)}</strong><span class="meta">says they're ${r.name}</span></span></span>
-    <p class="meta">${r.invited_as ? html`Used the invite you made for <strong>${r.invited_as}</strong>.` : "Used a Connect link you made."}
+    <p class="meta">${r.invited_as ? html`Used the invite you made for <strong>${r.invited_as}</strong>.` : "Used a friend link you made."}
       ${r.invited_as && r.invited_as.toLowerCase() !== r.name.toLowerCase() && html`<strong class="warn">That's not the name you invited.</strong>`}</p>
     <form method="post" class="fb-link">
       <button class="chip primary" formaction="/_admin/connections/${r.id}/approve">Approve</button>
@@ -823,7 +823,7 @@ ${friends.length ? html`<ul class="friend-list">
   </li>`)}
 </ul>` : html`<div class="empty">
   <p>No friends on afterwrd yet. When a friend has their own afterwrd site, connect with them to see each other's posts and photos.</p>
-  <a class="chip primary" href="/_admin/connections">${raw(icon("connections"))}<span>Connect with a friend</span></a>
+  <a class="chip primary" href="/_admin/connections">${raw(icon("connections"))}<span>Add a friend</span></a>
 </div>`}
 
 <h2 id="checks">Checking a friend's site</h2>
@@ -894,7 +894,7 @@ ${facebook.length > 0 && html`
       <th>${fbLink(p)}</th>
       <td>${fmtDate(p.friend_since)}</td>
       <td>${p.friend ? html`<a class="badge as-written" href="${friendBase(p.friend)}/posts">On afterwrd</a>`
-        : p.asking ? html`<span class="badge badge-new as-written">Asking to connect</span>`
+        : p.asking ? html`<span class="badge badge-new as-written">Asking to be friends</span>`
           : p.invited ? html`<span class="meta">Invited ${fmtDate(p.invited)}</span> <button class="link" data-invite="${p.name}">New link</button>`
             : html`<button class="chip" data-invite="${p.name}">Invite</button>`}</td>
     </tr>`)}
@@ -916,7 +916,7 @@ ${facebook.length > 0 && html`
     const q = e.target.value.trim().toLowerCase();
     for (const row of document.querySelectorAll("#fb-people tbody tr")) row.hidden = q && !row.cells[0].textContent.toLowerCase().includes(q);
   });
-  // Invite: make a Connect link for that person and show a message to send them.
+  // Invite: make a friend link for that person and show a message to send them.
   const panel = document.getElementById("invite");
   const message = document.getElementById("invite-message");
   document.getElementById("fb-people").addEventListener("click", async (e) => {
@@ -1604,7 +1604,7 @@ const SIDE_FRIENDS = 12; // on Home; the rest are on Friends
 /** "a", "a and b", "a, b and c". */
 const listed = (items) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
 
-export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { devices: [], canConfirm: false }, securityFix = null }) {
+export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { devices: [], canConfirm: false }, securityFix = null, asking = [] }) {
   const stream = [
     ...own.map((p) => ({ at: p.timestamp, card: postCard(ctx, p) })),
     ...feed.posts.map((p) => ({ at: p.created_at, card: remoteCard(ctx, p.connection, p) })),
@@ -1624,6 +1624,12 @@ export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { de
       ${newDevices.canConfirm
         ? html`<button class="link">${newDevices.devices.length === 1 ? "That was me" : "They were all me"}</button>`
         : html`If it was you, say so from one of your older devices.`}</form>`}
+    ${asking.map((r) => html`<form class="notice asking" method="post">
+      <strong>${host(r.origin)}</strong>, who says they're ${r.name}, is asking to be friends.
+      ${r.invited_as && r.invited_as.toLowerCase() !== r.name.toLowerCase() && html`<strong class="warn">That's not the name you invited (${r.invited_as}).</strong>`}
+      <span class="row"><button class="chip primary" formaction="/_admin/connections/${r.id}/approve?back=home">Approve</button>
+        <button class="chip" formaction="/_admin/connections/${r.id}/decline?back=home" onclick="return confirm('Decline? Their site will be told no.')">Decline</button></span>
+    </form>`)}
     ${composer()}
     ${feed.unreachable.length > 2
       ? html`<p class="notice">Couldn't reach ${feed.unreachable.length} friends' sites just now, so their newest posts may be missing.</p>`
@@ -1638,8 +1644,8 @@ export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { de
         ${friends.slice(0, SIDE_FRIENDS).map((c) => html`<li><a href="/friend/${c.id}/posts">${friendFace(ctx, c)}${c.name}</a></li>`)}
       </ul>
       ${friends.length > SIDE_FRIENDS && html`<p><a href="/friend">All ${friends.length} friends</a></p>`}`
-        : html`<p class="meta">Connect with friends who have their own afterwrd site to see their posts here.</p>`}
-      <p><a class="chip" href="/_admin/connections">${raw(icon("connections"))}<span>Connect with a friend</span></a></p>
+        : html`<p class="meta">Add friends to see their posts here. Anyone can join: your friend link shows them how.</p>`}
+      <p><a class="chip" href="/_admin/connections">${raw(icon("connections"))}<span>Add a friend</span></a></p>
     </section>
   </aside>
 </div>`, "wide");

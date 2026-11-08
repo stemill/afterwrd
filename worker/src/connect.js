@@ -12,13 +12,16 @@
 // Without a session:   GET /_connect/<token>  (the page the link opens), GET …/info, POST …/accept
 // The owner's:         GET /_admin/connections, POST …/link, GET|POST …/new?link=, POST …/<id>/disconnect,
 //                      POST …/<id>/facebook (name, or none=1): which person in the Facebook download they are
+import { testingHere } from "./cloudflare.js";
 import { asset, FAVICON, ownerHeader } from "./nav.js";
 import { connectLinkPage, messagePage } from "./pages.js";
 import { callSite, host, KEY_RE, ownerName, siteOrigin } from "./peers.js";
 import { escape, html, json, now, randomToken, sha256 } from "./util.js";
 
-const LINK_SECONDS = 7 * 24 * 3600;
-const INVITE_SECONDS = 30 * 24 * 3600; // setting up can take a while, waiting for Facebook's download
+// A friend link lasts 30 days, enough for someone new to set up their own site first (and wait for Facebook's
+// download, if they want it). It works once, and only asks: nothing is shared until its owner approves.
+const LINK_SECONDS = 30 * 24 * 3600;
+const INSTALLER = "https://install.afterwrd.app/";
 const PENDING_SECONDS = 600; // a connection half made is given up after this
 const LINK_RE = /^\/_connect\/([\w-]{40,100})$/;
 
@@ -36,11 +39,15 @@ export async function handleConnectLink(request, env, url) {
   if (!match) return new Response("Not found", { status: 404 });
   const [, token, action] = match;
   const db = env.DB;
-  if (!(await openLink(db, token))) {
-    const message = "This Connect link has expired or has already been used. Ask your friend for a new one.";
+  const link = await openLink(db, token);
+  if (!link) {
+    const message = "This friend link has expired or has already been used. Ask your friend for a new one.";
     return action ? json({ error: message }, 404) : html(messagePage(message, { href: "https://afterwrd.app/", label: "About afterwrd" }), 404);
   }
-  if (request.method === "GET" && !action) return html(connectLinkPage(await ownerName(db)));
+  if (request.method === "GET" && !action) {
+    return html(connectLinkPage(await ownerName(db), { invitedAs: link.person_name ?? null,
+      installer: (testingHere(env, url.origin) && env.INSTALLER_URL) || INSTALLER }));
+  }
   if (request.method === "GET" && action === "/info") return json({ name: await ownerName(db) });
   if (request.method === "POST" && action === "/accept") return accept(request, env, url, token);
   return new Response("Not found", { status: 404 });
@@ -64,7 +71,7 @@ async function accept(request, env, url, token) {
   const link = await openLink(db, token);
   const spent = await db.prepare("UPDATE connect_links SET used_at = ? WHERE token_hash = ? AND used_at IS NULL")
     .bind(now(), await sha256(token)).run();
-  if (!link || !spent.meta.changes) return json({ error: "This Connect link has already been used." }, 404);
+  if (!link || !spent.meta.changes) return json({ error: "This friend link has already been used." }, 404);
 
   // Connected, but waiting for this site's owner to approve (approved_at): nothing is shared until then.
   const key = randomToken();
@@ -105,9 +112,11 @@ export async function handleConnections(request, env, url) {
       db.prepare("DELETE FROM connect_links WHERE expires_at < ?").bind(now()),
       db.prepare("INSERT INTO connect_links (token_hash, expires_at, created_at) VALUES (?, ?, ?)").bind(await sha256(token), now() + LINK_SECONDS, now()),
     ]);
-    return json({ link: `${url.origin}/_connect/${token}` });
+    const link = `${url.origin}/_connect/${token}`;
+    return json({ link, message: `I'm on afterwrd, a small private social network where each of us has our own site, `
+      + `free. Open this to be friends with me: it shows you how to set up your own if you haven't got one yet. ${link}` });
   }
-  // An invitation for someone in the Facebook download: a Connect link for them alone, and a message to send.
+  // An invitation for someone in the Facebook download: a friend link for them alone, and a message to send.
   if (request.method === "POST" && path === "/invite") {
     const body = await request.json().catch(() => ({}));
     const person = await db.prepare("SELECT name FROM people WHERE is_me = 0 AND name = ? COLLATE NOCASE LIMIT 1")
@@ -117,15 +126,16 @@ export async function handleConnections(request, env, url) {
     await db.batch([
       db.prepare("DELETE FROM connect_links WHERE (person_name = ? AND used_at IS NULL) OR expires_at < ?").bind(person.name, now()),
       db.prepare("INSERT INTO connect_links (token_hash, expires_at, person_name, created_at) VALUES (?, ?, ?, ?)")
-        .bind(await sha256(token), now() + INVITE_SECONDS, person.name, now()),
+        .bind(await sha256(token), now() + LINK_SECONDS, person.name, now()),
     ]);
     const link = `${url.origin}/_connect/${token}`;
     const first = person.name.split(" ")[0];
-    const message = `Hi ${first}, I've moved my posts and photos to afterwrd, a small private social network that `
-      + `each of us runs for ourselves, free. Set yours up at https://afterwrd.app, then open this link to connect with me: ${link}`;
+    const message = `Hi ${first}, I've moved my posts and photos to afterwrd, a small private social network where each `
+      + `of us has our own site, free. Open this to be friends with me: it shows you how to set up your own first. ${link}`;
     return json({ name: person.name, link, message });
   }
-  // Someone used a Connect link: approve (share, and link them to who the invite was for) or decline (forget them).
+  // Someone used a friend link: approve (share, and link them to who the invite was for) or decline (forget them).
+  // From Home's line (?back=home) it goes back to Home; otherwise to Friends.
   const decide = /^\/(\d+)\/(approve|decline)$/.exec(path);
   if (request.method === "POST" && decide) {
     const connection = await db.prepare("SELECT * FROM connections WHERE id = ? AND connected_at IS NOT NULL AND approved_at IS NULL")
@@ -140,7 +150,7 @@ export async function handleConnections(request, env, url) {
       await callSite(connection.origin, "/_peer/disconnect", { key: connection.their_key, body: {} }).catch(() => {});
       await db.prepare("DELETE FROM connections WHERE id = ?").bind(connection.id).run();
     }
-    return Response.redirect(`${url.origin}/friend`, 303);
+    return Response.redirect(`${url.origin}${url.searchParams.get("back") === "home" ? "/" : "/friend"}`, 303);
   }
   // Which person in the owner's Facebook download a friend is (a form from Friends); kept by name.
   const facebook = /^\/(\d+)\/facebook$/.exec(path);
@@ -186,11 +196,11 @@ function parseLink(link, url, env) {
   try {
     parsed = new URL(link.trim());
   } catch {
-    return { error: "That isn't a Connect link. It should look like https://…/_connect/…" };
+    return { error: "That isn't a friend link. It should look like https://…/_connect/…" };
   }
   const origin = siteOrigin(parsed.origin, env);
   const match = LINK_RE.exec(parsed.pathname);
-  if (!origin || !match) return { error: "That isn't a Connect link. It should look like https://…/_connect/…" };
+  if (!origin || !match) return { error: "That isn't a friend link. It should look like https://…/_connect/…" };
   if (origin === url.origin) return { error: "That's a link to your own site. Send it to a friend instead." };
   return { origin, token: match[1] };
 }
@@ -257,29 +267,31 @@ const POST_SCRIPT = `
   const error = document.getElementById("error");`;
 
 function connectionsPage(connections) {
-  return shell("Connections", `
+  return shell("Add a friend", `
 <p class="crumbs"><a href="/friend">Friends</a> /</p>
-<h1>Connected sites</h1>
-<p class="meta">Connect with friends who have their own afterwrd site, and you become friends: you'll each see the
-other's new posts on <a href="/">Home</a>, and can read each other's posts and photos (everything you've published)
-on your own site: press their name. Your comments are kept on their site, as part of their archive. Removing a
-friend ends all of it at once.</p>
+<h1>Add a friend</h1>
+<p class="meta">Send a friend link to someone, whether or not they have an afterwrd site yet: if they haven't, it shows
+them how to set one up first. Once you're friends, you'll each see the other's new posts on <a href="/">Home</a>, and
+can read each other's posts and photos (everything you've published) on your own site. Your comments are kept on
+their site. Removing a friend ends all of it at once.</p>
 
 <div class="actions-row">
-  <button class="chip primary" id="make">Make a Connect link</button>
+  <button class="chip primary" id="make">Make a friend link</button>
 </div>
 <p id="error" role="alert"></p>
 <section class="card" id="link" hidden>
-  <strong>Send this to a friend who has an afterwrd site</strong>
-  <p class="meta">It works once, for 7 days. They open it, say where their site is, and confirm.</p>
-  <input id="link-url" readonly aria-label="Connect link">
-  <button class="chip primary" id="copy">Copy link</button>
+  <strong>Send this to your friend</strong>
+  <p class="meta">However you usually would. The link works once, for 30 days; when they use it, you'll be asked to
+  approve on Home.</p>
+  <textarea id="link-message" readonly rows="5" aria-label="Message with a friend link"></textarea>
+  <input id="link-url" readonly aria-label="Friend link" hidden>
+  <button class="chip primary" id="copy">Copy message</button>
   <button class="chip" id="share" hidden>Share…</button>
 </section>
 
 <form class="filters" id="paste" action="/_admin/connections/new" method="get">
-  <input type="search" name="link" placeholder="Got a Connect link from a friend? Paste it here" required autocomplete="off">
-  <button>Connect</button>
+  <input type="search" name="link" placeholder="Got a friend link? Paste it here" required autocomplete="off">
+  <button>Add friend</button>
 </form>
 
 ${connections.length ? `<table class="numbers">
@@ -295,20 +307,22 @@ ${connections.length ? `<table class="numbers">
   const linkUrl = document.getElementById("link-url");
   document.getElementById("make").addEventListener("click", async () => {
     try {
-      linkUrl.value = (await post("/_admin/connections/link")).link;
+      const made = await post("/_admin/connections/link");
+      linkUrl.value = made.link;
+      document.getElementById("link-message").value = made.message;
       panel.hidden = false;
-      linkUrl.select();
+      document.getElementById("link-message").select();
     } catch (err) { error.textContent = err.message; }
   });
   document.getElementById("copy").addEventListener("click", async (e) => {
-    await navigator.clipboard.writeText(linkUrl.value);
+    await navigator.clipboard.writeText(document.getElementById("link-message").value);
     e.target.textContent = "Copied";
-    setTimeout(() => { e.target.textContent = "Copy link"; }, 1500);
+    setTimeout(() => { e.target.textContent = "Copy message"; }, 1500);
   });
   const share = document.getElementById("share");
   if (navigator.share) {
     share.hidden = false;
-    share.addEventListener("click", () => navigator.share({ title: "Connect on afterwrd", url: linkUrl.value }).catch(() => {}));
+    share.addEventListener("click", () => navigator.share({ text: document.getElementById("link-message").value }).catch(() => {}));
   }
   document.querySelector("main").addEventListener("click", async (e) => {
     const button = e.target.closest("button[data-disconnect]");
@@ -322,13 +336,13 @@ ${connections.length ? `<table class="numbers">
 
 function confirmPage(name, origin) {
   return shell("Connect", `
-<p class="crumbs"><a href="/_admin/connections">Connections</a> /</p>
-<h1>Connect with ${escape(name)}?</h1>
-<p>Their site is <strong>${escape(host(origin))}</strong>. Once connected you're friends: you'll each see the other's
+<p class="crumbs"><a href="/_admin/connections">Add a friend</a> /</p>
+<h1>Add ${escape(name)} as a friend?</h1>
+<p>Their site is <strong>${escape(host(origin))}</strong>. Once they approve, you're friends: you'll each see the other's
 posts and photos on your own site, and can comment on them. Either of you can remove the other at any time, which ends all of it.</p>
 <p id="error" role="alert"></p>
 <div class="actions-row">
-  <button class="chip primary" id="go">Connect</button>
+  <button class="chip primary" id="go">Add friend</button>
   <a class="chip" href="/_admin/connections">Not now</a>
 </div>`, `${POST_SCRIPT}
   document.getElementById("go").addEventListener("click", async (e) => {
@@ -346,7 +360,7 @@ posts and photos on your own site, and can comment on them. Either of you can re
 
 function connectionsMessage(message) {
   return shell("Connect", `
-<p class="crumbs"><a href="/_admin/connections">Connections</a> /</p>
+<p class="crumbs"><a href="/_admin/connections">Add a friend</a> /</p>
 <h1>Couldn't connect</h1>
 <p>${escape(message)}</p>`);
 }

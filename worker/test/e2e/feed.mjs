@@ -73,23 +73,24 @@ await compose(bob, B, "Bob's holiday", [`${fixtures}/photo1.jpg`]);
 // Before connecting.
 await ann.goto(`${A}/`);
 check("Home is first in the owner's menu", (await ann.$$eval("header.site nav.main a", (l) => l.map((a) => a.querySelector("span").textContent)))[0] === "Home");
-check("empty Feed explains connecting", (await ann.$eval("main", (m) => m.textContent)).includes("Connect with friends"));
+check("empty Feed explains adding friends", (await ann.$eval("main", (m) => m.textContent)).includes("Add friends to see their posts here"));
 
 // Ann makes a Connect link; Bob opens it, gives his site, and confirms there.
 await ann.goto(`${A}/_admin/connections`);
 await ann.click("#make");
 await ann.waitForSelector("#link:not([hidden])");
 const link = await ann.$eval("#link-url", (i) => i.value);
-check("Connect link made", /^http:\/\/localhost:8787\/_connect\/[\w-]{40,}$/.test(link), link.slice(0, 50) + "…");
+check("friend link made, with a message to send", /^http:\/\/localhost:8787\/_connect\/[\w-]{40,}$/.test(link)
+  && (await ann.$eval("#link-message", (t) => t.value)).endsWith(link), link.slice(0, 50) + "…");
 
 const stranger = await (await browser.createBrowserContext()).newPage();
 await stranger.goto(link);
-check("link opens a page naming Ann, without signing in", (await stranger.$eval("h1", (h) => h.textContent)) === "Connect with Ann Example");
+check("link opens a welcome naming Ann, without signing in", (await stranger.$eval("h1", (h) => h.textContent)) === "Ann Example would like to be friends");
 await bob.goto(link);
 await bob.type("#site input", B);
 await Promise.all([bob.waitForNavigation(), bob.click("#site button")]);
 check("Bob is sent to his own site to confirm", bob.url().startsWith(`${B}/_admin/connections/new?link=`)
-  && (await bob.$eval("h1", (h) => h.textContent)) === "Connect with Ann Example?");
+  && (await bob.$eval("h1", (h) => h.textContent)) === "Add Ann Example as a friend?");
 await Promise.all([bob.waitForNavigation({ timeout: 30_000 }), bob.click("#go")]);
 check("confirming connects and opens Bob's Home", new URL(bob.url()).pathname === "/", bob.url());
 
@@ -102,8 +103,14 @@ check("Ann's Friends shows 1 request", (await ann.$eval('header.site a[href="/fr
 check("Ann's Home doesn't show Bob yet", !(await ann.$("article.from-friend")));
 await ann.goto(`${A}/friend`);
 const asking = await ann.$eval(".requests", (r) => r.innerText).catch(() => "");
-check("Friends lists Bob under Asking to connect", asking.includes("Bob Example") && asking.includes("Used a Connect link you made"), asking);
-await Promise.all([ann.waitForNavigation(), ann.click('.requests button[formaction$="/approve"]')]);
+check("Friends lists Bob under Asking to be friends", asking.includes("Bob Example") && asking.includes("Used a friend link you made"), asking);
+// Approved from Home, in one tap.
+await ann.goto(`${A}/`);
+const homeAsk = await ann.$eval(".notice.asking", (n) => n.textContent.replace(/\s+/g, " ")).catch(() => "");
+check("Home says who's asking to be friends, leading with their site", homeAsk.includes("localhost:8788") && homeAsk.includes("who says they're Bob Example"), homeAsk);
+await Promise.all([ann.waitForNavigation(), ann.click('.notice.asking button[formaction*="/approve"]')]);
+check("…and Approve there keeps Ann on Home", new URL(ann.url()).pathname === "/" && !(await ann.$(".notice.asking")));
+await ann.goto(`${A}/friend`);
 check("Approve makes Bob a friend", !(await ann.$(".requests")) && (await ann.$eval("main", (m) => m.innerText)).includes("Bob Example")
   && sql(stateA, "SELECT approved_at FROM connections")[0].approved_at > 0);
 await bob.goto(`${B}/`);
@@ -396,7 +403,13 @@ async function connectFrom(page, site, link) {
 }
 const zoe = await invite("Zoe Quinn");
 await ann.screenshot({ path: `${OUT}/invite-panel.png` });
-check("Invite gives a message to send, with a Connect link", zoe.message.startsWith("Hi Zoe,") && zoe.message.includes("https://afterwrd.app") && Boolean(zoe.link), zoe.message);
+check("Invite gives a message to send, with a friend link", zoe.message.startsWith("Hi Zoe,") && zoe.message.endsWith(zoe.link) && Boolean(zoe.link), zoe.message);
+const welcome = await (await browser.createBrowserContext()).newPage();
+await welcome.goto(zoe.link);
+const installHref = new URL(await welcome.$eval("#install", (a) => a.href));
+const carried = new URLSearchParams(installHref.hash.slice(1));
+check("the link's page offers to set up a site, carrying the link and the invited name after the #", installHref.origin === "https://install.afterwrd.app"
+  && carried.get("invite") === zoe.link && carried.get("name") === "Zoe Quinn" && !installHref.search, installHref.href);
 await ann.goto(`${A}/friend`);
 check("…and the list remembers she was invited", (await fbRow("Zoe Quinn")).startsWith("Invited"), await fbRow("Zoe Quinn"));
 const again = await invite("Zoe Quinn");
@@ -411,7 +424,7 @@ check("a request shows whose invite was used", forwarded.includes("Cara Example"
 check("…warns that it isn't the name invited, and leads with the site's address", forwarded.includes("That's not the name you invited")
   && (await ann.$eval(".requests strong", (e) => e.textContent)) === "localhost:8789");
 check("nothing is loaded from a site that hasn't been approved", !(await ann.$(".requests img")));
-check("…and Zoe's row says someone's asking", (await fbRow("Zoe Quinn")) === "Asking to connect");
+check("…and Zoe's row says someone's asking", (await fbRow("Zoe Quinn")) === "Asking to be friends");
 await ann.screenshot({ path: `${OUT}/friends-request.png`, fullPage: true });
 await Promise.all([ann.waitForNavigation(), ann.click('.requests button[formaction$="/decline"]')]);
 check("Decline forgets the request on both sites", sql(stateA, "SELECT COUNT(*) AS n FROM connections")[0].n === 0

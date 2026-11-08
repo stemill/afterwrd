@@ -459,6 +459,9 @@ async function home(ctx, params) {
   return views.homePage(ctx, {
     own, feed: friendsFeed, onThisDay: await onThisDay(ctx, 2), friends: friendsFeed.connections,
     newDevices: await newDevices(db, ctx.user), securityFix: await securityFixWaiting(db),
+    // Someone asking to be friends: approved (or not) from Home in one tap, as well as from Friends.
+    asking: await all(db, `SELECT id, origin, name, invited_as FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL
+      ORDER BY connected_at DESC LIMIT 3`),
   });
 }
 

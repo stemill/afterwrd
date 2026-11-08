@@ -30,7 +30,19 @@ const STYLE = `
 `;
 
 // Turns WebAuthn's binary fields into base64url JSON and back; @simplewebauthn/server expects this shape.
+// Also: a friend link brought here by the installer (after the #, so no server sees it) waits in this tab while the
+// owner makes their passkey, then opens "Add … as a friend?" (INVITE_RE: a friend link's shape).
 const CLIENT = `
+  const INVITE_RE = /^(https:\\/\\/[a-z0-9-]+\\.[a-z0-9-]+\\.workers\\.dev|http:\\/\\/localhost:\\d+)\\/_connect\\/[\\w-]{40,100}$/;
+  const keepInvite = () => {
+    const invite = new URLSearchParams(location.hash.slice(1)).get("invite");
+    try { if (invite && INVITE_RE.test(invite)) sessionStorage.setItem("afterwrd-invite", invite); } catch {}
+  };
+  const afterPasskey = () => {
+    let invite = null;
+    try { invite = sessionStorage.getItem("afterwrd-invite"); sessionStorage.removeItem("afterwrd-invite"); } catch {}
+    location.replace(invite && INVITE_RE.test(invite) ? "/_admin/connections/new?link=" + encodeURIComponent(invite) : "/");
+  };
   const dec = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
   const enc = (b) => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
   const ids = (list) => (list || []).map((c) => ({ ...c, id: dec(c.id) }));
@@ -128,7 +140,7 @@ fingerprint or PIN. There's no password, and this link only works once.</p>
       ...options, challenge: dec(options.challenge), user: { ...options.user, id: dec(options.user.id) },
       excludeCredentials: ids(options.excludeCredentials) } });
     await post("/_auth/register/verify", { token, response: credentialJSON(credential) });
-    location.replace("/");
+    afterPasskey();
   });`);
 }
 
@@ -141,6 +153,7 @@ this device, then you can import your Facebook download and invite friends.</p>
 <button id="go">Continue</button>
 <p id="error" role="alert"></p>`, `
   const code = new URLSearchParams(location.search).get("code");
+  keepInvite();
   // Off the address bar and out of history, so an abandoned setup doesn't leave the code lying around.
   history.replaceState(null, "", "/_auth/setup");
   run(document.getElementById("go"), async () => {
@@ -203,25 +216,42 @@ for anything afterwrd doesn't do. Cloudflare asks you to allow this. It can't ch
   });`);
 }
 
-// Opened from a Connect link (connect.js). Sends the friend on to their own site to confirm, carrying the link.
-export function connectLinkPage(name) {
-  return page("Connect", `
-<h1>Connect with ${escape(name)}</h1>
-<p>${escape(name)} would like to connect their afterwrd site with yours, so you're friends: you each see the other's
-posts and photos on your own site, and can comment on them. Where is your afterwrd site?</p>
+// Opened from a friend link (connect.js): someone wants to be friends. With a site already, they say where it is and
+// confirm there. Without one, "Set up your own afterwrd" takes them to the installer carrying this link after the #
+// (so neither the installer's server nor any other sees it); their new site then opens "Add … as a friend?" as soon
+// as they've made their passkey. `installer`: install.afterwrd.app, or a stand-in when testing.
+export function connectLinkPage(name, { invitedAs = null, installer = "https://install.afterwrd.app/" } = {}) {
+  return page("Be friends", `
+<style>main { max-width: 480px; } h2 { font: 900 1.15rem/1.3 var(--round); margin: 26px 0 6px; color: var(--text); }
+  .meta { font-size: 0.9rem; } .secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }</style>
+<h1>${escape(name)} would like to be friends</h1>
+<p>${escape(name)} is on afterwrd: a small, private social network where everyone has their own site, free, in their
+own Cloudflare account. Friends see each other's posts and photos, and nobody else does.</p>
+<h2>New to afterwrd?</h2>
+<p>Set up your own site: it takes a few minutes, on a phone or a computer. Once it's ready, you'll be friends with
+${escape(name)} in one step.</p>
+<a class="button" id="install" href="${escape(installer)}" data-name="${escape(invitedAs ?? "")}">Set up your own afterwrd</a>
+<h2>Already have an afterwrd site?</h2>
 <form id="site">
-  <input name="site" placeholder="e.g. jo.example.workers.dev" required autocomplete="url" inputmode="url" aria-label="Your site's address">
+  <input name="site" placeholder="e.g. afterwrd.your-name.workers.dev" required autocomplete="url" inputmode="url" aria-label="Your site's address">
   <p id="error" role="alert"></p>
-  <button>Continue on my site</button>
+  <button class="secondary">Continue on my site</button>
 </form>
-<p style="margin-top: 20px">No afterwrd site yet? <a href="https://afterwrd.app/">Set one up</a>, then open this link again.</p>`, `
+<p class="meta" style="margin-top: 16px">Or copy this page's address and paste it into <b>Add a friend</b> on your site.</p>
+<p class="meta" style="margin-top: 16px">Opened this inside an app, like WhatsApp or Instagram? Open it in your
+browser instead (usually in the app's ⋯ menu): passkeys often don't work inside apps.</p>`, `
+  // The installer gets this link (and the name it was made for, to suggest a Cloudflare name) after the #.
+  const install = document.getElementById("install");
+  const carry = new URLSearchParams({ invite: location.origin + location.pathname });
+  if (install.dataset.name) carry.set("name", install.dataset.name);
+  install.href += "#" + carry.toString();
   document.getElementById("site").addEventListener("submit", (e) => {
     e.preventDefault();
     let site = e.target.site.value.trim();
     if (!/^https?:\\/\\//.test(site)) site = "https://" + site;
     try {
       const origin = new URL(site).origin;
-      location.assign(origin + "/_admin/connections/new?link=" + encodeURIComponent(location.href));
+      location.assign(origin + "/_admin/connections/new?link=" + encodeURIComponent(location.origin + location.pathname));
     } catch {
       document.getElementById("error").textContent = "That doesn't look like a web address.";
     }

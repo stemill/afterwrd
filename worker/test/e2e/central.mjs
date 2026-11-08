@@ -12,6 +12,7 @@ const NEW_SITE = "http://127.0.0.1:8797";
 const results = [];
 const check = (name, ok, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? `  (${extra})` : ""}`); };
 const errors = [];
+const requestsSeen = []; // everything the browser sends to the installer, with its body
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const b64url = (buf) => buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
@@ -40,7 +41,7 @@ const fail = (status, message) => ({ status, body: { success: false, errors: [{ 
 const ok = (result) => ({ status: 200, body: { success: true, errors: [], result } });
 
 async function cloudflare(token, method, path, body, contentType) {
-  const s = (state[token] ??= { domains: { [B]: "ann-afterwrd", ...(token === "tok-fresh" ? {} : { [A]: "ann" }) }, workers: {}, deployed: [] });
+  const s = (state[token] ??= { domains: { [B]: "ann-afterwrd", ...(token.startsWith("tok-fresh") ? {} : { [A]: "ann" }) }, workers: {}, deployed: [] });
   let m;
   if (path === "/accounts") return ok(accountsFor(token));
   if ((m = /^\/accounts\/(\w+)\/workers\/subdomain$/.exec(path))) {
@@ -103,13 +104,15 @@ await new Promise((r) => site.listen(8797, "127.0.0.1", r));
 
 // --- a person installing ------------------------------------------------------------------------------------------
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
-async function install(code, siteName, { domains = [], account = null } = {}) {
+async function install(code, siteName, { domains = [], account = null, invite = null } = {}) {
   const context = await browser.createBrowserContext();
   const page = await context.newPage();
   page.on("pageerror", (e) => errors.push(e.message));
   let allow = null;
   await page.setRequestInterception(true);
   page.on("request", (req) => {
+    // What goes over the wire: the address without its # part (which browsers never send), and the body.
+    if (req.url().startsWith(BASE)) { const sent = new URL(req.url()); sent.hash = ""; requestsSeen.push(`${sent} ${req.postData() ?? ""}`); }
     const at = new URL(req.url());
     if (at.hostname.endsWith("cloudflare.com")) {
       // Cloudflare's Allow page: pressing Allow sends the browser back from Cloudflare's site, as the real one does
@@ -121,7 +124,7 @@ async function install(code, siteName, { domains = [], account = null } = {}) {
     }
     req.continue();
   });
-  await page.goto(BASE);
+  await page.goto(invite ? `${BASE}/#${new URLSearchParams(invite)}` : BASE);
   const before = await page.$eval("main", (m) => m.textContent.replace(/\s+/g, " "));
   await page.$eval("#name", (i) => { i.value = ""; });
   await page.type("#name", siteName);
@@ -129,6 +132,7 @@ async function install(code, siteName, { domains = [], account = null } = {}) {
   await Promise.all([page.waitForNavigation(), page.click("#allow")]);
   for (const domain of domains) {
     await page.waitForSelector("#naming:not([hidden])", { timeout: 15000 });
+    page.suggested ??= await page.$eval("#domain", (i) => i.value);
     await page.$eval("#domain", (i) => { i.value = ""; });
     await page.type("#domain", domain);
     await page.click("#use-domain");
@@ -166,6 +170,14 @@ check("then it's ready, with the new site's setup link", fresh.after.includes("Y
   && /^[0-9a-f]{48}$/.test(setupCode ?? ""), fresh.after.slice(0, 200));
 check("…and the token is dropped here", !(await fresh.page.cookies()).some((c) => c.name.includes("install_token")));
 check("every file came from the release, checked", calls.some((c) => c.includes("assets/upload")) && made.modules.join() === "index.js");
+
+// Invited by a friend: the invitation goes along, after the #, never to the installer's server.
+const friendLink = `http://localhost:8787/_connect/${"y".repeat(43)}`;
+const invited = await install("freshinvite", "bobsite", { domains: ["bob-smith"], invite: { invite: friendLink, name: "Bob Smith" } });
+check("an invited person is told they'll be friends in one step", invited.before.includes("A friend invited you"));
+check("…their Cloudflare name is suggested from the name they were invited by", invited.page.suggested === "bob-smith", invited.page.suggested);
+check("…and the new site's setup link carries the invitation after the #", invited.next.endsWith(`#${new URLSearchParams({ invite: friendLink })}`), invited.next);
+check("…which never reached the installer's server", !requestsSeen.some((u) => u.includes("_connect")), requestsSeen.filter((u) => u.includes("_connect")).join(" | ").slice(0, 400));
 
 // A leftover database with things in it: nothing is installed.
 const leftover = await install("leftover", "mysite");

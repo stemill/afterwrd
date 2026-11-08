@@ -264,6 +264,7 @@ img.who { object-fit: cover; padding: 0; }
 .notice.alert { border-left: 3px solid var(--danger); }
 .notice.alert a { text-decoration: underline; }
 .notice button.link { font-size: inherit; }
+.notice.asking .row { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
 
 /* Memories: everything from the Facebook download, in one place */
 .memory-tiles { list-style: none; margin: 0 0 1.5rem; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.9rem; }

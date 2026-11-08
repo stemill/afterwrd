@@ -292,6 +292,7 @@ function page(connected, go, error) {
 <main>
 <p class="brand" aria-label="afterwrd">afterw<svg class="o" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 1-4.7 14.5L3.8 20l1.2-3.6A8 8 0 0 1 12 4z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>rd</p>
 <h1>Install afterwrd</h1>
+<p id="invited" class="meta" hidden>A friend invited you: once your site is ready, you'll be friends in one step.</p>
 
 <section id="start"${connected && go ? " hidden" : ""}>
   <p>Your own afterwrd site, in your own free Cloudflare account. It takes a couple of minutes, and works on a phone.</p>
@@ -353,6 +354,23 @@ with Cloudflare's own Deploy page instead</a>. <a href="https://afterwrd.app/how
   const waitFor = (button) => new Promise((resolve) => button.addEventListener("click", resolve, { once: true }));
   // Connect takes the page away and back: the name typed is kept for the return.
   $("connect").addEventListener("click", () => { try { sessionStorage.setItem("afterwrd-name", $("name").value.trim()); } catch {} });
+  // A friend's link, brought from their site after the # (so it never reaches this installer's server): kept in this
+  // tab, and handed on to the new site the same way, which opens "Add … as a friend?" once its owner has a passkey.
+  const INVITE_RE = /^(https:\\/\\/[a-z0-9-]+\\.[a-z0-9-]+\\.workers\\.dev|http:\\/\\/localhost:\\d+)\\/_connect\\/[\\w-]{40,100}$/;
+  const brought = new URLSearchParams(location.hash.slice(1));
+  try {
+    if (INVITE_RE.test(brought.get("invite") ?? "")) {
+      sessionStorage.setItem("afterwrd-invite", brought.get("invite"));
+      sessionStorage.setItem("afterwrd-invite-name", (brought.get("name") ?? "").slice(0, 100));
+    }
+  } catch {}
+  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+  let invite = null;
+  let invitedAs = "";
+  try { invite = sessionStorage.getItem("afterwrd-invite"); invitedAs = sessionStorage.getItem("afterwrd-invite-name") || ""; } catch {}
+  if (invite) $("invited").hidden = false;
+  // A Cloudflare name to suggest, from the name the friend invited them by ("Bob Smith" → "bob-smith").
+  const suggested = invitedAs.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
   let name = "afterwrd";
   try { name = sessionStorage.getItem("afterwrd-name") || name; } catch {}
   $("name").value = name;
@@ -382,6 +400,7 @@ with Cloudflare's own Deploy page instead</a>. <a href="https://afterwrd.app/how
       }
       while (!account.domain) {
         $("naming").hidden = false;
+        if (suggested && !$("domain").value) $("domain").value = suggested;
         await waitFor($("use-domain"));
         try {
           account.domain = (await step("name", { account: account.id, domain: $("domain").value })).domain;
@@ -406,7 +425,8 @@ with Cloudflare's own Deploy page instead</a>. <a href="https://afterwrd.app/how
       await step("finish").catch(() => {});
       try { sessionStorage.removeItem("afterwrd-name"); } catch {}
       $("address").textContent = new URL(site).host;
-      $("continue").href = next;
+      $("continue").href = next + (invite ? "#" + new URLSearchParams({ invite }).toString() : "");
+      try { sessionStorage.removeItem("afterwrd-invite"); sessionStorage.removeItem("afterwrd-invite-name"); } catch {}
       $("ready").hidden = false;
     } catch (err) {
       $("error").textContent = err.message;

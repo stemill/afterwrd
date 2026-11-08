@@ -67,7 +67,7 @@ nothing is kept), puts afterwrd there, and sends you to your new site to make yo
 maintainer's Cloudflare account, so it's one more thing to trust: if you'd rather not, the install page also offers
 Cloudflare's own Deploy page, which puts the installer in your account instead. By hand, the steps in full:
 
-You need a free Cloudflare account and a few minutes on a computer. Bringing your Facebook years is optional, and
+You need a free Cloudflare account and a few minutes, on a phone or a computer. Bringing your Facebook years is optional, and
 can be done any time.
 
 1. **Make a Cloudflare account** at <https://dash.cloudflare.com/sign-up>. An email address is all it asks
@@ -105,7 +105,7 @@ photos and videos. To check a release for yourself, see [Check it yourself](SECU
   into that account can see your whole site.
 - **Only open a device link on your own phone or computer**: whoever opens it first gets owner access, so it works
   once and lasts an hour. *Your devices* can cancel unused links, remove a passkey or sign out everywhere.
-- **Approve only friends you know.** A Connect or invite link can be passed on, so each one only asks: nothing is
+- **Approve only friends you know.** A friend link can be passed on, so each one only asks: nothing is
   shared until you approve the request on *Friends*.
 - **Photo locations are removed** from photos you post, and left out of a Facebook import unless you tick *Photo
   locations*; they can show where you live.
@@ -185,13 +185,15 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   replied to which post. The README inside explains the files. Keys and sign-in details are never included.
 - **Friends** (the owner's alone) is one list: friends on afterwrd first, each with their posts and photos, then
   everyone from the Facebook download, marked *on afterwrd*, *invited*, or with an *Invite* button. Invite makes a
-  Connect link for that person (it lasts 30 days) and a message to send; when it's used you'll see who the invite
+  friend link for that person (it lasts 30 days) and a message to send; when it's used you'll see who the invite
   was for, and approving links them to their Facebook self. Otherwise, say which Facebook friend an afterwrd friend
   is (matching names are suggested; nothing is linked without you), and their page links to your Facebook history
-  together. Requests to connect wait at the top of *Friends* (with a count in the menu) for *Approve* or *Decline*.
-- **Feed and connections.** Connect with friends who have their own afterwrd site: make a one-time Connect
-  link (*Friends → Connect with a friend*) and send it to them; they open it, say where their site is, and confirm
-  there; then you approve their request. Connections are mutual, and make you friends: *Feed* (only the owner sees it) shows the newest posts written on
+  together. Requests to be friends show on *Home* and at the top of *Friends* (with a count in the menu) for *Approve* or
+  *Decline*.
+- **Feed and connections.** *Friends → Add a friend* makes a one-time friend link (30 days) inside a message to
+  send. Someone with an afterwrd site opens it, says where their site is, and confirms there. Someone without one
+  presses *Set up your own afterwrd*: the installer carries the link along (after the `#`, so no server sees it),
+  and their new site asks them to confirm as soon as they've made their passkey. Then you approve their request. Connections are mutual, and make you friends: *Feed* (only the owner sees it) shows the newest posts written on
   each connected site, and either of you can read the other's posts and photos (everything they've published)
   without leaving your own site: press their name. Comments you make are stored on your friend's site, with a
   copy kept on yours. Their photos and videos load straight from their site through links it signs, which last
