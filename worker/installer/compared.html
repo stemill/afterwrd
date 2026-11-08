@@ -27,13 +27,13 @@
   .meta { color: var(--muted); font-size: 0.9rem; }
   .short { background: var(--surface); border-radius: 22px; padding: 16px 20px; margin: 0 0 8px; }
   .short ul { margin: 6px 0 0; }
-  .pair { display: grid; gap: 12px; margin: 16px 0; }
-  @media (min-width: 600px) { .pair { grid-template-columns: 1fr 1fr; } }
-  .side { background: var(--surface); border-radius: 18px; padding: 14px 16px; }
-  .side.theirs { background: var(--sunken); }
-  .side .label { display: block; font: 800 0.8rem var(--round); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 6px; }
-  .side.ours .label { color: var(--moss); }
-  .side p { margin: 4px 0; font-size: 0.95rem; }
+  .cmp { display: grid; gap: 12px; margin: 16px 0; }
+  @media (min-width: 600px) { .cmp { grid-template-columns: 1fr 1fr; } }
+  .col { background: var(--surface); border-radius: 18px; padding: 14px 16px; }
+  .col.fb { background: var(--sunken); }
+  .col .head { display: block; font: 800 0.8rem var(--round); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 6px; }
+  .col.aw .head { color: var(--moss); }
+  .col p { margin: 4px 0; font-size: 0.95rem; }
   figure { margin: 18px 0; }
   figure svg { display: block; width: 100%; height: auto; }
   figcaption { color: var(--muted); font-size: 0.88rem; margin-top: 6px; }
@@ -49,13 +49,13 @@
   .d-link { stroke: var(--moss); stroke-width: 2.5; }
   .d-empty { fill: none; stroke: var(--border); stroke-width: 1.5; stroke-dasharray: 4 4; }
   /* Feeds */
-  .feed { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 6px; }
-  .feed li { margin: 0; border-radius: 12px; padding: 8px 10px; font-size: 0.9rem; background: var(--raised); }
-  .feed li b { display: block; font: 800 0.72rem var(--round); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
-  .feed li.pushed { background: var(--accent-soft); }
-  .feed li.pushed b { color: var(--accent-strong); }
-  .feed li.friend b { color: var(--moss); }
-  .feed li.end { background: none; color: var(--muted); text-align: center; font-style: italic; }
+  .items { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 6px; }
+  .items li { margin: 0; border-radius: 12px; padding: 8px 10px; font-size: 0.9rem; background: var(--raised); }
+  .items li b { display: block; font: 800 0.72rem var(--round); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .items li.them { background: var(--accent-soft); }
+  .items li.them b { color: var(--accent-strong); }
+  .items li.pal b { color: var(--moss); }
+  .items li.last { background: none; color: var(--muted); text-align: center; font-style: italic; }
   .record { display: grid; gap: 10px; margin: 14px 0; }
   .record div { background: var(--surface); border-radius: 16px; padding: 12px 16px; }
   .record .when { font: 800 0.8rem var(--round); color: var(--accent-strong); letter-spacing: 0.04em; }
@@ -94,7 +94,7 @@ technical knowledge needed.</p>
   once both people have agreed. There's no afterwrd company holding anything, and no central copy of anyone's posts.</p>
 
   <figure>
-    <div class="pair">
+    <div class="cmp">
     <svg viewBox="0 0 320 300" role="img" aria-labelledby="hub-a">
       <title id="hub-a">Facebook: six people all connect to one large box labelled "one company", which holds everyone's posts, photos, messages and habits, and the advertisers.</title>
       <!-- Left: everything goes through one company -->
@@ -143,14 +143,14 @@ technical knowledge needed.</p>
 
 <section id="who-sees">
   <h2>Who can see what you post</h2>
-  <div class="pair">
-    <div class="side theirs"><span class="label">Facebook</span>
+  <div class="cmp">
+    <div class="col fb"><span class="head">Facebook</span>
       <p>Your friends, depending on your settings, and sometimes friends of friends or anyone at all. Facebook's settings
       have changed many times over the years.</p>
       <p>And always Meta itself. By Meta's own privacy policy, what you post and do is used to decide which adverts to
       show you and others.</p>
     </div>
-    <div class="side ours"><span class="label">afterwrd</span>
+    <div class="col aw"><span class="head">afterwrd</span>
       <p>Only the friends you've approved. There's no "public" setting and no "friends of friends": a site can't be seen
       at all without being signed in or being an approved friend.</p>
       <p>Your friends' sites ask yours for your posts when your friends look, and your site checks each one is a friend
@@ -169,23 +169,23 @@ technical knowledge needed.</p>
   <p>On afterwrd, your feed is only posts from friends you've approved, in the order they were posted. Once you've seen
   them, that's it.</p>
   <figure>
-    <div class="pair">
-      <div class="side theirs"><span class="label">A typical ad-funded feed</span>
-        <ul class="feed">
-          <li class="pushed"><b>Sponsored</b>An advert chosen using what you've done</li>
-          <li class="pushed"><b>Suggested for you</b>A page you've never followed</li>
-          <li class="friend"><b>A friend</b>Picked out of order, because it's getting reactions</li>
-          <li class="pushed"><b>Video for you</b>From someone you don't know</li>
-          <li class="pushed"><b>Sponsored</b>Another advert</li>
-          <li class="end">…and it keeps going</li>
+    <div class="cmp">
+      <div class="col fb"><span class="head">A typical feed paid for by adverts</span>
+        <ul class="items">
+          <li class="them"><b>Advert</b>Chosen using what you've done</li>
+          <li class="them"><b>Suggested for you</b>A page you've never followed</li>
+          <li class="pal"><b>A friend</b>Picked out of order, because it's getting reactions</li>
+          <li class="them"><b>Video for you</b>From someone you don't know</li>
+          <li class="them"><b>Advert</b>Another one</li>
+          <li class="last">…and it keeps going</li>
         </ul>
       </div>
-      <div class="side ours"><span class="label">afterwrd</span>
-        <ul class="feed">
-          <li class="friend"><b>Ann · 2 hours ago</b>A friend you approved</li>
-          <li class="friend"><b>Bob · yesterday</b>A friend you approved</li>
-          <li class="friend"><b>Cat · Tuesday</b>A friend you approved</li>
-          <li class="end">That's everything</li>
+      <div class="col aw"><span class="head">afterwrd</span>
+        <ul class="items">
+          <li class="pal"><b>Ann · 2 hours ago</b>A friend you approved</li>
+          <li class="pal"><b>Bob · yesterday</b>A friend you approved</li>
+          <li class="pal"><b>Cat · Tuesday</b>A friend you approved</li>
+          <li class="last">That's everything</li>
         </ul>
       </div>
     </div>
@@ -195,8 +195,8 @@ technical knowledge needed.</p>
 
 <section id="money">
   <h2>Who pays for it, and what that means</h2>
-  <div class="pair">
-    <div class="side theirs"><span class="label">Facebook</span>
+  <div class="cmp">
+    <div class="col fb"><span class="head">Facebook</span>
       <p>Advertising. Meta's own annual reports say almost all of its money comes from adverts. Meta says it doesn't sell
       your data; what it sells is the chance to show adverts to people, chosen using what it knows about them.</p>
       <p>More time spent means more adverts seen, and notifications, endless scrolling and autoplaying videos
@@ -206,7 +206,7 @@ technical knowledge needed.</p>
       You can see some of what's been sent about you in your Facebook settings, under
       <a href="https://www.facebook.com/off_facebook_activity/">Your activity off Meta technologies</a>.</p>
     </div>
-    <div class="side ours"><span class="label">afterwrd</span>
+    <div class="col aw"><span class="head">afterwrd</span>
       <p>Nobody. Your site runs on Cloudflare's free plan, and the code is free and public. There are no adverts, and no
       one earns anything from how long you stay.</p>
       <p>So there's nothing to pull you back. afterwrd never sends notifications to your phone or emails to tempt you in.
