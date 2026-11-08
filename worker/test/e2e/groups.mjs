@@ -255,7 +255,7 @@ check("Download everything carries no group keys", !exported.includes("key") && 
 
 // Bob, an admin, sees the controls a member would; deleting; renaming.
 await bob.goto(`${B}/groups/${bobGroup}/members`);
-const bobControls = await bob.$$eval(".member-list button", (l) => l.map((b) => b.textContent));
+const bobControls = await bob.$$eval(".member-list form:not(.friendship) button", (l) => l.map((b) => b.textContent));
 check("Bob, an admin, can remove Cat but not Ann, nor make admins", bobControls.join() === "Remove", bobControls.join());
 await bob.goto(`${B}/groups/${bobGroup}/posts/${bobPost}`);
 const before = n(stateG, "group_comments");
@@ -384,11 +384,96 @@ await ann.goto(`${A}/groups/${annGroup}/calendar`);
 await ann.screenshot({ path: `${OUT}/group-calendar-phone.png`, fullPage: true });
 await ann.setViewport({ width: 1280, height: 800 });
 
+// Asking to be friends from a group's members, and introductions by friends. Nobody here is friends yet.
+const ask = (page, from) => Promise.all([page.waitForNavigation({ timeout: 30_000 }), page.click(`li[data-from="${from}"] .friendship button`)]);
+const friendship = (page, from) => page.$eval(`li[data-from="${from}"] .friendship`, (e) => e.innerText.trim()).catch(() => "");
+const remoteGroup = sql(stateB, "SELECT remote_id FROM groups")[0].remote_id;
+await bob.goto(`${B}/groups/${bobGroup}/members`);
+check("in a group, Bob can ask Ann and Cat to be friends", (await friendship(bob, A)) === "Ask to be friends"
+  && (await friendship(bob, C)) === "Ask to be friends" && (await friendship(bob, B)) === "");
+await ask(bob, C);
+check("Bob asks Cat: his side is done, hers waits for her", n(stateB, `connections WHERE origin = '${C}' AND approved_at IS NOT NULL`) === 1
+  && n(stateC, `connections WHERE origin = '${B}' AND approved_at IS NULL AND via_kind = 'group' AND via_name = 'Book club (2026)'`) === 1);
+check("…and his page says he's asked", (await friendship(bob, C)) === "Asked", await friendship(bob, C));
+const probe = await call(C, "/_connect/ask", null, { origin: B, key: "k".repeat(43), via: { group: G, id: remoteGroup } });
+check("asking for a site you can't prove is yours says nothing about it (Bob's already asking)", probe.status === 403
+  && (await probe.json()).error.startsWith("Without a friend link"));
+check("a site that isn't in the group can't ask", (await call(C, "/_connect/ask", null,
+  { origin: "http://localhost:8795", key: "k".repeat(43), via: { group: G, id: remoteGroup } })).status === 403);
+check("…nor can one that wasn't introduced", (await call(C, "/_connect/ask", null, { origin: A, key: "k".repeat(43), via: { introduction: true } })).status === 403);
+check("…and nothing was kept for them", n(stateC, "connections") === 1);
+await cat.goto(`${C}/`);
+check("Cat's Home says Bob is asking, from Book club", (await text(cat, "form.notice.asking")).includes("in Book club (2026) with you"), await text(cat, "form.notice.asking"));
+await Promise.all([cat.waitForNavigation(), cat.click("form.notice.asking button.primary")]);
+check("Cat approves: they're friends", n(stateC, `connections WHERE origin = '${B}' AND approved_at IS NOT NULL`) === 1);
+await bob.goto(`${B}/`);
+await bob.goto(`${B}/groups/${bobGroup}/members`);
+check("…and Bob's group page says so", (await friendship(bob, C)) === "Friends");
+
+await ann.goto(`${A}/groups/${annGroup}/members`);
+await ask(ann, C);
+await cat.goto(`${C}/groups/${catGroup}/members`);
+check("Cat's group page offers to approve Ann", (await friendship(cat, A)).includes("Approve"), await friendship(cat, A));
+await Promise.all([cat.waitForNavigation(), cat.click(`li[data-from="${A}"] .friendship button`)]);
+check("…which she does, staying on the page", n(stateC, `connections WHERE origin = '${A}' AND approved_at IS NOT NULL`) === 1
+  && new URL(cat.url()).pathname === `/groups/${catGroup}/members`);
+
+// Cat, friends with both, introduces Ann and Bob.
+const catsAnn = sql(stateC, `SELECT id FROM connections WHERE origin = '${A}'`)[0].id;
+const catsBob = sql(stateC, `SELECT id FROM connections WHERE origin = '${B}'`)[0].id;
+await cat.goto(`${C}/`); // her site hears from Ann's, so she knows Ann approved her too
+await cat.goto(`${C}/friend`);
+check("Cat's friends each have an Introduce link", Boolean(await cat.$(`a[href="/_admin/connections/${catsAnn}/introduce"]`)));
+await cat.goto(`${C}/_admin/connections/${catsAnn}/introduce`);
+check("…offering her other friends", (await cat.$$eval("select[name=to] option", (l) => l.map((o) => o.textContent.trim()))).join() === "Bob Example");
+await cat.select("select[name=to]", String(catsBob));
+await cat.type("textarea[name=note]", "You both run book clubs");
+await Promise.all([cat.waitForNavigation({ timeout: 30_000 }), cat.click("#introduce")]);
+check("both are told", n(stateA, `introductions WHERE origin = '${B}' AND name = 'Bob Example' AND note = 'You both run book clubs'`) === 1
+  && n(stateB, `introductions WHERE origin = '${A}' AND name = 'Ann Example'`) === 1, await text(cat, "body"));
+const catKeyAtAnn = sql(stateC, `SELECT their_key FROM connections WHERE origin = '${A}'`)[0].their_key;
+check("introducing again changes nothing", (await call(A, "/_peer/introduce", catKeyAtAnn, { origin: B, name: "Someone else" })).status === 200
+  && n(stateA, `introductions WHERE name = 'Bob Example'`) === 1);
+check("only friends can introduce", (await call(A, "/_peer/introduce", "x".repeat(43), { origin: C, name: "Cat" })).status === 401);
+await ann.goto(`${A}/`);
+check("Ann's Home mentions it", (await text(ann, ".notice.introduction")).includes("Cat Example introduced you to localhost:8788, who they call Bob Example"), await text(ann, ".notice.introduction"));
+await ann.goto(`${A}/friend`);
+check("…and her Friends, with Cat's note", (await text(ann, "#introductions")).includes("You both run book clubs"));
+await Promise.all([ann.waitForNavigation({ timeout: 30_000 }), ann.click("#introductions button.primary")]);
+check("Ann asks Bob from the introduction", n(stateB, `connections WHERE origin = '${A}' AND approved_at IS NULL
+  AND via_kind = 'introduction' AND via_name = 'Cat Example'`) === 1 && n(stateA, "introductions") === 0);
+await bob.goto(`${B}/friend`);
+check("Bob's Friends says Cat introduced them", (await text(bob, ".requests")).includes("Introduced by Cat Example"), await text(bob, ".requests"));
+check("…in place of the introduction itself", !(await bob.$("#introductions")));
+await Promise.all([bob.waitForNavigation(), bob.click('.requests button[formaction$="/decline"]')]);
+check("Bob declines: Ann's site is told", await waitFor(() => n(stateA, `connections WHERE origin = '${B}'`) === 0)
+  && n(stateB, `declined_asks WHERE origin = '${A}'`) === 1 && n(stateB, "introductions") === 0);
+await ann.goto(`${A}/groups/${annGroup}/members`);
+await ask(ann, B);
+check("Ann can't ask again another way", (await text(ann, "body")).includes("already asked") && n(stateB, `connections WHERE origin = '${A}'`) === 0
+  && n(stateA, `connections WHERE origin = '${B}'`) === 0);
+await bob.goto(`${B}/groups/${bobGroup}/members`);
+await ask(bob, A);
+check("Bob can still ask Ann himself", n(stateA, `connections WHERE origin = '${B}' AND approved_at IS NULL`) === 1 && n(stateB, "declined_asks") === 0);
+await ann.goto(`${A}/friend`);
+await Promise.all([ann.waitForNavigation(), ann.click('.requests button[formaction$="/approve"]')]);
+check("…and Ann approves", n(stateA, `connections WHERE origin = '${B}' AND approved_at IS NOT NULL`) === 1);
+await bob.goto(`${B}/`);
+await bob.setViewport({ width: 390, height: 844 });
+await bob.goto(`${B}/groups/${bobGroup}/members`);
+await bob.screenshot({ path: `${OUT}/group-members-friends-phone.png`, fullPage: true });
+await bob.setViewport({ width: 1280, height: 800 });
+const annAtBob = sql(stateB, `SELECT id FROM connections WHERE origin = '${A}'`)[0].id;
+check("Bob removes Ann", (await post(bob, `/_admin/connections/${annAtBob}/disconnect`, {})).ok === true && n(stateA, `connections WHERE origin = '${B}'`) === 0);
+await ann.goto(`${A}/groups/${annGroup}/members`);
+await ask(ann, B);
+check("…and she can't ask again from the group", (await text(ann, "body")).includes("already asked") && n(stateB, `connections WHERE origin = '${A}'`) === 0);
+
 // Leaving and removing.
 await ann.goto(`${A}/groups/${annGroup}/members`);
 await Promise.all([ann.waitForNavigation(), ann.click(`button[formaction$="/members/${bobMember}/member"]`)]);
 await bob.goto(`${B}/groups/${bobGroup}/members`);
-check("Ann takes Bob's admin role back", (await bob.$$eval(".member-list button", (l) => l.length)) === 0);
+check("Ann takes Bob's admin role back", (await bob.$$eval(".member-list form:not(.friendship) button", (l) => l.length)) === 0);
 await Promise.all([bob.waitForNavigation(), bob.click('form[action$="/leave"] button')]);
 check("Bob leaves", n(stateB, "groups") === 0 && n(stateG, `group_members WHERE origin = '${B}'`) === 0);
 check("…keeping his own copies of his posts", sql(stateB, "SELECT kind FROM group_mine").every((r) => r.kind === "post"));

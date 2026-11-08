@@ -453,6 +453,13 @@ async function activity(ctx, params) {
 
 const NEW_SITE_SECONDS = 7 * 86400;
 
+// Introductions from friends still here, to people the owner isn't connected with (or asking) yet (connect.js).
+const INTRODUCTION_DAYS = 60;
+const INTRODUCTIONS_SQL = `SELECT i.id, i.origin, i.name, i.note, c.name AS by_name FROM introductions i
+      JOIN connections c ON c.id = i.connection_id AND c.approved_at IS NOT NULL AND c.reached_at IS NOT NULL
+      WHERE i.created_at > ? AND NOT EXISTS (SELECT 1 FROM connections k WHERE k.origin = i.origin AND k.connected_at IS NOT NULL)
+      ORDER BY i.created_at DESC`;
+
 /** Home: write something, then the owner's own posts written here and their friends' newest, together. */
 async function home(ctx, params) {
   const { db } = ctx;
@@ -464,8 +471,10 @@ async function home(ctx, params) {
     // For its first week, a new site suggests getting it checked (this used to be on the installer's last page).
     newSite: now() - (ctx.user.created_at ?? 0) < NEW_SITE_SECONDS,
     // Someone asking to be friends: approved (or not) from Home in one tap, as well as from Friends.
-    asking: await all(db, `SELECT id, origin, name, invited_as FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL
+    asking: await all(db, `SELECT id, origin, name, invited_as, via_kind, via_name FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL
       ORDER BY connected_at DESC LIMIT 3`),
+    // Friends introducing the owner to someone: asked (or not) from Home too.
+    introductions: await all(db, `${INTRODUCTIONS_SQL} LIMIT 3`, [now() - INTRODUCTION_DAYS * 86400]),
   });
 }
 
@@ -511,13 +520,15 @@ async function fromFriend(ctx, id, load) {
  */
 async function friendsIndex(ctx) {
   const { db } = ctx;
-  const [connections, links, people, requests, invites] = await db.batch([
+  const [connections, links, people, requests, invites, introductions] = await db.batch([
     db.prepare("SELECT * FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NOT NULL ORDER BY name COLLATE NOCASE"),
     db.prepare("SELECT * FROM friend_links"),
     db.prepare("SELECT id, name, friend_since FROM people WHERE is_me = 0 AND friend_since IS NOT NULL ORDER BY name COLLATE NOCASE"),
-    db.prepare("SELECT id, origin, name, invited_as, connected_at FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL ORDER BY connected_at DESC"),
+    db.prepare(`SELECT id, origin, name, invited_as, via_kind, via_name, connected_at FROM connections
+      WHERE connected_at IS NOT NULL AND approved_at IS NULL ORDER BY connected_at DESC`),
     db.prepare(`SELECT person_name, MAX(created_at) AS invited_at FROM connect_links
       WHERE person_name IS NOT NULL AND used_at IS NULL AND expires_at > ? GROUP BY person_name`).bind(now()),
+    db.prepare(INTRODUCTIONS_SQL).bind(now() - INTRODUCTION_DAYS * 86400),
   ]);
   const same = (a, b) => a.localeCompare(b, "en", { sensitivity: "accent" }) === 0;
   const linked = new Map(links.results.map((l) => [l.connection_id, l]));
@@ -538,7 +549,8 @@ async function friendsIndex(ctx) {
   }));
   // Requests show only what their site said when it connected: nothing is fetched from a site you haven't approved,
   // so a stranger can't slow this page down or see when you look at it.
-  return views.friendsIndexPage(ctx, { friends, facebook, requests: requests.results, checks: await recentChecks(db) });
+  return views.friendsIndexPage(ctx, { friends, facebook, requests: requests.results, introductions: introductions.results,
+    checks: await recentChecks(db) });
 }
 
 /** Who a friend on afterwrd is in the owner's Facebook download, if the owner has linked them. */
@@ -666,8 +678,11 @@ async function groupEventFile(ctx, params, id, postId) {
 
 /** Who's in a group; for its admins, also requests to join, the invite link, and running it. */
 async function groupMembers(ctx, params, id) {
-  return fromGroup(ctx, id, async (g) => views.groupMembersPage(ctx, g, await groups.loadMembers(ctx.env, g),
-    { max: MAX_MEMBERS, connected: ctx.connected }));
+  return fromGroup(ctx, id, async (g) => views.groupMembersPage(ctx, g, await groups.loadMembers(ctx.env, g), {
+    max: MAX_MEMBERS, connected: ctx.connected,
+    // Where the owner stands with each member, to offer asking them to be friends (connect.js).
+    friends: await all(ctx.db, "SELECT id, origin, approved_at, reached_at, invited_as FROM connections WHERE connected_at IS NOT NULL"),
+  }));
 }
 
 /** Friends' profile pictures by site, where the link their site gave is still good. */

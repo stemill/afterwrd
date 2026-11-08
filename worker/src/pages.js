@@ -172,7 +172,7 @@ export function signOutPage() {
 }
 
 export function messagePage(message, link = { href: "/_auth/login", label: "Go to sign in" }) {
-  return page("afterwrd", `<p>${escape(message)}</p><a class="button" href="${link.href}">${escape(link.label)}</a>`);
+  return page("afterwrd", `<p>${escape(message)}</p><a class="button" href="${escape(link.href)}">${escape(link.label)}</a>`);
 }
 
 // Opened from a check link (checks.js): a friend's site asking to check this person's site, read-only, through

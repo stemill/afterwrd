@@ -774,8 +774,29 @@ function remoteCard(ctx, c, p, { thread = true } = {}) {
 </article>`;
 }
 
+/** Why someone's asking to be friends: a group they're both in, a friend's introduction, or a link the owner made. */
+function askedBecause(r) {
+  if (r.via_kind === "group") return html`They're in <strong>${r.via_name}</strong> with you.`;
+  if (r.via_kind === "introduction") return html`Introduced by <strong>${r.via_name}</strong>.`;
+  return r.invited_as ? html`Used the invite you made for <strong>${r.invited_as}</strong>.` : "Used a friend link you made.";
+}
+
+/** A friend introducing the owner to someone, with a way to ask them (or not), landing back on `back`. */
+function introductionCard(i, back, tag = "li") {
+  return html`<${raw(tag)} class="${tag === "li" ? "card" : "notice introduction"}">
+    <span><strong>${i.by_name}</strong> introduced you to <strong>${host(i.origin)}</strong>, who they call ${i.name}${i.note && html`:
+      “${i.note}”`}</span>
+    <form method="post" class="row actions-row">
+      <input type="hidden" name="origin" value="${i.origin}"><input type="hidden" name="introduction" value="1">
+      <input type="hidden" name="back" value="${back}">
+      <button class="chip primary" formaction="/_admin/connections/ask">Ask to be friends</button>
+      <button class="chip" formaction="/_admin/connections/introductions/${i.id}/dismiss${back === "/" ? "?back=home" : ""}">Not now</button>
+    </form>
+  </${raw(tag)}>`;
+}
+
 /** The owner's Friends: friends on afterwrd first, then everyone from the Facebook download, in one list. */
-export function friendsIndexPage(ctx, { friends, facebook, requests = [], checks = [] }) {
+export function friendsIndexPage(ctx, { friends, facebook, requests = [], introductions = [], checks = [] }) {
   const people = has(ctx, "friends"); // Facebook people have pages only if the friends list is published
   const fbLink = (p) => (people && p.id ? html`<a href="/people/${p.id}">${p.name}</a>` : p.name);
   const linkForm = (c, body) => html`<form method="post" action="/_admin/connections/${c.id}/facebook" class="fb-link">${body}</form>`;
@@ -788,13 +809,13 @@ export function friendsIndexPage(ctx, { friends, facebook, requests = [], checks
 
 ${requests.length > 0 && html`
 <h2>Asking to be friends</h2>
-<p class="meta">Someone used one of your friend links. Nothing is shared until you approve. Links can be passed on, and
-anyone can call their site anything, so check the address is one you expect; if not, decline.</p>
+<p class="meta">Nothing is shared until you approve. Links can be passed on, and anyone can call their site anything,
+so check the address is one you expect; if not, decline.</p>
 <ul class="friend-list requests">
   ${requests.map((r) => html`<li class="card">
     <span class="friend-link"><span class="who who-${r.id % 6}" aria-hidden="true">${initial(r.name)}</span>
       <span><strong>${host(r.origin)}</strong><span class="meta">says they're ${r.name}</span></span></span>
-    <p class="meta">${r.invited_as ? html`Used the invite you made for <strong>${r.invited_as}</strong>.` : "Used a friend link you made."}
+    <p class="meta">${askedBecause(r)}
       ${r.invited_as && r.invited_as.toLowerCase() !== r.name.toLowerCase() && html`<strong class="warn">That's not the name you invited.</strong>`}</p>
     <form method="post" class="fb-link">
       <button class="chip primary" formaction="/_admin/connections/${r.id}/approve">Approve</button>
@@ -803,6 +824,13 @@ anyone can call their site anything, so check the address is one you expect; if 
   </li>`)}
 </ul>`}
 
+${introductions.length > 0 && html`<section id="introductions">
+<h2>Introductions</h2>
+<p class="meta">Friends who think you'd like to know someone. Only you see these, and the other person can't ask
+you to be friends unless you ask them first or they were introduced to you too.</p>
+<ul class="friend-list">${introductions.map((i) => introductionCard(i, "/friend"))}</ul>
+</section>`}
+
 <h2>On afterwrd</h2>
 ${friends.length ? html`<ul class="friend-list">
   ${friends.map((c) => html`<li class="card">
@@ -810,7 +838,8 @@ ${friends.length ? html`<ul class="friend-list">
       ${friendFace(ctx, c)}
       <span><strong>${c.name}</strong><span class="meta">${host(c.origin)} · friends since ${fmtDate(c.connected_at)}</span></span>
     </a>
-    <nav class="friend-tabs"><a href="${friendBase(c)}/posts">Posts</a><a href="${friendBase(c)}/photos">Photos</a></nav>
+    <nav class="friend-tabs"><a href="${friendBase(c)}/posts">Posts</a><a href="${friendBase(c)}/photos">Photos</a>${friends.length > 1
+      && html`<a href="/_admin/connections/${c.id}/introduce">Introduce</a>`}</nav>
     ${friendSilence(c) && html`<div class="meta silent">${friendSilence(c)} ${removeFriend(c, "chip")}</div>`}
     ${c.person ? linkForm(c, html`<span class="meta">On Facebook as ${fbLink(c.person)}</span>
         <input type="hidden" name="unlink" value="1"><button class="link">Unlink</button>`)
@@ -1470,12 +1499,30 @@ ${groupHead(ctx, g, info, "calendar")}
 }
 
 /** Who's in a group. For its admins: requests to join, the invite link, roles, and (its owner) deleting it. */
-export function groupMembersPage(ctx, g, { group: info, members }, { max, connected }) {
+export function groupMembersPage(ctx, g, { group: info, members }, { max, connected, friends = [] }) {
   const owner = g.role === "owner";
-  const person = (m, actions) => html`<li class="card member">
+  const here = `/groups/${g.id}/members`;
+  // Friends with them, asked them, asked by them, or a button to ask: everyone in a group can see who's in it.
+  const friendship = (m) => {
+    if (!m.from || m.waiting || m.from === ctx.url.origin) return "";
+    const c = friends.find((f) => f.origin === m.from);
+    if (c?.approved_at) {
+      return html`<span class="friendship">${c.reached_at ? html`<a class="chip" href="/friend/${c.id}/posts">Friends</a>` : html`<span class="meta">Asked</span>`}</span>`;
+    }
+    if (c?.invited_as) return html`<span class="friendship"><a class="chip primary" href="/friend">Asking to be friends</a></span>`;
+    if (c) {
+      return html`<form method="post" class="friendship"><button class="chip primary"
+        formaction="/_admin/connections/${c.id}/approve?back=${encodeURIComponent(here)}">Approve friend request</button></form>`;
+    }
+    return html`<form method="post" action="/_admin/connections/ask" class="friendship">
+      <input type="hidden" name="origin" value="${m.from}"><input type="hidden" name="group" value="${g.id}">
+      <input type="hidden" name="back" value="${here}"><button class="chip">Ask to be friends</button></form>`;
+  };
+  const person = (m, actions) => html`<li class="card member" data-from="${m.from ?? ""}">
     ${faceFor(ctx, m.from, m.name, m.id ?? 0)}
     <span class="what"><strong>${m.name}</strong>${m.from && html`<span class="meta">${host(m.from)}</span>`}</span>
     ${ROLE_NAMES[m.role] && html`<span class="badge as-written">${ROLE_NAMES[m.role]}</span>`}
+    ${friendship(m)}
     ${actions}
   </li>`;
   // Buttons for an admin: what they can do about someone (only the owner deals with admins).
@@ -1604,7 +1651,7 @@ const SIDE_FRIENDS = 12; // on Home; the rest are on Friends
 /** "a", "a and b", "a, b and c". */
 const listed = (items) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
 
-export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { devices: [], canConfirm: false }, securityFix = null, asking = [], newSite = false }) {
+export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { devices: [], canConfirm: false }, securityFix = null, asking = [], introductions = [], newSite = false }) {
   const stream = [
     ...own.map((p) => ({ at: p.timestamp, card: postCard(ctx, p) })),
     ...feed.posts.map((p) => ({ at: p.created_at, card: remoteCard(ctx, p.connection, p) })),
@@ -1625,11 +1672,12 @@ export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { de
         ? html`<button class="link">${newDevices.devices.length === 1 ? "That was me" : "They were all me"}</button>`
         : html`If it was you, say so from one of your older devices.`}</form>`}
     ${asking.map((r) => html`<form class="notice asking" method="post">
-      <strong>${host(r.origin)}</strong>, who says they're ${r.name}, is asking to be friends.
+      <strong>${host(r.origin)}</strong>, who says they're ${r.name}, is asking to be friends. ${r.via_kind && askedBecause(r)}
       ${r.invited_as && r.invited_as.toLowerCase() !== r.name.toLowerCase() && html`<strong class="warn">That's not the name you invited (${r.invited_as}).</strong>`}
       <span class="row"><button class="chip primary" formaction="/_admin/connections/${r.id}/approve?back=home">Approve</button>
         <button class="chip" formaction="/_admin/connections/${r.id}/decline?back=home" onclick="return confirm('Decline? Their site will be told no.')">Decline</button></span>
     </form>`)}
+    ${introductions.map((i) => introductionCard(i, "/", "div"))}
     ${newSite && html`<p class="notice">Your site is new. Before you share much, it's worth checking it's exactly the
       published afterwrd: <a href="/_admin/update#check">ask a friend with afterwrd to check it</a>, or
       <a href="https://afterwrd.app/check/">check it yourself</a>.</p>`}

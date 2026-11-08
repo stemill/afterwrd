@@ -190,7 +190,11 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   was for, and approving links them to their Facebook self. Otherwise, say which Facebook friend an afterwrd friend
   is (matching names are suggested; nothing is linked without you), and their page links to your Facebook history
   together. Requests to be friends show on *Home* and at the top of *Friends* (with a count in the menu) for *Approve* or
-  *Decline*.
+  *Decline*, with why they came: a link, a group you're both in, or a friend's introduction.
+- **Without a link.** A group's *Members* page has *Ask to be friends* by each member you're not friends with (the site
+  asked checks with the group that you're in it). *Introduce* on a friend's card tells them and another friend about
+  each other, with a note if you like; each sees it on *Home* and *Friends* and can ask. Someone you decline or remove can't ask again
+  this way (you still can). There's no "people you may know": it would reveal who your friends' friends are.
 - **Feed and connections.** *Friends → Add a friend* makes a one-time friend link (30 days) inside a message to
   send. Someone with an afterwrd site opens it, says where their site is, and confirms there. Someone without one
   presses *Set up your own afterwrd*: the installer carries the link along (after the `#`, so no server sees it),

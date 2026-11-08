@@ -8,6 +8,8 @@
 //   POST /_peer/comments                a Note inReplyTo a post or photo here: their owner comments on it
 //   POST /_peer/comments/<n>/delete     their owner deletes a comment they made
 //   POST /_peer/notify                  a note: something new on their site (notify.js)
+//   POST /_peer/introduce               {origin, name, content?}: their owner introduces the owner here to someone
+//                                       (connect.js); either can then ask the other to be friends
 //   POST /_peer/disconnect              they've disconnected
 // The feed and comments are ActivityStreams (public/static/activity.js). The feed and notes carry only posts written
 // on afterwrd; friend pages (posts, albums, photos) also show the parts of the Facebook archive the owner has chosen to
@@ -19,6 +21,7 @@ import { SITE_ID } from "./posts.js";
 import { notes, ownerActor, photoShared, postShared, shareAlbum, shareAlbums, sharePhoto, sharePosts } from "./share.js";
 import { json, now, sha256 } from "./util.js";
 import { notifyComment, receiveNote } from "./notify.js";
+import { receiveIntroduction } from "./connect.js";
 
 const FEED_POSTS = 30;
 const TIMEOUT_MS = 8000;
@@ -134,8 +137,13 @@ export async function handlePeer(request, env, url) {
     await db.batch([
       db.prepare("DELETE FROM connections WHERE id = ?").bind(peer.id),
       db.prepare("DELETE FROM friend_links WHERE connection_id = ?").bind(peer.id),
+      db.prepare("DELETE FROM introductions WHERE connection_id = ?").bind(peer.id),
     ]);
     return json({ ok: true });
+  }
+  if (route === "POST /_peer/introduce") {
+    const [body, status] = await receiveIntroduction(env, url, peer, await request.json().catch(() => ({})));
+    return json(body, status);
   }
   if (route === "POST /_peer/comments") {
     const note = await request.json().catch(() => ({}));

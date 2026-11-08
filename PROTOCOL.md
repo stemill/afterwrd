@@ -244,6 +244,36 @@ doesn't forget the connection on its own, because a site that's broken for a whi
 
 Source: `src/peers.js:115-117`, `src/peers.js:128-135`, `src/connect.js:165-178`.
 
+### 4.4 Asking without a link (afterwrd 0.32.0)
+
+A site may also ask to be friends without a link, but only someone its owner is in a group with (section 9), or someone a friend has introduced them to (5.11). The steps are those of 4.2 from step 3, with `POST /_connect/ask` in place of the link's `accept`, and a `via` saying why:
+
+```
+POST https://cat.example/_connect/ask
+Content-Type: application/json
+
+{"origin": "https://bob.example", "key": "<keyB>", "via": {"group": "https://club.example", "id": 1}}
+{"origin": "https://bob.example", "key": "<keyB>", "via": {"introduction": true}}
+```
+
+Before calling B's `hello`, C checks the reason itself:
+
+- **group:** `via.group` and `via.id` must name a group that C is a member of, and that group must list B's origin among the members let in. C reads the group's members with its own key, at most once a minute, and trusts what it read for 10 minutes. C never calls an address that only the asker gave it.
+- **introduction:** C must hold an introduction to B's origin, made in the last 60 days by a friend who is still connected and has approved C (5.11).
+
+Requests with a reason are counted: at most 30 an hour overall, and 5 from any one origin. C then calls B's `hello` (4.2 step 4). Until that succeeds, every refusal is the same `403`, so nobody can learn from C whom its owner is friends with, has declined, has been introduced to or shares a group with. After it, C answers as `accept` does (`200 {"name", "key"}`), and records the request as not approved, with why it came. Errors:
+
+| Status | When | Message |
+|---|---|---|
+| 400 | `origin` or `key` invalid | `That doesn't look like an afterwrd site.` |
+| 403 | No reason holds, or the hello check failed | `Without a friend link, you can only ask someone you're in a group with, or a friend has introduced you to.` |
+| 429 | Over the hourly limits | |
+| 409 | (after hello) already friends | `You're already friends.` |
+| 409 | (after hello) already asking, or C's owner declined an earlier request from B made this way, or removed B as a friend | `You've already asked.` |
+| 429 | (after hello) 20 requests are already waiting for C's owner | |
+
+A site from before 0.32.0 answers `404`; afterwrd then suggests a friend link instead. If C's owner declines, C disconnects (4.3) as usual and won't accept another request from B this way; the same if C's owner removes B as a friend later. If C's owner asks B, or approves a request from B, that's forgotten.
+
 ## 5. Friend API
 
 All the endpoints in this section are on the site being read (the "owner's site"). They are called by a connected friend's site with `Authorization: Bearer <key the owner's site issued>`.
@@ -416,6 +446,20 @@ Receives a note. See section 8.
 ### 5.10 `POST /_peer/disconnect`
 
 See 4.3.
+
+### 5.11 `POST /_peer/introduce` (afterwrd 0.32.0)
+
+The caller's owner introduces the owner here to someone else, who is told the same about them:
+
+```
+{"type": "Introduce", "origin": "https://bob.example", "name": "Bob Example", "content": "You both run book clubs"}
+```
+
+- Only from a friend who has approved the receiver too, not merely one the receiver's owner asked. If the receiver has never read the caller's site successfully, it tries `GET /_peer/feed` there once; if that fails, the answer is `403`.
+- `origin` must be a valid origin (2.1), and not the receiver's or the caller's own. `content` is optional; up to 300 characters are kept.
+- If the receiver is already connected with `origin`, has declined it (4.4), or already holds this friend's introduction to it, nothing changes, and the answer is still `200 {"ok": true}`.
+- Otherwise the receiver keeps it and shows it to its owner, led by the address, who may ask to be friends (4.4) or dismiss it. Introductions go when acted on, after 60 days, or when the introducing friend is disconnected.
+- Limits: 20 a day from one friend, 20 kept from one friend, and 100 kept in all. Beyond them: `429`.
 
 ## 6. Objects
 
