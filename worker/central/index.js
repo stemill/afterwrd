@@ -395,7 +395,7 @@ with Cloudflare's own Deploy page instead</a>. <a href="https://afterwrd.app/how
   } catch {}
   if (invite) $("invited").hidden = false;
   // An address to suggest, from the name the friend invited them by ("Bob Smith" → "bob-smith").
-  // Names are tidied as they're typed, so "Pauline Millington" becomes pauline-millington rather than an error: accents
+  // Names are tidied as they're typed, so "Sam Taylor" becomes sam-taylor rather than an error: accents
   // dropped, anything else that isn't a letter or number turned into a hyphen. A hyphen can end the box while typing
   // (the space before a surname), and finished() takes it off when the name is used.
   const tidy = (text) => text.normalize("NFKD").replace(/[\\u0300-\\u036f]/g, "").toLowerCase()
