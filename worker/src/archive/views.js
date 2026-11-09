@@ -1660,9 +1660,8 @@ export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { de
 <div class="home">
   <section class="stream" aria-label="Posts">
     <h1 class="hidden">Home</h1>
-    ${securityFix ? html`<p class="notice alert">afterwrd ${securityFix} fixes a security problem, and this site is older.
-      <a href="/_admin/update">Update now</a>.</p>`
-      : ctx.newRelease && html`<p class="notice">afterwrd ${ctx.newRelease} is out. <a href="/_admin/update">See what's new and update</a>.</p>`}
+    ${securityFix && html`<p class="notice alert">afterwrd ${securityFix} fixes a security problem, and this site is older.
+      <a href="/_admin/update">Update now</a>.</p>`}
     ${newDevices.devices.length > 0 && html`<form class="notice alert" method="post" action="/_admin/devices/seen">
       ${newDevices.devices.length === 1
         ? html`A new device was added to your site on ${fmtDate(newDevices.devices[0].created_at)}.`

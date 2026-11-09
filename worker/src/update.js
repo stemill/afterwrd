@@ -29,7 +29,8 @@ const PERMISSIONS = [{ key: "workers_scripts", type: "edit" }, { key: "d1", type
 const TOKEN_URL = "https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys="
   + encodeURIComponent(JSON.stringify(PERMISSIONS)) + "&accountId=*&zoneId=all&name=afterwrd%20update";
 const TOKENS_PAGE = "https://dash.cloudflare.com/profile/api-tokens";
-const CHECK_SECONDS = 3600; // how often the mark on the Update button (and Home's line) looks for a new release
+const CHECK_SECONDS = 900; // how often the dot on the picture (and "Update available") looks for a new release
+const REFRESH_WAIT_MS = 1500; // how long a page waits for GitHub's answer when it's the one asking
 const FRESH_SECONDS = 300; // how long the Update page trusts its last answer from GitHub
 
 export async function handleUpdate(request, env, url, owner) {
@@ -140,7 +141,7 @@ async function latestRelease(db) {
     // can say so on Home, even if later releases fixed nothing of the kind.
     if (typeof fix === "string" && TAG_RE.test(`v${fix}`) && !newer(fix, version)) latest.securityFix = fix;
   } catch (error) {
-    // Noted as checked, so a GitHub that's down or slow is asked again in an hour, not on every page and poll.
+    // Noted as checked, so a GitHub that's down or slow is asked again later, not on every page and poll.
     await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('latest_release', ?)")
       .bind(JSON.stringify({ ...known, checked: now() })).run().catch(() => {});
     return known.latest ?? { error: error.message };
@@ -156,18 +157,22 @@ const knownRelease = async (db) => {
 };
 
 /**
- * The newer release that's out, if there is one (else null), for a mark on the owner's Update button and a line on
- * Home. Uses the copy of the latest version kept in settings, refreshed at most hourly, after the page is sent
- * (`work.waitUntil`); a page that's open gets the news within 30 seconds from live.js asking /_live.
+ * The newer release that's out, if there is one (else null), for the dot on the owner's picture and "Update
+ * available" behind it. Uses the copy of the latest version kept in settings, refreshed every 15 minutes or so. The
+ * request that refreshes it waits a moment for GitHub's answer, so that page shows it too (before 0.35.1 only the
+ * next page did); if GitHub is slow, it finishes after the page is sent. An open page gets the news within 30
+ * seconds from live.js asking /_live.
  */
 export async function waitingRelease(env, work) {
   const known = await knownRelease(env.DB);
+  let { version } = known;
   if (!known.checked || now() - known.checked > CHECK_SECONDS) {
-    const refresh = latestRelease(env.DB).catch(() => {});
+    const refresh = latestRelease(env.DB).catch(() => null);
     if (work?.waitUntil) work.waitUntil(refresh);
-    else await refresh;
+    const answer = await Promise.race([refresh, new Promise((resolve) => setTimeout(resolve, REFRESH_WAIT_MS))]);
+    if (typeof answer?.version === "string") version = answer.version;
   }
-  return known.version && TAG_RE.test(`v${known.version}`) && newer(known.version, VERSION) ? known.version : null;
+  return version && TAG_RE.test(`v${version}`) && newer(version, VERSION) ? version : null;
 }
 
 export const updateWaiting = async (env, work) => Boolean(await waitingRelease(env, work));
