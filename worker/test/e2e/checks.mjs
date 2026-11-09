@@ -216,6 +216,7 @@ check("a used link can't start another check", again.status === 409);
 
 // --- asking for a check, by message ---------------------------------------------------------------------------
 await owner.goto(`${BASE}/_admin/update`);
+await owner.$eval("#ask-other", (d) => { d.open = true; });
 await owner.click("#ask-check");
 const ask = await owner.$eval("#ask-message", (t) => t.value);
 check("\"Ask a friend to check my site\" on the Update page writes a message naming this site", ask.includes("localhost:8787")

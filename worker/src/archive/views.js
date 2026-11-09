@@ -856,11 +856,11 @@ ${friends.length ? html`<ul class="friend-list">
 </div>`}
 
 <h2 id="checks">Checking a friend's site</h2>
-<p class="meta">When a friend asks you to check their afterwrd site (from their Update page, by message), paste their
-message, or just their site's address, here. Make a link and send it back to them: they open it and allow read-only
-access in Cloudflare, and your site checks theirs is exactly the published afterwrd, with nothing else done in their
-account. You both see what it found. The request comes by message, not between the sites, so a site that had been
-tampered with couldn't fake it.</p>
+<p class="meta">When a friend on afterwrd asks you to check their site, their request shows on <a href="/">Home</a>, with a
+button that makes the link to send back to them. If someone asks by message instead, paste it, or just their site's
+address, here. They open the link and allow read-only access in Cloudflare, and your site checks theirs is exactly the
+published afterwrd, with nothing else done in their account. You both see what it found. The link goes back by message,
+not between the sites, so a site that had been tampered with couldn't swap it for a fake.</p>
 <form class="check-form" onsubmit="return false">
   <input id="check-site" placeholder="Their message, or their site's address" aria-label="Their message, or their site's address">
   <button class="chip" data-check="">Make a check link</button>
@@ -1651,7 +1651,7 @@ const SIDE_FRIENDS = 12; // on Home; the rest are on Friends
 /** "a", "a and b", "a, b and c". */
 const listed = (items) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
 
-export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { devices: [], canConfirm: false }, securityFix = null, asking = [], introductions = [], unchecked = false }) {
+export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { devices: [], canConfirm: false }, securityFix = null, asking = [], introductions = [], unchecked = false, checkRequests = [] }) {
   const stream = [
     ...own.map((p) => ({ at: p.timestamp, card: postCard(ctx, p) })),
     ...feed.posts.map((p) => ({ at: p.created_at, card: remoteCard(ctx, p.connection, p) })),
@@ -1678,6 +1678,48 @@ export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { de
         <button class="chip" formaction="/_admin/connections/${r.id}/decline?back=home" onclick="return confirm('Decline? Their site will be told no.')">Decline</button></span>
     </form>`)}
     ${introductions.map((i) => introductionCard(i, "/", "div"))}
+    ${checkRequests.map((r) => html`<div class="notice check-request">
+      <span><strong>${r.name}</strong> asks you to check their afterwrd site. Make a link, and send it to them by message.</span>
+      <span class="row actions-row"><button class="chip primary" data-check-request="${r.id}">Make a check link</button>
+        <form method="post" action="/_admin/checks/requests/${r.id}/dismiss" class="inline"><button class="chip">Not now</button></form></span>
+      <span class="check-share row actions-row" hidden><button class="chip primary" data-share>Send it to ${r.name}…</button>
+        <button class="chip" data-copy>Copy the link</button></span>
+      <span class="error" role="alert"></span>
+    </div>`)}
+    ${checkRequests.length > 0 && html`<script>
+      // A friend asked for a check: make the link here, then hand it to the phone's share sheet (or copy it).
+      document.addEventListener("click", async (e) => {
+        const card = e.target.closest(".check-request");
+        if (!card) return;
+        const make = e.target.closest("button[data-check-request]");
+        const error = card.querySelector(".error");
+        const send = () => navigator.share({ text: card.dataset.message }).catch(() => {});
+        if (make) {
+          make.disabled = true;
+          error.textContent = "";
+          try {
+            const res = await fetch("/_admin/checks/new", { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ connection: Number(make.dataset.checkRequest) }) });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Something went wrong.");
+            card.dataset.message = data.message;
+            make.parentElement.hidden = true;
+            card.querySelector(".check-share").hidden = false;
+            card.querySelector("[data-share]").hidden = !navigator.share;
+            if (navigator.share) send();
+          } catch (err) {
+            error.textContent = err.message;
+            make.disabled = false;
+          }
+        }
+        if (e.target.closest("[data-share]")) send();
+        const copy = e.target.closest("[data-copy]");
+        if (copy) {
+          await navigator.clipboard.writeText(card.dataset.message);
+          copy.textContent = "Copied: paste it into a message";
+        }
+      });
+    </script>`}
     ${unchecked && html`<form class="notice checked-notice" method="post" action="/_admin/checks/myself">Your site hasn't been checked yet.
       Before you share much, it's worth checking it's exactly the published afterwrd:
       <a href="/_admin/update#check">ask a friend with afterwrd to check it</a>, or

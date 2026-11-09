@@ -286,7 +286,7 @@ How the receiver handles the key:
 
 Where an endpoint takes `page`, it is an integer clamped to between 1 and 10,000. Anything else counts as 1.
 
-Source: `src/peers.js:1-17`, `src/peers.js:100-175`, `src/checks.js` (`tellChecked`, `receiveChecked`).
+Source: `src/peers.js:1-17`, `src/peers.js:100-175`, `src/checks.js` (`tellChecked`, `receiveChecked`, `askForCheck`, `receiveCheckRequest`).
 
 ### 5.1 `GET /_peer/hello?from=<origin>`
 
@@ -473,6 +473,18 @@ The caller's site has just checked the receiver's (a read-only look at its Cloud
 - `site` must be the receiver's own origin, or the answer is `400 {"error": "That isn't a check of this site."}`. `version` is the release the code matched; anything that isn't `x.y.z` is dropped.
 - The receiver keeps who checked it (the caller's name, as it has it) and when, at most one an hour from one caller (more still answer `200`), and the newest 10 such records. It's the friend's word: it only changes what the receiver suggests to its owner (no longer suggesting a check) and shows on its Update page. Answer: `200 {"ok": true}`.
 - Older sites answer `404`, which the caller ignores.
+
+### 5.13 `POST /_peer/check-request` (afterwrd 0.35.0)
+
+The caller's owner asks the owner here to check their site (5.12 describes what a check finds and how it ends):
+
+```
+{"type": "CheckRequest"}
+```
+
+- The receiver keeps one request from each friend, shown to its owner with a way to make a check link: a one-time link to the receiver's own site, for the caller's origin as the receiver has it. The owner sends that link back by some other way (a message), never between the sites, so a caller that had been tampered with can't swap it for a fake. The receiver makes a check link for a friend only if that friend asked.
+- Asking again moves the request back to the top, at most once an hour. Requests go when a link is made, when the owner dismisses them, or after 14 days. At most 50 are kept; beyond that, nothing changes. The answer is always `200 {"ok": true}`.
+- Older sites answer `404`. The caller then offers its owner a message to send instead.
 
 ## 6. Objects
 

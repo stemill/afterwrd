@@ -38,6 +38,8 @@ export async function handleUpdate(request, env, url, owner) {
     return html(updatePage(owner, await latestRelease(env.DB), {
       site: url.host, connected: Boolean(connectedToken(request)), oldToken: Boolean(env.UPDATE_TOKEN), groups: await groupsBehind(env.DB), go: url.searchParams.get("go"),
       checked: await lastChecked(env.DB),
+      friends: (await env.DB.prepare(`SELECT id, name FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NOT NULL
+        AND their_key IS NOT NULL ORDER BY name COLLATE NOCASE LIMIT 200`).all()).results,
     }));
   }
   if (request.method === "GET" && path === "/version") return json({ version: VERSION });
@@ -206,7 +208,7 @@ function connectPart(connected, back, what) {
 </details>`;
 }
 
-function updatePage(owner, latest, { site, connected, oldToken, groups, go, checked = null }) {
+function updatePage(owner, latest, { site, connected, oldToken, groups, go, checked = null, friends = [] }) {
   const available = latest.version && newer(latest.version, VERSION);
   // Groups this site made that are behind it: brought up to this version, with the same connection.
   const groupsPart = groups.length && !available ? `
@@ -284,27 +286,53 @@ ${ownerHeader("update")}
 <p class="meta">Signed in as ${escape(owner.name)}. This site is afterwrd ${escape(VERSION)}.</p>
 ${body}
 <section class="card" id="check">
-  <h2>Ask a friend to check your site</h2>
+  <h2>Get your site checked</h2>
   <p id="last-checked">${checked ? escape(checkedWords(checked)) : "Your site hasn't been checked yet."}</p>
   <p class="meta">A friend's afterwrd site can check that yours is exactly the published afterwrd, with nothing else done in
-  your Cloudflare account. Worth doing when your site is new, and after updates. This writes a message for you to send
-  them however you usually would: your site doesn't contact anyone, so a site that had been tampered with couldn't fake
-  the check.</p>
-  <p><button class="chip" id="ask-check">Ask a friend to check my site</button></p>
-  <form method="post" action="/_admin/checks/myself?back=update" class="meta">Or <a href="https://afterwrd.app/check/">check it
-    yourself</a>, and then <button class="link">say you've checked it</button>.</form>
+  your Cloudflare account. Worth doing when your site is new, and after updates. Ask a friend: they'll send you a link by
+  message. Open it and press Allow when Cloudflare asks.</p>
+  ${friends.length ? `<p class="row ask-friends">${friends.map((f) => `<button class="chip" data-ask="${f.id}">Ask ${escape(f.name)}</button>`).join(" ")}</p>
+  <p id="ask-result" role="status"></p>` : ""}
+  <details id="ask-other"${friends.length ? "" : " open"}>
+  <summary class="meta">${friends.length ? "Someone else, or their site is older? Send them a message instead" : "Ask by message"}</summary>
+  <p class="meta">This writes a message for you to send them. Their afterwrd site makes the link to send back.</p>
+  <p><button class="chip" id="ask-check">Write the message</button></p>
   <div id="ask-panel" hidden>
-    <textarea id="ask-message" readonly rows="5" aria-label="Message asking for a check">Could you check that my afterwrd site is genuine? It's at ${escape(site)}. On your afterwrd site, go to Friends, paste this message under "Checking a friend's site", press "Make a check link", and send me the link it makes. Thank you!</textarea>
+    <textarea id="ask-message" readonly rows="5" aria-label="Message asking for a check">Could you check that my afterwrd site is genuine? It's at ${escape(site)}. On your afterwrd site, go to Friends, paste this message (or just my address) under "Checking a friend's site", press "Make a check link", and send me the link it makes. Thank you!</textarea>
     <p class="row"><button class="chip primary" id="ask-copy">Copy message</button>
       <button class="chip" id="ask-share" hidden>Share…</button></p>
   </div>
+  </details>
+  <form method="post" action="/_admin/checks/myself?back=update" class="meta">Or <a href="https://afterwrd.app/check/">check it
+    yourself</a>, and then <button class="link">say you've checked it</button>.</form>
 </section>
 ${groupsPart}
 ${forget}
 </main>
 <script>
   const go = document.getElementById("go");
-  // Asking a friend for a check: only a message to send, nothing sent from here.
+  // Asking a friend for a check: their site is sent the request (it makes the link they send back), or, for anyone
+  // else, a message to send them.
+  document.querySelectorAll("button[data-ask]").forEach((button) => button.addEventListener("click", async () => {
+    const result = document.getElementById("ask-result");
+    button.disabled = true;
+    result.textContent = "";
+    try {
+      const res = await fetch("/_admin/checks/ask", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connection: Number(button.dataset.ask) }) });
+      const data = await res.json().catch(() => ({}));
+      if (data.older) {
+        document.getElementById("ask-other").open = true;
+        document.getElementById("ask-check").click();
+      }
+      if (!res.ok) throw new Error(data.error || "Something went wrong.");
+      result.textContent = "Asked " + data.name + ". Their site will show them your request. When their link comes,"
+        + " open it and press Allow.";
+    } catch (err) {
+      result.textContent = err.message;
+      button.disabled = false;
+    }
+  }));
   document.getElementById("ask-check").addEventListener("click", () => {
     document.getElementById("ask-panel").hidden = false;
     document.getElementById("ask-message").select();

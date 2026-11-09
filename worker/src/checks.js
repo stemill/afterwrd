@@ -6,6 +6,8 @@
 //   POST /_admin/checks/new {connection?}  the owner makes a one-time link (for a friend, or anyone they send it to)
 //   POST /_admin/checks/<id>/delete        forget a check
 //   POST /_admin/checks/myself?back=       the owner checked their own site (a form on Home and Update)
+//   POST /_admin/checks/ask {connection}   the owner asks a friend to check their site (sent to that friend's site)
+//   POST /_admin/checks/requests/<id>/dismiss  "Not now" on a friend's request
 //   GET  /_check/<token>                   the friend's page: what will happen, their site's address, the result
 //   POST /_check/<token>/start {site}      a PKCE secret in a short cookie; back comes the relay link
 //   GET  /_check/done                      back from Cloudflare via the relay, which asked only for read-only access
@@ -61,16 +63,27 @@ export async function handleCheckAdmin(request, env, url) {
     const back = url.searchParams.get("back") === "update" ? "/_admin/update#check" : "/";
     return Response.redirect(`${url.origin}${back}`, 303);
   }
+  // "Not now" on a friend's request for a check (a form on Home).
+  const dismiss = /^\/_admin\/checks\/requests\/(\d+)\/dismiss$/.exec(url.pathname);
+  if (dismiss) {
+    await env.DB.prepare("DELETE FROM check_requests WHERE connection_id = ?").bind(Number(dismiss[1])).run();
+    return Response.redirect(`${url.origin}/`, 303);
+  }
   const body = await request.json().catch(() => ({}));
+  // The owner asking a friend to check their site: their site is sent the request, and shows it on its Home.
+  if (url.pathname === "/_admin/checks/ask") return askForCheck(env, Number(body.connection));
   if (url.pathname === "/_admin/checks/new") {
-    // For a friend (from their card), for a site whose address (or whole "please check" message) was pasted, or,
-    // with neither, for whichever site the person opening it names.
+    // For a friend who asked (their request on Home), for a site whose address (or whole "please check" message) was
+    // pasted, or, with neither, for whichever site the person opening it names. Never for a friend who didn't ask:
+    // checks start with the person being checked.
     const connection = body.connection == null ? null : Number(body.connection);
     let friend = null;
     let site = null;
     if (connection !== null) {
       friend = await env.DB.prepare("SELECT id, name, origin FROM connections WHERE id = ? AND approved_at IS NOT NULL").bind(connection).first();
       if (!friend) return json({ error: "That isn't one of your friends." }, 404);
+      const asked = await env.DB.prepare("SELECT 1 FROM check_requests WHERE connection_id = ?").bind(friend.id).first();
+      if (!asked) return json({ error: `${friend.name} hasn't asked for a check. They can, from their site's Update page.` }, 409);
       site = friend.origin;
     } else if (typeof body.site === "string" && body.site.trim()) {
       site = siteIn(body.site, env, url.origin);
@@ -83,6 +96,11 @@ export async function handleCheckAdmin(request, env, url) {
       .bind(await sha256(token), friend?.id ?? null, site, site ? 1 : 0, now(), now() + LINK_SECONDS, OPEN_LINKS).run();
     if (!made.meta.changes) return json({ error: `You have ${OPEN_LINKS} check links nobody has used yet; wait for those first.` }, 429);
     const link = `${url.origin}/_check/${token}`;
+    if (connection !== null) {
+      await env.DB.prepare("DELETE FROM check_requests WHERE connection_id = ?").bind(friend.id).run();
+      return json({ link, message: `Here's the link to check your afterwrd site, as you asked. Open it, press "Check my site", `
+        + `then press Allow when Cloudflare asks (it's read-only: it can't change anything). It works once, for 14 days.\n\n${link}` });
+    }
     const me = await ownerName(env.DB);
     return json({
       link,
@@ -465,6 +483,52 @@ export function resultHtml(r, whose = "theirs", by = null) {
   }
   lines.push(`<p class="meta">Checked ${escape(when(r.checkedAt))}, read-only. The access Cloudflare gave was used for this check and not kept.</p>`);
   return lines.join("\n");
+}
+
+// --- asking a friend for a check, and being asked ------------------------------------------------------------------
+
+const MAX_REQUESTS = 50;
+
+/**
+ * Asks a friend's site to check this one: it shows the request on its owner's Home, with one tap to make the check
+ * link, which they send back by message. Safe even from a site that's been tampered with: the friend's site makes
+ * the link, for the address it already has for this site, and the link comes back by another way.
+ */
+async function askForCheck(env, connection) {
+  const friend = Number.isInteger(connection) && await env.DB.prepare(`SELECT name, origin, their_key FROM connections WHERE id = ?
+    AND connected_at IS NOT NULL AND approved_at IS NOT NULL AND their_key IS NOT NULL`).bind(connection).first();
+  if (!friend) return json({ error: "That isn't one of your friends." }, 404);
+  try {
+    await callSite(friend.origin, "/_peer/check-request", { key: friend.their_key, body: { type: "CheckRequest" } });
+  } catch (error) {
+    // A site from before 0.35.0 doesn't know the request: the page offers the message to send instead.
+    if (error.status === 404) return json({ error: `${friend.name}'s site is on an older afterwrd, so send them a message instead.`, older: true }, 409);
+    return json({ error: `Couldn't reach ${friend.name}'s site: ${error.message}` }, 502);
+  }
+  return json({ ok: true, name: friend.name });
+}
+
+/** A friend's site asking for a check (POST /_peer/check-request). Returns [body, status]. */
+export async function receiveCheckRequest(env, peer, body) {
+  if (body?.type !== "CheckRequest") return [{ error: "That isn't a request for a check." }, 400];
+  const at = now();
+  // One at a time from each friend (asking again brings it back to the top, at most hourly), and a cap on them all.
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM check_requests WHERE created_at <= ?").bind(at - LINK_SECONDS),
+    env.DB.prepare(`INSERT INTO check_requests (connection_id, created_at) SELECT ?1, ?2
+      WHERE (SELECT COUNT(*) FROM check_requests) < ?3
+      ON CONFLICT (connection_id) DO UPDATE SET created_at = excluded.created_at WHERE created_at < excluded.created_at - 3600`)
+      .bind(peer.id, at, MAX_REQUESTS),
+  ]);
+  return [{ ok: true }, 200];
+}
+
+/** Friends' requests for a check, newest first, for Home. */
+export async function checkRequests(db) {
+  const { results } = await db.prepare(`SELECT c.id, c.name FROM check_requests r
+    JOIN connections c ON c.id = r.connection_id AND c.approved_at IS NOT NULL
+    WHERE r.created_at > ? ORDER BY r.created_at DESC LIMIT 3`).bind(now() - LINK_SECONDS).all();
+  return results;
 }
 
 // --- telling a friend's site it was checked, and hearing it -------------------------------------------------------

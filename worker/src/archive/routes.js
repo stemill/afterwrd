@@ -13,7 +13,7 @@ import { ownerName } from "../peers.js";
 import { SITE_ID } from "../posts.js";
 import { profilePictures } from "../photos.js";
 import { newDevices } from "../admin.js";
-import { lastChecked, recentChecks } from "../checks.js";
+import { checkRequests, lastChecked, recentChecks } from "../checks.js";
 import { securityFixWaiting, waitingRelease } from "../update.js";
 import { now } from "../util.js";
 import { fmtDate, fmtMonth } from "./format.js";
@@ -468,6 +468,8 @@ async function home(ctx, params) {
     newDevices: await newDevices(db, ctx.user), securityFix: await securityFixWaiting(db),
     // Until it's been checked (by a friend's site, or the owner themselves: checks.js), Home suggests a check.
     unchecked: !(await lastChecked(db)),
+    // Friends asking for their site to be checked: one tap makes the link to send back (checks.js).
+    checkRequests: await checkRequests(db),
     // Someone asking to be friends: approved (or not) from Home in one tap, as well as from Friends.
     asking: await all(db, `SELECT id, origin, name, invited_as, via_kind, via_name FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL
       ORDER BY connected_at DESC LIMIT 3`),
