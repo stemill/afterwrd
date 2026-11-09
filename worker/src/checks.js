@@ -357,6 +357,8 @@ export async function checkSite(token, site, env, here, { latest = {} } = {}, fe
       // called (a name like a group's included), so each one's bindings are looked at too.
       const database = (detail.resources?.bindings ?? []).find((b) => b?.type === "d1" && b?.name === "DB");
       const databaseId = database?.id ?? database?.database_id;
+      // Kept (as Cloudflare's id, nothing more), so the audit log can tell changes to the site's own database apart.
+      if (typeof databaseId === "string") result.database = text(databaseId, 64);
       if (databaseId) {
         const sharing = [];
         for (const other of others.slice(0, OTHER_WORKERS)) {
@@ -395,20 +397,23 @@ export async function checkSite(token, site, env, here, { latest = {} } = {}, fe
   }
 
   result.problems = problems;
-  result.audit = { from: (result.created ?? now()) - 3600, until: new Date().toISOString(), count: 0, unexpected: [] };
+  result.audit = { from: (result.created ?? now()) - 3600, until: new Date().toISOString(), count: 0, unexpected: [], other: [] };
   return result;
 }
 
 // What afterwrd does in an account through Connect: installing and updating its site, starting and deleting groups
-// (Workers named after the site), and the installer removing itself.
+// (Workers named after the site), and the installer removing itself; and, from 0.20.0, an update removing the
+// long-lived token an earlier version kept as a secret (UPDATE_TOKEN).
 function expected(e, script, created) {
   if (e.context !== "oauth") return false;
   const when = Math.floor(Date.parse(e.time) / 1000);
   const ours = e.resource === script || e.resource.startsWith(`${script}-`) || e.resource.startsWith("afterwrd-installer-");
+  if (e.type === "delete" && e.what.startsWith("workers/scripts") && /secret/i.test(e.description) && e.resource === script) return true;
   switch (`${e.type} ${e.what}`) {
     case "create workers/scripts.assets-upload-session": case "update workers/scripts": case "delete workers/scripts":
     case "create workers/scripts.subdomain": return ours;
-    case "create d1/database": case "delete d1/database": return true;
+    // Making and deleting databases (a site's, a group's); never a query, which could change what's in one.
+    case "create d1/database": case "delete d1/database": return !/query/i.test(e.description);
     // A brand-new account's workers.dev name, set by the installer at install.afterwrd.app just before it made the
     // site. Changed any later, it would move every site in the account off its address, so it's flagged.
     case "create workers/subdomain": case "update workers/subdomain": return Boolean(created && when && when <= created + 300);
@@ -424,16 +429,23 @@ async function readAuditPage(access, env, here, result, cursor, fetcher = fetch)
     + `&before=${encodeURIComponent(result.audit.until)}&direction=desc&limit=${AUDIT_PAGE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
   for (const raw of data.result ?? []) {
     const context = raw?.actor?.context;
-    // Views change nothing; "dash" is the person in Cloudflare's dashboard; a sign-in shows as "api".
-    if (raw?.action?.type === "view" || (context !== "oauth" && context !== "api") || raw?.action?.description === "LOGIN") continue;
+    // Views change nothing; "dash" is the person in Cloudflare's dashboard; a sign-in (LOGIN, SSO_LOGIN) shows as
+    // "api", and changes nothing by itself: whatever's done after it is in the log too.
+    if (raw?.action?.type === "view" || (context !== "oauth" && context !== "api") || /^(SSO_)?LOGIN$/.test(raw?.action?.description ?? "")) continue;
     const product = text(raw.resource?.product, 40);
     const e = { time: text(raw.action?.time, 40), type: text(raw.action?.type, 20), description: text(raw.action?.description, 100),
       what: `${product}/${text(raw.resource?.type, 60)}`, resource: text(raw.resource?.id, 100), context };
-    result.audit.count++;
-    if (expected(e, result.script, result.created) || result.audit.unexpected.length >= 40) continue;
+    if (expected(e, result.script, result.created)) { result.audit.count++; continue; } // afterwrd's own
+    // Other Workers and databases in the account: listed, but they don't count against the site. (A Worker connected
+    // to the site's database is a problem, found above; so is anything done to the site's own Worker or database, or
+    // to the account itself, such as its workers.dev name or its tokens.)
+    const elsewhere = (product === "workers" || product === "d1") && e.resource && e.resource !== result.script
+      && e.resource !== result.database && !/subdomain/.test(e.what);
+    const list = elsewhere ? (result.audit.other ??= []) : result.audit.unexpected;
+    if (list.length >= 40) continue;
     // Only Workers' and databases' names are kept: the rest of someone's account is theirs.
     if (product !== "workers" && product !== "d1") e.resource = "";
-    result.audit.unexpected.push(e);
+    list.push(e);
   }
   return { cursor: data.result?.length ? data.result_info?.cursor ?? "" : "" };
 }
@@ -476,8 +488,16 @@ export function resultHtml(r, whose = "theirs", by = null) {
       else if (!a.complete) say(false, a.stopped ? `${Your} account's audit log was too long to read all of, so it isn't checked.` : `Still reading ${your} account's audit log…`);
       if (!odd.length && a.complete) say(true, `Since it was installed, apps and API tokens did only what installing, updating and groups do (${a.count} ${a.count === 1 ? "change" : "changes"}).`);
       if (odd.length) {
-        say(false, `${odd.length === 1 ? "One change" : `${odd.length} changes`} in ${your} Cloudflare account, made through an app or API token, isn't something afterwrd does. Check ${whose === "yours" ? "you" : "they"} recognise ${odd.length === 1 ? "it" : "them"}:`);
-        lines.push(`<ul class="check-files">${odd.map((e) => `<li>${escape(e.time.replace("T", " ").slice(0, 16))} · ${escape(e.description || `${e.type} ${e.what}`)}${e.resource ? ` · ${escape(e.resource)}` : ""} (${e.context === "api" ? "API token" : "app"})</li>`).join("")}</ul>`);
+        say(false, `${odd.length === 1 ? "One change" : `${odd.length} changes`} to ${your} site or ${your} Cloudflare account, made through an app or API token, isn't something afterwrd does. Check ${whose === "yours" ? "you" : "they"} recognise ${odd.length === 1 ? "it" : "them"}:`);
+        lines.push(changeList(odd, r));
+        lines.push(`<p class="meta">“App” is something given access through Cloudflare's sign-in, such as wrangler; “API token” is a token
+          made in the Cloudflare profile.${odd.some((e) => r.database && e.resource === r.database) ? ` Changes to the site's database
+          matter even when the code is genuine: they could, say, add someone else's passkey.` : ""}</p>`);
+      }
+      const other = a.other ?? [];
+      if (other.length) {
+        lines.push(`<details class="check-other"><summary class="meta">${other.length === 1 ? "One change" : `${other.length} changes`} to other things in ${your}
+          account (not ${your} site, so they don't count against it)</summary>${changeList(other, r)}</details>`);
       }
     }
   }
@@ -494,7 +514,21 @@ const MAX_REQUESTS = 50;
  * link, which they send back by message. Safe even from a site that's been tampered with: the friend's site makes
  * the link, for the address it already has for this site, and the link comes back by another way.
  */
+/**
+ * When asking for a check would be too soon: the hour after this version was installed, when the access used for the
+ * install or update could still change the site, so a check can't count yet. Returns the time it's over (seconds),
+ * or 0. (From Cloudflare: when this version was uploaded.)
+ */
+export function tooSoonToCheck(env) {
+  // A local test site always looks freshly installed; tests can say when it was (only with ALLOW_LOCAL_SITES).
+  const stamp = (env.ALLOW_LOCAL_SITES && env.TEST_VERSION_AT) || env.VERSION?.timestamp;
+  const at = Math.floor(Date.parse(stamp ?? "") / 1000);
+  return at && now() < at + HOUR ? at + HOUR : 0;
+}
+
 async function askForCheck(env, connection) {
+  const wait = tooSoonToCheck(env);
+  if (wait) return json({ error: `Your site was updated less than an hour ago. Ask after ${when(wait)}.` }, 409);
   const friend = Number.isInteger(connection) && await env.DB.prepare(`SELECT name, origin, their_key FROM connections WHERE id = ?
     AND connected_at IS NOT NULL AND approved_at IS NOT NULL AND their_key IS NOT NULL`).bind(connection).first();
   if (!friend) return json({ error: "That isn't one of your friends." }, 404);
@@ -579,6 +613,20 @@ export function checkedWords(last) {
   return last.name === null
     ? `You last checked it yourself, on ${day}.`
     : `Last checked by ${last.name}'s site on ${day}${last.version ? ` (afterwrd ${last.version})` : ""}.`;
+}
+
+/** Changes, the same ones together ("Upload Version · afterwrd-install × 6"), newest first. */
+function changeList(changes, r) {
+  const groups = new Map();
+  for (const e of changes) {
+    const key = `${e.description || `${e.type} ${e.what}`}|${e.resource}|${e.context}`;
+    const group = groups.get(key);
+    if (group) { group.n++; if (e.time < group.first) group.first = e.time; } else groups.set(key, { ...e, n: 1, first: e.time });
+  }
+  const day = (t) => escape(t.replace("T", " ").slice(0, 16));
+  return `<ul class="check-files">${[...groups.values()].map((g) => `<li>${g.n > 1 ? `${day(g.first)} to ${day(g.time)}` : day(g.time)} · `
+    + `${escape(g.description || `${g.type} ${g.what}`)}${g.resource ? ` · ${escape(g.resource)}${g.resource === r.database ? " (its database)" : ""}` : ""}`
+    + ` (${g.context === "api" ? "API token" : "app"})${g.n > 1 ? ` × ${g.n}` : ""}</li>`).join("")}</ul>`;
 }
 
 // Changed less than an hour before the check: whoever was given access for the install or update still had it.

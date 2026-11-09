@@ -19,7 +19,7 @@ import { connectedToken, connectLink, tokenFor } from "./cloudflare.js";
 import { api, deployVersion, existingDatabase, findWorker, loadRelease, uploadAssets } from "./deploy.js";
 import { GROUP_RELEASE, isGroupWorker } from "./groupsites.js";
 import { escape, html, json, now } from "./util.js";
-import { checkedWords, lastChecked } from "./checks.js";
+import { checkedWords, lastChecked, tooSoonToCheck } from "./checks.js";
 
 const VERSION = pkg.version;
 const REPO = pkg.afterwrd.releases;
@@ -38,7 +38,7 @@ export async function handleUpdate(request, env, url, owner) {
   if (request.method === "GET" && path === "") {
     return html(updatePage(owner, await latestRelease(env.DB), {
       site: url.host, connected: Boolean(connectedToken(request)), oldToken: Boolean(env.UPDATE_TOKEN), groups: await groupsBehind(env.DB), go: url.searchParams.get("go"),
-      checked: await lastChecked(env.DB),
+      checked: await lastChecked(env.DB), checkWait: tooSoonToCheck(env),
       friends: (await env.DB.prepare(`SELECT id, name FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NOT NULL
         AND their_key IS NOT NULL ORDER BY name COLLATE NOCASE LIMIT 200`).all()).results,
     }));
@@ -213,7 +213,7 @@ function connectPart(connected, back, what) {
 </details>`;
 }
 
-function updatePage(owner, latest, { site, connected, oldToken, groups, go, checked = null, friends = [] }) {
+function updatePage(owner, latest, { site, connected, oldToken, groups, go, checked = null, friends = [], checkWait = 0 }) {
   const available = latest.version && newer(latest.version, VERSION);
   // Groups this site made that are behind it: brought up to this version, with the same connection.
   const groupsPart = groups.length && !available ? `
@@ -296,9 +296,12 @@ ${body}
   <p class="meta">A friend's afterwrd site can check that yours is exactly the published afterwrd, with nothing else done in
   your Cloudflare account. Worth doing when your site is new, and after updates. Ask a friend: they'll send you a link by
   message. Open it and press Allow when Cloudflare asks.</p>
-  ${friends.length ? `<p class="row ask-friends">${friends.map((f) => `<button class="chip" data-ask="${f.id}">Ask ${escape(f.name)}</button>`).join(" ")}</p>
+  ${checkWait ? `<p class="notice" id="check-wait">Your site was updated less than an hour ago. Ask for a check after
+  <b>${escape(new Date(checkWait * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" }))}</b>:
+  for an hour after an update, the access it used could still change your site, so a check before then can't count.</p>` : ""}
+  ${checkWait ? "" : friends.length ? `<p class="row ask-friends">${friends.map((f) => `<button class="chip" data-ask="${f.id}">Ask ${escape(f.name)}</button>`).join(" ")}</p>
   <p id="ask-result" role="status"></p>` : ""}
-  <details id="ask-other"${friends.length ? "" : " open"}>
+  <details id="ask-other"${friends.length ? "" : " open"}${checkWait ? " hidden" : ""}>
   <summary class="meta">${friends.length ? "Someone else, or their site is older? Send them a message instead" : "Ask by message"}</summary>
   <p class="meta">This writes a message for you to send them. Their afterwrd site makes the link to send back.</p>
   <p><button class="chip" id="ask-check">Write the message</button></p>

@@ -238,6 +238,11 @@ const makeLinkAsBob = () => bob.evaluate((id) => fetch("/_admin/checks/new", { m
 await bob.goto(`${B}/`);
 check("a friend's site can't make a check link for someone who didn't ask", (await makeLinkAsBob()) === 409);
 await ann.goto(`${A}/_admin/update`);
+await ann.$eval("#ask-other", (d) => { d.open = true; });
+await ann.click("#ask-check");
+const askMessage = await ann.$eval("#ask-message", (t) => t.value);
+check("for anyone else, Update writes a message naming this site", askMessage.includes("localhost:8787")
+  && askMessage.includes("(or just my address)") && await ann.$eval("#ask-panel", (p) => !p.hidden), askMessage);
 await ann.click(`button[data-ask="${bobId}"]`);
 await ann.waitForFunction(() => document.getElementById("ask-result").textContent, { timeout: 10_000 });
 const asked = await ann.$eval("#ask-result", (p) => p.textContent);

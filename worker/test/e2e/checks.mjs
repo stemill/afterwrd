@@ -42,6 +42,14 @@ const auditFor = (token) => [
   { action: { type: "update", time: "2026-11-07T18:02:30Z", description: "Upload Worker" }, actor: { context: "oauth" }, resource: { product: "workers", type: "scripts", id: "localhost" } },
   { action: { type: "delete", time: "2026-11-07T18:03:00Z", description: "Delete Worker" }, actor: { context: "dash" }, resource: { product: "workers", type: "scripts", id: "mine" } },
   { action: { type: "create", time: "2026-11-07T18:01:30Z", description: "Create Worker Assets Upload Session" }, actor: { context: "oauth" }, resource: { product: "workers", type: "scripts.assets-upload-session", id: "localhost" } },
+  // Someone deploying another Worker in the account by hand (wrangler), twice: listed apart, not against the site.
+  { action: { type: "create", time: "2026-11-07T18:20:00Z", description: "Upload Version" }, actor: { context: "oauth" }, resource: { product: "workers", type: "scripts.versions", id: "afterwrd-install" } },
+  { action: { type: "create", time: "2026-11-07T18:40:00Z", description: "Upload Version" }, actor: { context: "oauth" }, resource: { product: "workers", type: "scripts.versions", id: "afterwrd-install" } },
+  // An update removing the token an older version kept (afterwrd's own), and a sign-in (changes nothing).
+  { action: { type: "delete", time: "2026-11-07T18:30:00Z", description: "Delete Worker script secret" }, actor: { context: "oauth" }, resource: { product: "workers", type: "scripts.secrets", id: "localhost" } },
+  { action: { type: "update", time: "2026-11-07T18:31:00Z", description: "SSO_LOGIN" }, actor: { context: "api" }, resource: { product: "", type: "user" } },
+  ...(token === "tok-tampered" ? [{ action: { type: "create", time: "2026-11-07T19:20:00Z", description: "Query D1 Database" },
+    actor: { context: "oauth" }, resource: { product: "d1", type: "database", id: "x" } }] : []),
   ...(token === "tok-tampered" ? [{ action: { type: "create", time: "2026-11-07T19:00:00Z", description: "Create DNS Record <img src=x onerror=alert(1)>" },
     actor: { context: "oauth" }, resource: { product: "dns", type: "records", id: "secret.example" } },
     { action: { type: "update", time: "2026-11-07T19:05:00Z", description: "Upload Worker" }, actor: { context: "oauth" }, resource: { product: "workers", type: "scripts", id: "someone-else" } }] : []),
@@ -203,7 +211,11 @@ check("the code is swapped with the PKCE secret that matches the challenge", exc
   && b64url(createHash("sha256").update(exchange.code_verifier ?? "").digest()) === good.relay.searchParams.get("challenge"));
 check("a genuine site is reported as exactly the release", good.after.includes("running exactly afterwrd 9.9.9"), good.after.slice(0, 300));
 check("…connected to exactly what afterwrd uses", good.after.includes("connected to exactly what afterwrd uses"), good.after.slice(0, 500));
-check("…and its account as only doing what afterwrd does, over both pages of the log", good.after.includes("did only what installing, updating and groups do (5 changes)"), good.after.slice(0, 600));
+check("…and its account as only doing what afterwrd does, over both pages of the log", good.after.includes("did only what installing, updating and groups do (6 changes)"), good.after.slice(0, 600));
+check("…counting an update removing an old secret as afterwrd's, and skipping sign-ins", !good.after.includes("script secret") && !good.after.includes("SSO_LOGIN")
+  && !good.after.includes("isn't something afterwrd does"), good.after.slice(0, 900));
+check("…and listing other Workers' changes apart, grouped, without counting them against the site", good.after.includes("2 changes to other things in your account")
+  && good.after.includes("Upload Version · afterwrd-install (app) × 2") && good.after.includes("2026-11-07 18:20 to 2026-11-07 18:40"), good.after.slice(0, 1200));
 check("the audit log is read newest first, page by page", audits.some((a) => a.direction === "desc" && a.cursor === "page-3"));
 check("the result names the Worker and the end of the account id, not the account's name", good.after.includes("Worker localhost") && good.after.includes("abcdef")
   && !good.after.includes("someone@example.com"));
@@ -215,12 +227,12 @@ const again = await fetch(`${good.checkLink}/start`, { method: "POST", headers: 
 check("a used link can't start another check", again.status === 409);
 
 // --- asking for a check, by message ---------------------------------------------------------------------------
+// This site has only just been installed (as a local site always looks): asking is held back for the hour.
 await owner.goto(`${BASE}/_admin/update`);
-await owner.$eval("#ask-other", (d) => { d.open = true; });
-await owner.click("#ask-check");
-const ask = await owner.$eval("#ask-message", (t) => t.value);
-check("\"Ask a friend to check my site\" on the Update page writes a message naming this site", ask.includes("localhost:8787")
-  && ask.includes("Make a check link") && await owner.$eval("#ask-panel", (p) => !p.hidden), ask);
+const wait = await owner.$eval("#check-wait", (p) => p.textContent.replace(/\s+/g, " ")).catch(() => "");
+check("for an hour after an update, Update says a check can't count yet, and offers no way to ask", wait.includes("updated less than an hour ago")
+  && (await owner.$$("button[data-ask]")).length === 0 && await owner.$eval("#ask-other", (d) => d.hidden), wait);
+check("…and the site won't send a request then either", (await asOwner("/_admin/checks/ask", { connection: 1 })).status === 409);
 await owner.goto(`${BASE}/friend`);
 check("Friends has the checker's side only", (await owner.$("#ask-check")) === null && (await owner.$("#check-site")) !== null
   && !(await owner.$eval("main", (m) => m.textContent)).includes("Check their site"));
@@ -240,6 +252,8 @@ const toldBeforeBad = toldChecked.length;
 const bad = await runCheck("tampered");
 check("a site whose check finds problems isn't told it was checked", toldChecked.length === toldBeforeBad);
 check("tampered code is reported", bad.after.includes("is not the published afterwrd 9.9.9") && bad.after.includes("index.js: different"), bad.after.slice(0, 300));
+check("a query on the site's own database is flagged, saying why it matters", bad.after.includes("Query D1 Database · x (its database) (app)")
+  && bad.after.includes("add someone else's passkey"), bad.after.slice(0, 1500));
 check("…and changes afterwrd doesn't make, escaped", bad.after.includes("Create DNS Record <img src=x onerror=alert(1)>") && bad.after.includes("someone-else")
   && (await bad.friend.$$("main img")).length === 0, bad.after.slice(0, 900));
 check("…without keeping the names of other things in their account", !bad.after.includes("secret.example"));

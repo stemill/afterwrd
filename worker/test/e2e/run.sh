@@ -83,7 +83,7 @@ three_sites() { # $1: the suite, run against three sites, each with its own data
     if [ "$name" = G ]; then mode="--var GROUP_KEY:local-test-group-key"; fi
     rm -rf "$OUT/state$name"
     (cd "$WORKER" && "$WRANGLER" dev --name "afterwrd-$port" --port "$port" --ip 127.0.0.1 --inspector-port $((port + 500)) \
-      --persist-to "$OUT/state$name" $mode --var ALLOW_LOCAL_SITES:1 > "$OUT/dev$port.log" 2>&1 &)
+      --persist-to "$OUT/state$name" $mode --var ALLOW_LOCAL_SITES:1 --var TEST_VERSION_AT:2026-01-01T00:00:00Z > "$OUT/dev$port.log" 2>&1 &)
   done
   wait_for 8787 && wait_for 8788 && wait_for 8789 && { [ "${2:-}" != group ] || wait_for 8790; }
   suite "$1" "$OUT/fake-export.zip" "$PHOTOS" "$OUT/stateA" "$OUT/stateB" "$OUT/stateC" "$OUT/stateG"
