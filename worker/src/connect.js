@@ -25,6 +25,7 @@ import { loadMembers } from "./membership.js";
 import { asset, FAVICON, ownerHeader } from "./nav.js";
 import { connectLinkPage, messagePage } from "./pages.js";
 import { callSite, host, KEY_RE, ownerName, siteOrigin } from "./peers.js";
+import { lastChecked } from "./checks.js";
 import { escape, html, json, now, randomToken, sha256 } from "./util.js";
 
 // A friend link lasts 30 days, enough for someone new to set up their own site first (and wait for Facebook's
@@ -234,7 +235,7 @@ export async function handleConnections(request, env, url) {
   if (request.method === "GET" && path === "") {
     const { results } = await db.prepare(`SELECT * FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NOT NULL
       ORDER BY name COLLATE NOCASE`).all();
-    return html(connectionsPage(results));
+    return html(connectionsPage(results, !(await lastChecked(db))));
   }
   if (path === "/new") {
     const target = parseLink(url.searchParams.get("link") ?? "", url, env);
@@ -501,7 +502,7 @@ const POST_SCRIPT = `
   }
   const error = document.getElementById("error");`;
 
-function connectionsPage(connections) {
+function connectionsPage(connections, unchecked = false) {
   return shell("Add a friend", `
 <p class="crumbs"><a href="/friend">Friends</a> /</p>
 <h1>Add a friend</h1>
@@ -509,6 +510,8 @@ function connectionsPage(connections) {
 them how to set one up first. Once you're friends, you'll each see the other's new posts on <a href="/">Home</a>, and
 can read each other's posts and photos (everything you've published) on your own site. Your comments are kept on
 their site. Removing a friend ends all of it at once.</p>
+${unchecked ? `<p class="meta" id="unchecked">Your site hasn't been checked yet. Once a friend with afterwrd is here, it's worth
+<a href="/_admin/update#check">asking them to check it</a>, before you invite many others.</p>` : ""}
 
 <div class="actions-row">
   <button class="chip primary" id="make">Make a friend link</button>

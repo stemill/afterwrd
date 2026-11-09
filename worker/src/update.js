@@ -19,6 +19,7 @@ import { connectedToken, connectLink, tokenFor } from "./cloudflare.js";
 import { api, deployVersion, existingDatabase, findWorker, loadRelease, uploadAssets } from "./deploy.js";
 import { GROUP_RELEASE, isGroupWorker } from "./groupsites.js";
 import { escape, html, json, now } from "./util.js";
+import { checkedWords, lastChecked } from "./checks.js";
 
 const VERSION = pkg.version;
 const REPO = pkg.afterwrd.releases;
@@ -36,6 +37,7 @@ export async function handleUpdate(request, env, url, owner) {
   if (request.method === "GET" && path === "") {
     return html(updatePage(owner, await latestRelease(env.DB), {
       site: url.host, connected: Boolean(connectedToken(request)), oldToken: Boolean(env.UPDATE_TOKEN), groups: await groupsBehind(env.DB), go: url.searchParams.get("go"),
+      checked: await lastChecked(env.DB),
     }));
   }
   if (request.method === "GET" && path === "/version") return json({ version: VERSION });
@@ -204,7 +206,7 @@ function connectPart(connected, back, what) {
 </details>`;
 }
 
-function updatePage(owner, latest, { site, connected, oldToken, groups, go }) {
+function updatePage(owner, latest, { site, connected, oldToken, groups, go, checked = null }) {
   const available = latest.version && newer(latest.version, VERSION);
   // Groups this site made that are behind it: brought up to this version, with the same connection.
   const groupsPart = groups.length && !available ? `
@@ -283,11 +285,14 @@ ${ownerHeader("update")}
 ${body}
 <section class="card" id="check">
   <h2>Ask a friend to check your site</h2>
+  <p id="last-checked">${checked ? escape(checkedWords(checked)) : "Your site hasn't been checked yet."}</p>
   <p class="meta">A friend's afterwrd site can check that yours is exactly the published afterwrd, with nothing else done in
   your Cloudflare account. Worth doing when your site is new, and after updates. This writes a message for you to send
   them however you usually would: your site doesn't contact anyone, so a site that had been tampered with couldn't fake
   the check.</p>
   <p><button class="chip" id="ask-check">Ask a friend to check my site</button></p>
+  <form method="post" action="/_admin/checks/myself?back=update" class="meta">Or <a href="https://afterwrd.app/check/">check it
+    yourself</a>, and then <button class="link">say you've checked it</button>.</form>
   <div id="ask-panel" hidden>
     <textarea id="ask-message" readonly rows="5" aria-label="Message asking for a check">Could you check that my afterwrd site is genuine? It's at ${escape(site)}. On your afterwrd site, go to Friends, paste this message under "Checking a friend's site", press "Make a check link", and send me the link it makes. Thank you!</textarea>
     <p class="row"><button class="chip primary" id="ask-copy">Copy message</button>

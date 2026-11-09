@@ -286,7 +286,7 @@ How the receiver handles the key:
 
 Where an endpoint takes `page`, it is an integer clamped to between 1 and 10,000. Anything else counts as 1.
 
-Source: `src/peers.js:1-16`, `src/peers.js:100-170`.
+Source: `src/peers.js:1-17`, `src/peers.js:100-175`, `src/checks.js` (`tellChecked`, `receiveChecked`).
 
 ### 5.1 `GET /_peer/hello?from=<origin>`
 
@@ -460,6 +460,19 @@ The caller's owner introduces the owner here to someone else, who is told the sa
 - If the receiver is already connected with `origin`, has declined it (4.4), or already holds this friend's introduction to it, nothing changes, and the answer is still `200 {"ok": true}`.
 - Otherwise the receiver keeps it and shows it to its owner, led by the address, who may ask to be friends (4.4) or dismiss it. Introductions go when acted on, after 60 days, or when the introducing friend is disconnected.
 - Limits: 20 a day from one friend, 20 kept from one friend, and 100 kept in all. Beyond them: `429`.
+
+### 5.12 `POST /_peer/checked` (afterwrd 0.34.0)
+
+The caller's site has just checked the receiver's (a read-only look at its Cloudflare account, at the receiver's owner's invitation) and found it exactly a published release, with nothing else done in the account:
+
+```
+{"type": "Checked", "site": "https://afterwrd.ann.workers.dev", "version": "0.34.0"}
+```
+
+- Sent once, after a check that found nothing wrong, and only to a friend's site; a check that found problems sends nothing. The caller doesn't retry: a site that can't be reached just isn't told.
+- `site` must be the receiver's own origin, or the answer is `400 {"error": "That isn't a check of this site."}`. `version` is the release the code matched; anything that isn't `x.y.z` is dropped.
+- The receiver keeps who checked it (the caller's name, as it has it) and when, at most one an hour from one caller (more still answer `200`), and the newest 10 such records. It's the friend's word: it only changes what the receiver suggests to its owner (no longer suggesting a check) and shows on its Update page. Answer: `200 {"ok": true}`.
+- Older sites answer `404`, which the caller ignores.
 
 ## 6. Objects
 

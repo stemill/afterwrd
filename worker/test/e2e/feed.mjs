@@ -468,7 +468,11 @@ check("Home asks at most 40 sites, Cara first as she's posted lately",
 const notices = await ann.$$eval("p.notice", (l) => l.map((p) => p.textContent));
 const reachNotices = notices.filter((n) => /Couldn't (reach|load)/.test(n));
 check("sites that can't be reached are summed up in one line", reachNotices.length === 1 && /Couldn't reach 39 friends' sites/.test(reachNotices[0]), notices.join(" | "));
-check("a site in its first week suggests getting it checked", notices.some((n) => n.startsWith("Your site is new") && n.includes("check it yourself")));
+const checkNotice = await ann.$eval("form.checked-notice", (f) => f.textContent.replace(/\s+/g, " ")).catch(() => "");
+check("a site nobody has checked suggests getting it checked", checkNotice.startsWith("Your site hasn't been checked yet") && checkNotice.includes("check it yourself"), checkNotice);
+await Promise.all([ann.waitForNavigation(), ann.click("form.checked-notice button.link")]);
+check("…until the owner says they've checked it themselves", new URL(ann.url()).pathname === "/" && (await ann.$("form.checked-notice")) === null
+  && sql(stateA, "SELECT COUNT(*) AS n FROM checked WHERE connection_id IS NULL")[0].n === 1);
 check("the friends column shows a dozen, then a link to the rest", (await ann.$$(".mini-friends li")).length === 12
   && (await ann.$eval('aside.side a[href="/friend"]', (a) => a.textContent).catch(() => "")) === "All 46 friends");
 sql(stateA, "DELETE FROM connections WHERE id < 0");

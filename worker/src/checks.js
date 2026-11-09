@@ -5,6 +5,7 @@
 //
 //   POST /_admin/checks/new {connection?}  the owner makes a one-time link (for a friend, or anyone they send it to)
 //   POST /_admin/checks/<id>/delete        forget a check
+//   POST /_admin/checks/myself?back=       the owner checked their own site (a form on Home and Update)
 //   GET  /_check/<token>                   the friend's page: what will happen, their site's address, the result
 //   POST /_check/<token>/start {site}      a PKCE secret in a short cookie; back comes the relay link
 //   GET  /_check/done                      back from Cloudflare via the relay, which asked only for read-only access
@@ -25,11 +26,13 @@
 //     in, must get the sign-in redirect the code gives, not the file from Cloudflare directly);
 //   - what apps (OAuth) and API tokens did in the account since the Worker was made, marking what afterwrd doesn't do.
 // The code carries the hash of every static file (src/static.js), so with the above it covers the whole site.
+// A check that passes is then told to the site checked, if it's a friend's (POST /_peer/checked): it's a snapshot,
+// so that site shows who checked it last, and stops suggesting a check.
 import pkg from "../package.json";
 import { CODE_RE, donePage, exchangeCode, readCookie, relayLink, testingHere, withCookie } from "./cloudflare.js";
 import { API } from "./deploy.js";
 import { checkLinkPage, messagePage } from "./pages.js";
-import { ownerName, siteOrigin } from "./peers.js";
+import { callSite, ownerName, siteOrigin } from "./peers.js";
 import { knownLatest, newer } from "./update.js";
 import { escape, html, json, now, randomToken, sha256 } from "./util.js";
 
@@ -52,6 +55,12 @@ const SECRETS = new Set(["SETUP_CODE", "UPDATE_TOKEN"]);
 
 export async function handleCheckAdmin(request, env, url) {
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
+  // The owner checked their own site (afterwrd.app/check/): a form on Home and Update. Their word for it.
+  if (url.pathname === "/_admin/checks/myself") {
+    await keepChecked(env.DB, null, null, null);
+    const back = url.searchParams.get("back") === "update" ? "/_admin/update#check" : "/";
+    return Response.redirect(`${url.origin}${back}`, 303);
+  }
   const body = await request.json().catch(() => ({}));
   if (url.pathname === "/_admin/checks/new") {
     // For a friend (from their card), for a site whose address (or whole "please check" message) was pasted, or,
@@ -193,8 +202,9 @@ async function auditStep(request, env, url, body) {
   if (!result?.audit || result.audit.complete || result.audit.stopped) return withCookie(json({ error: "This check has finished or expired." }, 400), clearRun);
   const done = async (how) => {
     result.audit[how] = true;
-    await env.DB.prepare("UPDATE site_checks SET result = ?, checked_at = ? WHERE id = ? AND checked_at IS NULL")
+    const marked = await env.DB.prepare("UPDATE site_checks SET result = ?, checked_at = ? WHERE id = ? AND checked_at IS NULL")
       .bind(JSON.stringify(result), now(), check.id).run();
+    if (marked.meta.changes) await tellChecked(env, check.site, result);
     return withCookie(json({ done: true }), clearRun);
   };
   if (body.stop === true) return done("stopped"); // the page gave up (too many pages): it says the log wasn't all read
@@ -455,6 +465,56 @@ export function resultHtml(r, whose = "theirs", by = null) {
   }
   lines.push(`<p class="meta">Checked ${escape(when(r.checkedAt))}, read-only. The access Cloudflare gave was used for this check and not kept.</p>`);
   return lines.join("\n");
+}
+
+// --- telling a friend's site it was checked, and hearing it -------------------------------------------------------
+
+/**
+ * After a check that found nothing wrong, a friend's site is told it was checked: it stops suggesting a check on
+ * Home, and says on Update who checked it last. Only a pass is sent (the person saw the result either way), only
+ * to a friend, and only once. Best effort: a site that can't be reached just isn't told.
+ */
+async function tellChecked(env, site, result) {
+  if (!site || verdict(result) !== "all good") return;
+  const friend = await env.DB.prepare(`SELECT origin, their_key FROM connections WHERE origin = ? AND connected_at IS NOT NULL
+    AND approved_at IS NOT NULL AND their_key IS NOT NULL`).bind(site).first();
+  if (!friend) return;
+  await callSite(friend.origin, "/_peer/checked", { key: friend.their_key, timeout: 5000,
+    body: { type: "Checked", site: friend.origin, version: result.version } }).catch(() => {});
+}
+
+/**
+ * A friend's site saying it checked this one and found it genuine (POST /_peer/checked). Returns [body, status].
+ * It's their word, as a friend: it only changes what this site suggests to its owner, and says who it came from.
+ */
+export async function receiveChecked(env, url, peer, body) {
+  if (body?.type !== "Checked" || body.site !== url.origin) return [{ error: "That isn't a check of this site." }, 400];
+  const version = typeof body.version === "string" && /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(body.version) ? body.version : null;
+  // At most once an hour from one friend (a real check takes a while, and each is told once), so a site saying it
+  // over and over can't wear out this one's database.
+  await keepChecked(env.DB, peer.id, peer.name, version);
+  return [{ ok: true }, 200];
+}
+
+async function keepChecked(db, connectionId, name, version) {
+  const at = now();
+  await db.batch([
+    db.prepare(`INSERT INTO checked (connection_id, name, version, checked_at) SELECT ?1, ?2, ?3, ?4
+      WHERE ?1 IS NULL OR NOT EXISTS (SELECT 1 FROM checked WHERE connection_id = ?1 AND checked_at > ?4 - 3600)`)
+      .bind(connectionId, name, version, at),
+    db.prepare("DELETE FROM checked WHERE id NOT IN (SELECT id FROM checked ORDER BY id DESC LIMIT 10)"),
+  ]);
+}
+
+/** This site's newest check, as { name (null: the owner's own), version, checked_at }, or null if it's never been checked. */
+export const lastChecked = (db) => db.prepare("SELECT name, version, checked_at FROM checked ORDER BY id DESC LIMIT 1").first();
+
+/** "Last checked by Sam Taylor's site on 9 Nov 2026 (afterwrd 0.34.0)." or "You last checked it yourself on …". */
+export function checkedWords(last) {
+  const day = new Date(last.checked_at * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Europe/London" });
+  return last.name === null
+    ? `You last checked it yourself, on ${day}.`
+    : `Last checked by ${last.name}'s site on ${day}${last.version ? ` (afterwrd ${last.version})` : ""}.`;
 }
 
 // Changed less than an hour before the check: whoever was given access for the install or update still had it.

@@ -110,7 +110,13 @@ const direct = createServer((req, res) => {
   if (req.url === "/_version") { res.setHeader("Content-Type", "application/json"); return res.end(JSON.stringify({ id: "v-1" })); }
   res.statusCode = req.url.startsWith("/static/") ? 200 : 404; res.end();
 });
+const toldChecked = []; // what this site told the friend's site after its checks (POST /_peer/checked)
 const friendSite = createServer((req, res) => {
+  if (req.method === "POST" && req.url === "/_peer/checked") {
+    let body = "";
+    req.on("data", (c) => { body += c; });
+    return req.on("end", () => { toldChecked.push({ auth: req.headers.authorization, body: JSON.parse(body) }); res.setHeader("Content-Type", "application/json"); res.end("{}"); });
+  }
   if (req.url === "/_version") { res.setHeader("Content-Type", "application/json"); return res.end(JSON.stringify({ id: "v-1" })); }
   res.statusCode = 302; res.setHeader("Location", "/_auth/login"); res.end();
 });
@@ -171,8 +177,23 @@ async function runCheck(code, site = FRIEND_SITE, fixed = false) {
   return { checkLink, message, before, relay, friend, after };
 }
 
+// --- before any check: Home, Add a friend and Update suggest one ---------------------------------------------------
+const textOf = async (path, selector = "main") => { await owner.goto(BASE + path); return owner.$eval(selector, (m) => m.textContent.replace(/\s+/g, " ")); };
+check("an unchecked site suggests a check on Home", (await textOf("/")).includes("Your site hasn't been checked yet"));
+check("…and on Add a friend", (await textOf("/_admin/connections")).includes("hasn't been checked yet"));
+check("…and Update says it hasn't been", (await textOf("/_admin/update", "#last-checked")) === "Your site hasn't been checked yet.");
+
+// The site being checked is a friend's: once a check passes, its site is told (and only then).
+const THEIR_KEY = "k".repeat(43); // what this site sends when calling theirs
+const OUR_KEY = "o".repeat(43); // what theirs sends when calling this one
+sql(`INSERT INTO connections (origin, name, their_key, key_hash, created_at, connected_at, approved_at)
+  VALUES ('${FRIEND_SITE}', 'Bob Example', '${THEIR_KEY}', '${sha(OUR_KEY)}', 1, 1, 1)`);
+
 // --- a genuine site ----------------------------------------------------------------------------------------------
 const good = await runCheck("match");
+check("a friend's site that passes is told it was checked, with this site's key for it", toldChecked.length === 1
+  && toldChecked[0].auth === `Bearer ${THEIR_KEY}` && JSON.stringify(toldChecked[0].body) === JSON.stringify({ type: "Checked", site: FRIEND_SITE, version: "9.9.9" }),
+  JSON.stringify(toldChecked));
 check("the owner's message carries a one-time check link", /\/_check\/[\w-]{43}$/.test(good.checkLink) && good.message.includes("read-only"));
 check("the friend's page says what will happen, without signing in", good.before.includes("Ann Example would like to check your site") && good.before.includes("can't change anything"));
 check("the site sends the friend to the relay, to come back to /_check/done", good.relay.searchParams.get("to") === `${BASE}/_check/done`
@@ -214,7 +235,9 @@ const fixedRun = await runCheck("match", FRIEND_SITE, true);
 check("a check through a link made for a site runs on that site", fixedRun.after.includes("running exactly afterwrd 9.9.9"), fixedRun.after.slice(0, 200));
 
 // --- a tampered site, with other things done in the account -------------------------------------------------------
+const toldBeforeBad = toldChecked.length;
 const bad = await runCheck("tampered");
+check("a site whose check finds problems isn't told it was checked", toldChecked.length === toldBeforeBad);
 check("tampered code is reported", bad.after.includes("is not the published afterwrd 9.9.9") && bad.after.includes("index.js: different"), bad.after.slice(0, 300));
 check("…and changes afterwrd doesn't make, escaped", bad.after.includes("Create DNS Record <img src=x onerror=alert(1)>") && bad.after.includes("someone-else")
   && (await bad.friend.$$("main img")).length === 0, bad.after.slice(0, 900));
@@ -290,6 +313,24 @@ check("only workers.dev addresses (or this computer, in tests) can be checked", 
 check("finishing without the start cookie is refused", (await fetch(`${BASE}/_check/finish`, { method: "POST",
   headers: { Origin: BASE, "Content-Type": "application/json" }, body: JSON.stringify({ code: "match.one-time-code", state: "x".repeat(32) }) })).status === 400);
 check("a made-up link says so", (await fetch(`${BASE}/_check/${"a".repeat(43)}`)).status === 404);
+
+
+// --- this site being told it was checked -------------------------------------------------------------------------
+const tell = (body, key = OUR_KEY) => fetch(`${BASE}/_peer/checked`, { method: "POST",
+  headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+check("only a friend can say they checked this site", (await tell({ type: "Checked", site: BASE, version: "9.9.9" }, "x".repeat(43))).status === 401);
+check("…and only of this site", (await tell({ type: "Checked", site: "http://localhost:8789", version: "9.9.9" })).status === 400
+  && (await textOf("/")).includes("hasn't been checked yet"));
+check("a friend's site saying it checked this one is kept", (await tell({ type: "Checked", site: BASE, version: "9.9.9" })).status === 200);
+check("…and Home stops suggesting a check", !(await textOf("/")).includes("hasn't been checked yet"));
+check("…as does Add a friend", !(await textOf("/_admin/connections")).includes("hasn't been checked yet"));
+const lastLine = await textOf("/_admin/update", "#last-checked");
+check("…and Update says who checked it last, and when", /^Last checked by Bob Example's site on \d{1,2} \w{3} \d{4} \(afterwrd 9\.9\.9\)\.$/.test(lastLine), lastLine);
+await Promise.all([owner.waitForNavigation(), owner.click("#check form button.link")]);
+const mine = await owner.$eval("#last-checked", (p) => p.textContent);
+check("the owner can say they checked it themselves, from Update", owner.url().endsWith("/_admin/update#check")
+  && /^You last checked it yourself, on \d{1,2} \w{3} \d{4}\.$/.test(mine), mine);
+check("another site can't say the owner checked it", (await asOwner("/_admin/checks/myself", {}, "https://evil.example")).status === 403);
 
 check("no script errors", errors.length === 0, errors.join(" | "));
 await browser.close();

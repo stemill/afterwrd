@@ -13,7 +13,7 @@ import { ownerName } from "../peers.js";
 import { SITE_ID } from "../posts.js";
 import { profilePictures } from "../photos.js";
 import { newDevices } from "../admin.js";
-import { recentChecks } from "../checks.js";
+import { lastChecked, recentChecks } from "../checks.js";
 import { securityFixWaiting, waitingRelease } from "../update.js";
 import { now } from "../util.js";
 import { fmtDate, fmtMonth } from "./format.js";
@@ -451,8 +451,6 @@ async function activity(ctx, params) {
   return views.activityPage(ctx, { items, paging });
 }
 
-const NEW_SITE_SECONDS = 7 * 86400;
-
 // Introductions from friends still here, to people the owner isn't connected with (or asking) yet (connect.js).
 const INTRODUCTION_DAYS = 60;
 const INTRODUCTIONS_SQL = `SELECT i.id, i.origin, i.name, i.note, c.name AS by_name FROM introductions i
@@ -468,8 +466,8 @@ async function home(ctx, params) {
   return views.homePage(ctx, {
     own, feed: friendsFeed, onThisDay: await onThisDay(ctx, 2), friends: friendsFeed.connections,
     newDevices: await newDevices(db, ctx.user), securityFix: await securityFixWaiting(db),
-    // For its first week, a new site suggests getting it checked (this used to be on the installer's last page).
-    newSite: now() - (ctx.user.created_at ?? 0) < NEW_SITE_SECONDS,
+    // Until it's been checked (by a friend's site, or the owner themselves: checks.js), Home suggests a check.
+    unchecked: !(await lastChecked(db)),
     // Someone asking to be friends: approved (or not) from Home in one tap, as well as from Friends.
     asking: await all(db, `SELECT id, origin, name, invited_as, via_kind, via_name FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL
       ORDER BY connected_at DESC LIMIT 3`),
