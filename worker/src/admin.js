@@ -184,7 +184,9 @@ link here and open it on that device: it works once, for an hour, and gives owne
   };
   document.querySelector("main").addEventListener("click", async (e) => {
     const button = e.target.closest("button[data-action]");
-    if (!button || (confirmations[button.dataset.action] && !confirm(confirmations[button.dataset.action]))) return;
+    if (!button) return;
+    const ask = confirmations[button.dataset.action];
+    if (ask && !(await askFirst(ask, { ok: button.dataset.action === "sign-out" ? "Sign out" : "Remove" }))) return;
     try {
       await post("/_admin/devices/" + button.dataset.action, { credential: button.dataset.credential });
       location.assign(button.dataset.action === "sign-out" ? "/_auth/login" : "/_admin");

@@ -135,7 +135,7 @@ function thread(ctx, key, comments) {
     <div class="bubble"><strong>${c.name}</strong>${c.origin && c.origin !== "site" && html`<span class="from">${host(c.origin)}</span>`}<span class="said">${linkify(c.text)}</span></div>
     <div class="under">
       <time title="${fmtDatetime(c.created_at)}">${fmtAgo(c.created_at)}</time>
-      ${html`<form method="post" action="/_comments/${c.id}/delete" onsubmit="return confirm('Delete this comment?')">
+      ${html`<form method="post" action="/_comments/${c.id}/delete" data-confirm="Delete this comment?" data-confirm-ok="Delete">
         <input type="hidden" name="back" value="${back}"><button>Delete</button>
       </form>`}
     </div>
@@ -167,7 +167,7 @@ function postCard(ctx, p) {
     ${p.thread ? html`<a class="when" href="/posts/${p.key}" title="${fmtDatetime(p.timestamp)}"><time>${fmtAgo(p.timestamp)}</time></a>`
       : html`<time title="${fmtDatetime(p.timestamp)}">${fmtAgo(p.timestamp)}</time>`}
     ${p.thread && html`<form method="post" action="/_admin/posts/${p.id}/delete"
-      onsubmit="return confirm('Delete this post, its photos and its comments? This can’t be undone.')"><button class="delete">Delete</button></form>`}
+      data-confirm="Delete this post, its photos and its comments? This can’t be undone." data-confirm-ok="Delete"><button class="delete">Delete</button></form>`}
   </header>
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
   ${collage(p.media)}
@@ -185,7 +185,7 @@ function postCard(ctx, p) {
     ${p.thread ? html`<a class="when" href="/posts/${p.key}" title="Link to this post"><time>${fmtDatetime(p.timestamp)}</time></a>`
       : html`<time>${fmtDatetime(p.timestamp)}</time>`}
     ${p.id >= SITE_ID && p.thread && html`<form method="post" action="/_admin/posts/${p.id}/delete"
-      onsubmit="return confirm('Delete this post, its photos and its comments? This can’t be undone.')"><button class="delete">Delete</button></form>`}
+      data-confirm="Delete this post, its photos and its comments? This can’t be undone." data-confirm-ok="Delete"><button class="delete">Delete</button></form>`}
   </header>
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
   ${collage(p.media)}
@@ -248,7 +248,7 @@ function options(values, selected, label = null) {
 }
 
 function yearSelect(years, year, label = "All years") {
-  return html`<select name="year" onchange="this.form.submit()">
+  return html`<select name="year" onchange="this.form.submit()" data-search="Type a year" aria-label="Year">
   <option value="">${label}</option>
   ${options(years, year)}
 </select>`;
@@ -480,7 +480,7 @@ export function albumPage(ctx, { key, title, info, stats, groups, paging }) {
       </form>
     </details>
     <form method="post" action="/_admin/albums/${key}/delete"
-      onsubmit="return confirm('Delete this album and its photos? Photos that are also in a post stay, under Posted on afterwrd.')">
+      data-confirm="Delete this album and its photos? Photos that are also in a post stay, under Posted on afterwrd." data-confirm-ok="Delete">
       <button class="chip danger">Delete album</button>
     </form>
   </div>`}
@@ -542,7 +542,7 @@ export function photoPage(ctx, { m, setKey, setTitle, prev, next, index, total, 
         <button class="chip">${role === "profile" ? "Make profile picture" : "Make cover"}</button>
       </form>`)}
       ${m.id >= SITE_ID && html`<form method="post" action="/_admin/photos/${m.id}/delete"
-        onsubmit="return confirm('Delete this photo and its comments? This can’t be undone.')"><button class="chip danger">Delete photo</button></form>`}
+        data-confirm="Delete this photo and its comments? This can’t be undone." data-confirm-ok="Delete"><button class="chip danger">Delete photo</button></form>`}
     </div>`}
     ${key && html`<h2>Comments</h2>${thread(ctx, key, comments)}`}
     ${post && html`<h2>Posted with</h2>${postCard(ctx, post)}`}
@@ -722,7 +722,7 @@ function remoteThread(ctx, c, target, comments) {
     <div class="bubble"><strong>${r.mine ? ctx.user.name : r.name}</strong>${!r.mine && r.from && html`<span class="from">${host(r.from)}</span>`}<span class="said">${linkify(r.text)}</span></div>
     <div class="under">
       <time title="${fmtDatetime(r.created_at)}">${fmtAgo(r.created_at)}</time>
-      ${r.mine && html`<form method="post" action="/_feed/comments/${c.id}/${r.id}/delete" onsubmit="return confirm('Delete this comment?')">
+      ${r.mine && html`<form method="post" action="/_feed/comments/${c.id}/${r.id}/delete" data-confirm="Delete this comment?" data-confirm-ok="Delete">
         <input type="hidden" name="back" value="${back}"><button>Delete</button>
       </form>`}
     </div>
@@ -805,7 +805,8 @@ export function friendsIndexPage(ctx, { friends, facebook, requests = [], introd
   <h1>Friends</h1>
   <a class="chip primary" href="/_admin/connections">${raw(icon("connections"))}<span>Add a friend</span></a>
 </div>
-<p class="meta">Only you see this page.</p>
+<p class="meta">Only you see this page.${friends.filter((f) => f.reached_at).length >= 3
+  ? html` <a href="/_admin/connections/together">Introduce friends to each other</a>.` : ""}</p>
 
 ${requests.length > 0 && html`
 <h2>Asking to be friends</h2>
@@ -819,7 +820,7 @@ so check the address is one you expect; if not, decline.</p>
       ${r.invited_as && r.invited_as.toLowerCase() !== r.name.toLowerCase() && html`<strong class="warn">That's not the name you invited.</strong>`}</p>
     <form method="post" class="fb-link">
       <button class="chip primary" formaction="/_admin/connections/${r.id}/approve">Approve</button>
-      <button class="chip danger" formaction="/_admin/connections/${r.id}/decline" onclick="return confirm('Decline? Their site will be told no.')">Decline</button>
+      <button class="chip danger" formaction="/_admin/connections/${r.id}/decline" data-confirm="Decline? Their site will be told no." data-confirm-ok="Decline">Decline</button>
     </form>
   </li>`)}
 </ul>`}
@@ -986,8 +987,8 @@ ${facebook.length > 0 && html`
 /** Remove a friend: both sites forget each other (connect.js). `look` is the button's class. */
 function removeFriend(c, look) {
   return html`<form method="post" action="/_admin/connections/${c.id}/disconnect" class="inline"
-    data-ask="Remove ${c.name} as a friend? You'll stop seeing each other's posts and photos. Comments already made stay where they are."
-    onsubmit="return confirm(this.dataset.ask)"><button class="${look}">Remove friend</button></form>`;
+    data-confirm="Remove ${c.name} as a friend? You'll stop seeing each other's posts and photos. Comments already made stay where they are."
+    data-confirm-ok="Remove"><button class="${look}">Remove friend</button></form>`;
 }
 
 /** Why a friend's site isn't being heard from, once it's gone quiet (feed.js), or null. */
@@ -1109,6 +1110,23 @@ export function groupsIndexPage(ctx, { groups, unfinished = [], plans = [], conn
   <h1>Groups</h1>
   <a class="chip primary" href="/groups/new">${raw(icon("groups"))}<span>Start a group</span></a>
 </div>
+<form class="filters" id="join" action="/groups/join" method="get">
+  <input type="search" name="link" placeholder="Got a link to join a group? Paste it here" required autocomplete="off" aria-label="A group's invite link">
+  <button type="button" class="chip" id="join-paste" hidden>Paste</button>
+  <button>Join</button>
+</form>
+<script>
+  // Paste in one tap where the browser allows reading what was copied (it may ask first).
+  const joinPaste = document.getElementById("join-paste");
+  if (navigator.clipboard?.readText) {
+    joinPaste.hidden = false;
+    joinPaste.addEventListener("click", async () => {
+      const box = document.querySelector("#join input[name=link]");
+      try { box.value = (await navigator.clipboard.readText()).trim(); } catch { box.focus(); return; }
+      if (box.value) document.getElementById("join").requestSubmit();
+    });
+  }
+</script>
 <p class="meta">Each group is its own small site, in the Cloudflare account of whoever started it. Its members read it
 from their own sites, and post and comment there. You're told about comments on posts you wrote or commented on; for
 anything else, open the group.</p>
@@ -1145,7 +1163,7 @@ ${unfinished.length > 0 && html`<section class="card" id="unfinished">
 <script>${raw(STEP_SCRIPT)}
   document.getElementById("unfinished").addEventListener("click", async (e) => {
     const button = e.target.closest("button[data-finish], button[data-delete]");
-    if (!button || (button.dataset.delete && !confirm("Delete this group's Worker and database from your Cloudflare account?"))) return;
+    if (!button || (button.dataset.delete && !(await askFirst("Delete this group's Worker and database from your Cloudflare account?", { ok: "Delete" })))) return;
     button.disabled = true;
     error.textContent = "";
     try {
@@ -1165,11 +1183,7 @@ ${unfinished.length > 0 && html`<section class="card" id="unfinished">
       button.disabled = false;
     }
   });
-</script>`}
-<form class="filters" action="/groups/join" method="get">
-  <input type="search" name="link" placeholder="Got an invite to a group? Paste the link here" required autocomplete="off">
-  <button>Join</button>
-</form>`);
+</script>`}`);
 }
 
 /**
@@ -1333,7 +1347,7 @@ function groupThread(ctx, g, p) {
     <div class="under">
       <time title="${fmtDatetime(c.created_at)}">${fmtAgo(c.created_at)}</time>
       ${mayDelete(g, c) && html`<form method="post" action="/_groups/${g.id}/comments/${c.id}/delete"
-        onsubmit="return confirm('Delete this comment?')"><input type="hidden" name="back" value="${back}"><button>Delete</button></form>`}
+        data-confirm="Delete this comment?" data-confirm-ok="Delete"><input type="hidden" name="back" value="${back}"><button>Delete</button></form>`}
     </div>
   </div>`)}
   <form class="say" method="post" action="/_groups/${g.id}/comments" data-group="${g.id}" data-post="${p.id}">
@@ -1354,7 +1368,7 @@ function groupCard(ctx, g, p) {
     <span class="what"><strong>${p.mine ? "You" : p.name}</strong>${!p.mine && p.from && html`<span class="meta">${host(p.from)}</span>`}</span>
     <a class="when" href="${groupBase(g)}/posts/${p.id}" title="${fmtDatetime(p.created_at)}"><time>${fmtAgo(p.created_at)}</time></a>
     ${mayDelete(g, p) && html`<form method="post" action="/_groups/${g.id}/posts/${p.id}/delete"
-      onsubmit="return confirm('Delete this post, its photos and its comments? This can’t be undone.')">
+      data-confirm="Delete this post, its photos and its comments? This can’t be undone." data-confirm-ok="Delete">
       <input type="hidden" name="back" value="${groupBase(g)}"><button class="delete">Delete</button></form>`}
   </header>
   ${p.event && eventBlock(ctx, g, p, { full: ctx.url.pathname.includes("/posts/") })}
@@ -1428,7 +1442,7 @@ function eventBlock(ctx, g, p, { full = false } = {}) {
     ${!e.cancelled_at && html`<a class="chip" href="${groupBase(g)}/posts/${p.id}/event.ics" download>${raw(icon("calendar"))}<span>Add to my calendar</span></a>`}
     ${p.mine && !e.cancelled_at && html`<a class="chip" href="${groupBase(g)}/posts/${p.id}/edit">Change it</a>`}
     ${mayDelete(g, p) && !e.cancelled_at && !over && html`<form method="post" action="/_groups/${g.id}/events/${p.id}/cancel"
-      onsubmit="return confirm('Call this event off? Everyone going will be told.')">
+      data-confirm="Call this event off? Everyone going will be told." data-confirm-ok="Call it off">
       <input type="hidden" name="back" value="${back}"><button class="chip">Call it off</button></form>`}
   </div>`}
 </div>`;
@@ -1536,7 +1550,7 @@ export function groupMembersPage(ctx, g, { group: info, members }, { max, connec
     const list = choices(m);
     return list.length > 0 && html`<form method="post" class="actions-row">
       ${list.map(([action, label, primary]) => html`<button class="chip${primary ? " primary" : ""}" formaction="/_groups/${g.id}/members/${m.id}/${action}"
-        ${action === "remove" && raw(`onclick="return confirm('Remove them from the group? What they posted stays.')"`)}>${label}</button>`)}
+        ${action === "remove" && raw(`data-confirm="Remove them from the group? What they posted stays." data-confirm-ok="Remove"`)}>${label}</button>`)}
     </form>`;
   };
   const waiting = members.filter((m) => m.waiting);
@@ -1547,8 +1561,9 @@ ${owner && html`<p class="meta jump">You started this group: <a href="#about">ch
   <a href="#delete">delete it</a>.</p>`}
 ${runs(g) && html`<section class="card" id="invite">
   <h2>Invite people</h2>
-  <p class="meta">Make a link and send it to people who have an afterwrd site. Anyone with it can ask to join for the
-  next 14 days, and the group's admins decide who's in. Making a new link stops the old one working.</p>
+  <p class="meta">Make a link and send it to people who have an afterwrd site: they paste it into <b>Groups</b> on their
+  own site. Anyone with it can ask to join for the next 14 days, and the group's admins decide who's in. Making a new
+  link stops the old one working.</p>
   <div class="actions-row"><button class="chip primary" id="make">Make an invite link</button></div>
   <div id="link" hidden>
     <input id="link-url" readonly aria-label="Invite link">
@@ -1578,7 +1593,7 @@ ${owner ? html`<section class="card" id="delete">
   <div class="actions-row"><button class="chip" id="delete-go">Delete the group</button></div>
   <ol id="log"></ol>
   <p id="error" role="alert"></p>
-</section>` : html`<form method="post" action="/_groups/${g.id}/leave" onsubmit="return confirm('Leave this group? What you posted in it stays there.')">
+</section>` : html`<form method="post" action="/_groups/${g.id}/leave" data-confirm="Leave this group? What you posted in it stays there." data-confirm-ok="Leave">
   <button class="chip">Leave the group</button>
 </form>`}
 <script>${raw(STEP_SCRIPT)}
@@ -1598,7 +1613,7 @@ ${owner ? html`<section class="card" id="delete">
     setTimeout(() => { e.target.textContent = "Copy link"; }, 1500);
   });
   document.getElementById("delete-go")?.addEventListener("click", async (e) => {
-    if (!confirm("Delete this group and everything in it, for everyone? This can’t be undone.")) return;
+    if (!(await askFirst("Delete this group and everything in it, for everyone? This can’t be undone.", { ok: "Delete" }))) return;
     e.target.disabled = true;
     error.textContent = "";
     try {
@@ -1674,7 +1689,7 @@ export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { de
       <strong>${host(r.origin)}</strong>, who says they're ${r.name}, is asking to be friends. ${r.via_kind && askedBecause(r)}
       ${r.invited_as && r.invited_as.toLowerCase() !== r.name.toLowerCase() && html`<strong class="warn">That's not the name you invited (${r.invited_as}).</strong>`}
       <span class="row"><button class="chip primary" formaction="/_admin/connections/${r.id}/approve?back=home">Approve</button>
-        <button class="chip" formaction="/_admin/connections/${r.id}/decline?back=home" onclick="return confirm('Decline? Their site will be told no.')">Decline</button></span>
+        <button class="chip" formaction="/_admin/connections/${r.id}/decline?back=home" data-confirm="Decline? Their site will be told no." data-confirm-ok="Decline">Decline</button></span>
     </form>`)}
     ${introductions.map((i) => introductionCard(i, "/", "div"))}
     ${checkRequests.map((r) => html`<div class="notice check-request">

@@ -75,6 +75,7 @@ export function siteHeader({ main, menu, current, face = {}, updateKnown = true 
   </details>
 </div></header>
 <script src="${asset("/static/live.js")}" defer></script>
+<script src="${asset("/static/ui.js")}" defer></script>
 <script>
   // Close the menu when clicking anywhere else.
   document.addEventListener("click", (e) => {

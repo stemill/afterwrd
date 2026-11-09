@@ -17,7 +17,10 @@ const browser = await puppeteer.launch({ executablePath: CHROME, headless: true 
 async function person(start) {
   const page = await (await browser.createBrowserContext()).newPage();
   page.on("pageerror", (e) => errors.push(e.message));
-  page.on("dialog", (d) => d.accept());
+  page.on("dialog", (d) => { errors.push(`a browser dialog: ${d.message()}`); d.dismiss(); });
+  // afterwrd asks in its own box (ui.js): say yes, as a person would.
+  await page.evaluateOnNewDocument(() => new MutationObserver(() => document.querySelector("dialog.ask[open] .chip.danger")?.click())
+    .observe(document, { childList: true, subtree: true }));
   const cdp = await page.createCDPSession();
   await cdp.send("WebAuthn.enable");
   await cdp.send("WebAuthn.addVirtualAuthenticator", { options: { protocol: "ctap2", transport: "internal",
@@ -63,6 +66,43 @@ await owner.goto(BASE + albumPath);
 await Promise.all([owner.waitForNavigation(), owner.click('.album-tools a[href^="/_admin/photos/add?album="]')]);
 check("Add photos from an album picks that album", (await owner.$eval("select[name=album]", (s) => s.options[s.selectedIndex].text)) === "Summer"
   && (await owner.$eval(".new-album", (d) => d.hidden)));
+// The album list is a box you can type into (ui.js): typing narrows it, and picking sets the real (hidden) choice.
+check("the album choice shows as a search box, with the album chosen", (await owner.$eval("select[name=album]", (s) => s.hidden))
+  && (await owner.$eval(".picker-input", (i) => i.value)) === "Summer");
+await owner.click(".picker-input");
+await owner.type(".picker-input", "new");
+const narrowed = await owner.$$eval(".picker-list li", (l) => l.map((li) => li.textContent));
+check("…typing narrows the list", narrowed.join() === "New album…", narrowed.join());
+await owner.keyboard.press("Enter");
+check("…and Enter picks it, as choosing in the list would (the new album's boxes appear)", (await owner.$eval("select[name=album]", (s) => s.value)) === "new"
+  && !(await owner.$eval(".new-album", (d) => d.hidden)) && (await owner.$eval(".picker-input", (i) => i.value)) === "New album…");
+await owner.click(".picker-input");
+await owner.type(".picker-input", "summ");
+await owner.keyboard.press("Enter");
+check("…and back again", (await owner.$eval("select[name=album]", (s) => s.options[s.selectedIndex].text)) === "Summer" && (await owner.$eval(".new-album", (d) => d.hidden)));
+
+// Asking first happens in afterwrd's own box (ui.js), not the browser's: Cancel leaves things as they were. (A page
+// of its own, without the stand-in that says yes.)
+const asker = await owner.browserContext().newPage();
+asker.on("dialog", (d) => { errors.push(`a browser dialog: ${d.message()}`); d.dismiss(); });
+await asker.goto(BASE + albumPath);
+const tilesBefore = await asker.$$eval(".tile", (l) => l.length);
+await asker.click(".tile");
+await asker.waitForSelector("button.chip.danger");
+const photoUrl = asker.url();
+await asker.click("main form[data-confirm] button");
+await asker.waitForSelector("dialog.ask[open]");
+const asked = await asker.$eval("dialog.ask", (d) => ({ words: d.querySelector("p").textContent, buttons: [...d.querySelectorAll("button")].map((b) => b.textContent),
+  focused: document.activeElement?.textContent }));
+check("deleting a photo asks in afterwrd's own box, with Cancel ready and the button saying what it does", asked.words.startsWith("Delete this photo")
+  && asked.buttons.join() === "Cancel,Delete" && asked.focused === "Cancel", JSON.stringify(asked));
+await asker.click("dialog.ask button.chip:not(.danger)");
+await new Promise((r) => setTimeout(r, 500));
+check("…and Cancel leaves the photo be", asker.url() === photoUrl && (await asker.$("dialog.ask")) === null
+  && (await asker.goto(BASE + albumPath), (await asker.$$eval(".tile", (l) => l.length)) === tilesBefore));
+await asker.close();
+await owner.bringToFront(); // a tab left in the background stops answering in headless Chrome
+
 await (await owner.$("#add input[type=file]")).uploadFile(`${fixtures}/big-secret.jpg`);
 await owner.click("#add input[name=share]");
 await Promise.all([owner.waitForNavigation({ timeout: 60_000 }), owner.click("#add button.post")]);

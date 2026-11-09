@@ -26,6 +26,9 @@ async function person() {
   await cdp.send("WebAuthn.addVirtualAuthenticator", { options: { protocol: "ctap2", transport: "internal",
     hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } });
   page.on("dialog", (d) => d.accept());
+  // afterwrd asks in its own box (ui.js): say yes, as a person would.
+  await page.evaluateOnNewDocument(() => new MutationObserver(() => document.querySelector("dialog.ask[open] .chip.danger")?.click())
+    .observe(document, { childList: true, subtree: true }));
   return page;
 }
 const session = async (page) => (await page.cookies()).find((c) => c.name === "__Host-session");

@@ -170,7 +170,7 @@ ${ownerHeader("photos")}
 ${role ? `<p class="meta">Upload one here, or open any of your photos and press <b>Make ${role === "profile" ? "profile picture" : "cover"}</b>.</p>` : ""}
 <form class="card composer" id="add" data-role="${role ?? ""}" data-max="${role ? 1 : MAX_BATCH}">
   ${role ? "" : `<label>Album
-    <select name="album">
+    <select name="album" data-search="Type an album's name" aria-label="Album">
       <option value="new">New album…</option>
       ${albums.map((a) => `<option value="${SITE_ID + a.id}" ${a.id === chosen ? "selected" : ""}>${escape(a.name)}</option>`).join("")}
     </select></label>

@@ -131,8 +131,9 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent-stron
 .filters { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.25rem; }
 .filters input, .filters select, .filters button {
   font: inherit; font-size: 0.95rem; min-height: 2.75rem; padding: 0.5rem 1rem;
-  border: 1px solid var(--border); border-radius: 999px; background: var(--sunken); color: var(--text);
+  border: 1px solid var(--border); border-radius: 999px; background-color: var(--sunken); color: var(--text);
 }
+.filters select { padding-right: 2.4rem; }
 .filters input[type=search] {
   flex: 1 1 16rem; padding-left: 2.6rem;
   background: var(--sunken) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a9a092' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") 0.95rem 50% / 1.1rem no-repeat;
@@ -537,8 +538,9 @@ table.numbers tbody tr:hover { background: var(--raised); }
 .edit-album[open] summary { margin-bottom: 0.5rem; }
 .edit-album form { display: flex; flex-direction: column; gap: 0.5rem; min-width: min(28rem, 85vw); }
 .edit-album input, .edit-album textarea, .add-photos select, .add-photos .new-album input, .add-photos .new-album textarea {
-  width: 100%; font: inherit; padding: 0.6rem 0.95rem; border: 1px solid var(--border); border-radius: 14px; background: var(--sunken); color: var(--text);
+  width: 100%; font: inherit; padding: 0.6rem 0.95rem; border: 1px solid var(--border); border-radius: 14px; background-color: var(--sunken); color: var(--text);
 }
+.add-photos select { padding-right: 2.4rem; }
 .add-photos form label:not(.chip) { display: flex; flex-direction: column; gap: 0.3rem; font-weight: 700; }
 .add-photos form label.check { flex-direction: row; align-items: flex-start; gap: 0.5rem; font-weight: 400; }
 .add-photos form label.check input { accent-color: var(--accent); }
@@ -577,3 +579,50 @@ table.numbers tbody tr:hover { background: var(--raised); }
 .check-form { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.5rem 0 1rem; }
 .check-form input { flex: 1 1 16rem; font: inherit; padding: 0.5rem 0.9rem; border: 1px solid var(--border); border-radius: 999px;
   background: var(--bg); color: var(--text); }
+
+/* Drop-downs: one look everywhere (a chevron instead of the browser's own arrow). */
+select {
+  appearance: none; -webkit-appearance: none; font: inherit; color: var(--text); cursor: pointer;
+  min-height: 2.75rem; padding: 0.5rem 2.4rem 0.5rem 1rem; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--sunken) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a9a092' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 0.9rem center / 1rem;
+}
+select:hover { border-color: var(--muted); }
+select:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 2px; }
+option { background: var(--raised); color: var(--text); }
+
+/* A drop-down you can type into (ui.js: select[data-search]). */
+.picker { position: relative; display: inline-block; min-width: min(18rem, 100%); vertical-align: middle; }
+.picker-input {
+  width: 100%; font: inherit; min-height: 2.75rem; padding: 0.5rem 2.4rem 0.5rem 1rem; color: var(--text);
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--sunken) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a9a092' stroke-width='2.5' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat right 0.9rem center / 1rem;
+}
+.picker-input:focus { outline: 3px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 2px; }
+.picker-list {
+  position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 0.35rem); max-height: 16rem; overflow-y: auto;
+  margin: 0; padding: 0.35rem; list-style: none; background: var(--raised); border: 1px solid var(--border);
+  border-radius: 16px; box-shadow: var(--shadow);
+}
+.picker-list li { padding: 0.55rem 0.8rem; border-radius: 10px; cursor: pointer; }
+.picker-list li.active, .picker-list li:hover { background: var(--surface); }
+.picker-list li[aria-selected="true"] { color: var(--accent-strong); font-weight: 700; }
+.picker-list li.picker-none { color: var(--muted); cursor: default; background: none; }
+
+/* Asking first (ui.js), in place of the browser's own box. */
+dialog.ask {
+  max-width: min(26rem, calc(100vw - 2rem)); padding: 1.4rem 1.4rem 1.1rem; border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--surface); color: var(--text); box-shadow: var(--shadow);
+}
+dialog.ask::backdrop { background: rgb(8 12 10 / 0.6); }
+dialog.ask p { margin: 0 0 1.1rem; font-size: 1rem; line-height: 1.5; }
+.ask-buttons { display: flex; justify-content: flex-end; gap: 0.5rem; flex-wrap: wrap; }
+
+/* Introducing several friends to each other (connect.js). */
+.together-list { display: flex; flex-direction: column; gap: 0.35rem; max-height: 22rem; overflow-y: auto; margin: 0; padding: 0.4rem;
+  border: 1px solid var(--border); border-radius: 18px; background: var(--sunken); }
+.together-friend { display: flex; align-items: center; gap: 0.7rem; padding: 0.55rem 0.8rem; border-radius: 12px; cursor: pointer; font-weight: 700; }
+.together-friend:hover { background: var(--surface); }
+.together-friend:has(input:checked) { background: var(--raised); color: var(--accent-strong); }
+form.stack .together-friend input { width: 1.15rem; height: 1.15rem; padding: 0; flex: none; accent-color: var(--accent); }
+.together-friend[hidden] { display: none; }
+.together-log { padding-left: 1.2rem; color: var(--muted); }

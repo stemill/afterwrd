@@ -196,7 +196,7 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   each other, with a note if you like; each sees it on *Home* and *Friends* and can ask. Someone you decline or remove can't ask again
   this way (you still can). There's no "people you may know": it would reveal who your friends' friends are.
 - **Feed and connections.** *Friends → Add a friend* makes a one-time friend link (30 days) inside a message to
-  send. Someone with an afterwrd site opens it, says where their site is, and confirms there. Someone without one
+  send. Someone with an afterwrd site pastes it into *Add a friend* on their own site (or opens it and says where their site is), and confirms there. Someone without one
   presses *Set up your own afterwrd*: the installer carries the link along (after the `#`, so no server sees it),
   and their new site asks them to confirm as soon as they've made their passkey. Then you approve their request. Connections are mutual, and make you friends: *Feed* (only the owner sees it) shows the newest posts written on
   each connected site, and either of you can read the other's posts and photos (everything they've published)

@@ -258,7 +258,8 @@ export async function handleConnections(request, env, url) {
     ]);
     const link = `${url.origin}/_connect/${token}`;
     return json({ link, message: `I'm on afterwrd, a small private social network where each of us has our own site, `
-      + `free. Open this to be friends with me: it shows you how to set up your own if you haven't got one yet. ${link}` });
+      + `free. Let's be friends! Already on afterwrd? Copy this link and paste it into Add a friend on your site. New `
+      + `to it? Open the link, and it shows you how to set up your own. ${link}` });
   }
   // An invitation for someone in the Facebook download: a friend link for them alone, and a message to send.
   if (request.method === "POST" && path === "/invite") {
@@ -275,7 +276,8 @@ export async function handleConnections(request, env, url) {
     const link = `${url.origin}/_connect/${token}`;
     const first = person.name.split(" ")[0];
     const message = `Hi ${first}, I've moved my posts and photos to afterwrd, a small private social network where each `
-      + `of us has our own site, free. Open this to be friends with me: it shows you how to set up your own first. ${link}`;
+      + `of us has our own site, free. Let's be friends! Open this link, and it shows you how to set up your own first. `
+      + `(Already on afterwrd? Copy the link and paste it into Add a friend on your site.) ${link}`;
     return json({ name: person.name, link, message });
   }
   // Someone asked to be friends: approve (share, and link them to who the invite was for) or decline (forget them;
@@ -299,6 +301,8 @@ export async function handleConnections(request, env, url) {
   }
   // Asking someone to be friends without a link: someone in one of the owner's groups, or someone a friend introduced.
   if (request.method === "POST" && path === "/ask") return askFrom(env, url, await request.formData().catch(() => new FormData()));
+  // Introducing several friends to each other at once: the page, then one friend's site told about the rest per call.
+  if (path === "/together") return introduceTogether(request, env);
   // Introducing a friend to another friend: each of their sites is told about the other.
   const introduce = /^\/(\d+)\/introduce$/.exec(path);
   if (introduce) return introduceFriends(request, env, url, Number(introduce[1]));
@@ -469,6 +473,37 @@ async function introduceFriends(request, env, url, id) {
     ? "it needs a newer afterwrd first" : t.reason.message}`).filter(Boolean);
   return html(introducedPage(friend, other, trouble), trouble.length === 2 ? 400 : 200);
 }
+/** Friends both ways (their sites have answered this one, so they've approved the owner here too), by name. */
+const introducible = async (db) => (await db.prepare(`SELECT * FROM connections WHERE connected_at IS NOT NULL
+  AND approved_at IS NOT NULL AND reached_at IS NOT NULL ORDER BY name COLLATE NOCASE`).all()).results;
+
+const TOGETHER_MAX = 10; // people introduced to each other at once (each site takes 20 introductions a day from one friend)
+
+/**
+ * Several friends introduced to each other, as if each pair had been: nothing is made or kept here. GET: the page,
+ * to choose them. POST {to, others, note}: tells one of them (to) about each of the rest; the page calls it once for
+ * each person chosen, so a call never needs more than TOGETHER_MAX - 1 of the 50 calls to other sites a request gets.
+ */
+async function introduceTogether(request, env) {
+  const friends = await introducible(env.DB);
+  if (request.method === "GET") return html(togetherPage(friends));
+  if (request.method !== "POST") return new Response("Not found", { status: 404 });
+  const body = await request.json().catch(() => ({}));
+  const byId = new Map(friends.map((c) => [c.id, c]));
+  const friend = byId.get(Number(body.to));
+  const ids = [...new Set(Array.isArray(body.others) ? body.others.map(Number) : [])].filter((id) => id !== friend?.id);
+  const others = ids.map((id) => byId.get(id)).filter(Boolean);
+  if (!friend || !others.length || others.length !== ids.length) return json({ error: "Choose friends who've approved you too." }, 400);
+  if (others.length > TOGETHER_MAX - 1) return json({ error: `Up to ${TOGETHER_MAX} people at a time.` }, 400);
+  const note = String(body.note ?? "").replace(/\r\n?/g, "\n").trim().slice(0, MAX_NOTE);
+  const told = await Promise.allSettled(others.map((about) => callSite(friend.origin, "/_peer/introduce", { key: friend.their_key,
+    body: { type: "Introduce", origin: about.origin, name: about.name, ...(note && { content: note }) } })));
+  const failed = told.find((t) => t.status === "rejected")?.reason;
+  if (!failed) return json({ ok: true });
+  return json({ error: failed.status === 404 ? "their site needs a newer afterwrd first"
+    : failed.status === 429 ? "their site has had a lot of introductions today; try tomorrow" : failed.message }, 502);
+}
+
 // --- pages -------------------------------------------------------------------------------------------------------
 
 function shell(title, body, script = "") {
@@ -506,6 +541,14 @@ function connectionsPage(connections, unchecked = false) {
   return shell("Add a friend", `
 <p class="crumbs"><a href="/friend">Friends</a> /</p>
 <h1>Add a friend</h1>
+<h2>Got a link from a friend?</h2>
+<form class="filters" id="paste" action="/_admin/connections/new" method="get">
+  <input type="search" name="link" placeholder="Paste their friend link here" required autocomplete="off" aria-label="A friend link">
+  <button type="button" class="chip" id="paste-clip" hidden>Paste</button>
+  <button>Add friend</button>
+</form>
+
+<h2>Invite someone</h2>
 <p class="meta">Send a friend link to someone, whether or not they have an afterwrd site yet: if they haven't, it shows
 them how to set one up first. Once you're friends, you'll each see the other's new posts on <a href="/">Home</a>, and
 can read each other's posts and photos (everything you've published) on your own site. Your comments are kept on
@@ -527,11 +570,6 @@ ${unchecked ? `<p class="meta" id="unchecked">Your site hasn't been checked yet.
   <button class="chip" id="share" hidden>Share…</button>
 </section>
 
-<form class="filters" id="paste" action="/_admin/connections/new" method="get">
-  <input type="search" name="link" placeholder="Got a friend link? Paste it here" required autocomplete="off">
-  <button>Add friend</button>
-</form>
-
 ${connections.length ? `<table class="numbers">
   <thead><tr><th>Friend</th><th>Site</th><th>Since</th><th></th></tr></thead>
   <tbody>${connections.map((c) => `<tr>
@@ -541,6 +579,16 @@ ${connections.length ? `<table class="numbers">
     <td><button class="chip" data-disconnect="${c.id}" data-name="${escape(c.name)}">Remove friend</button></td>
   </tr>`).join("")}</tbody>
 </table>` : `<p class="empty">You're not connected with anyone yet.</p>`}`, `${POST_SCRIPT}
+  // Paste in one tap where the browser allows reading what was copied (it may ask first).
+  const pasteClip = document.getElementById("paste-clip");
+  if (navigator.clipboard?.readText) {
+    pasteClip.hidden = false;
+    pasteClip.addEventListener("click", async () => {
+      const box = document.querySelector("#paste input[name=link]");
+      try { box.value = (await navigator.clipboard.readText()).trim(); } catch { box.focus(); return; }
+      if (box.value) document.getElementById("paste").requestSubmit();
+    });
+  }
   const panel = document.getElementById("link");
   const linkUrl = document.getElementById("link-url");
   document.getElementById("make").addEventListener("click", async () => {
@@ -564,7 +612,7 @@ ${connections.length ? `<table class="numbers">
   }
   document.querySelector("main").addEventListener("click", async (e) => {
     const button = e.target.closest("button[data-disconnect]");
-    if (!button || !confirm("Remove " + button.dataset.name + " as a friend? You'll stop seeing each other's posts and photos. Comments already made stay where they are.")) return;
+    if (!button || !(await askFirst("Remove " + button.dataset.name + " as a friend? You'll stop seeing each other's posts and photos. Comments already made stay where they are.", { ok: "Remove" }))) return;
     try {
       await post("/_admin/connections/" + button.dataset.disconnect + "/disconnect");
       location.reload();
@@ -603,10 +651,78 @@ function introducePage(friend, others) {
 ${others.length ? `<p class="meta">Choose a friend who'd like to know ${escape(friend.name)}. Both of them are told who you
 introduced them to, and that it was you, and either can then ask the other to be friends. Nobody else is told anything.</p>
 <form class="stack" method="post">
-  <label>Introduce them to <select name="to" required>${others.map((c) => `<option value="${c.id}">${escape(c.name)}</option>`).join("")}</select></label>
+  <label>Introduce them to <select name="to" required data-search="Type a friend's name" aria-label="The friend to introduce them to">${others.map((c) => `<option value="${c.id}">${escape(c.name)}</option>`).join("")}</select></label>
   <textarea name="note" rows="2" maxlength="${MAX_NOTE}" placeholder="Why they'd get on (optional)" aria-label="A note for both of them"></textarea>
   <div class="actions-row"><button class="chip primary" id="introduce">Introduce them</button><a class="chip" href="/friend">Not now</a></div>
 </form>` : `<p>You'll need at least one other friend on afterwrd to introduce ${escape(friend.name)} to.</p>`}`);
+}
+
+function togetherPage(friends) {
+  return shell("Introduce friends to each other", `
+<p class="crumbs"><a href="/friend">Friends</a> /</p>
+<h1>Introduce friends to each other</h1>
+${friends.length < 2 ? `<p>You'll need at least two friends on afterwrd who've approved you too.</p>` : `<p class="meta">Choose friends who'd like to know each other: a
+book club, a family, old school friends. Each of them is told about all the others, and that it was you; any of them can
+then ask another to be friends. Nobody else is told anything, and nothing is kept: it's like introducing each pair.</p>
+<form class="stack" id="together">
+  <input type="search" id="together-filter" placeholder="Type a name to find them" aria-label="Find a friend" autocomplete="off">
+  <fieldset class="together-list"><legend class="hidden">Friends</legend>
+    ${friends.map((c) => `<label class="together-friend"><input type="checkbox" name="friend" value="${c.id}" data-name="${escape(c.name)}"> ${escape(c.name)}</label>`).join("")}
+  </fieldset>
+  <p class="meta" id="together-count">Choose at least two, and up to ${TOGETHER_MAX}.</p>
+  <textarea name="note" rows="2" maxlength="${MAX_NOTE}" placeholder="Why they'd get on (optional): everyone sees this" aria-label="A note for all of them"></textarea>
+  <div class="actions-row"><button class="chip primary" id="together-go" disabled>Introduce them to each other</button><a class="chip" href="/friend">Not now</a></div>
+</form>
+<ol class="together-log" id="together-log"></ol>
+<p id="error" role="alert"></p>`}`, friends.length < 2 ? "" : `
+  const form = document.getElementById("together");
+  const boxes = [...form.querySelectorAll("input[name=friend]")];
+  const go = document.getElementById("together-go");
+  const count = document.getElementById("together-count");
+  const chosen = () => boxes.filter((b) => b.checked);
+  const update = () => {
+    const n = chosen().length;
+    go.disabled = n < 2 || n > ${TOGETHER_MAX};
+    count.textContent = n < 2 ? "Choose at least two, and up to ${TOGETHER_MAX}." : n > ${TOGETHER_MAX}
+      ? "That's more than ${TOGETHER_MAX}: untick some, or do it in two goes." : n + " chosen: each will be told about the other " + (n - 1) + ".";
+  };
+  form.addEventListener("change", update);
+  document.getElementById("together-filter").addEventListener("input", (e) => {
+    const words = e.target.value.trim().toLowerCase();
+    for (const b of boxes) b.closest("label").hidden = Boolean(words) && !b.dataset.name.toLowerCase().includes(words) && !b.checked;
+  });
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const people = chosen();
+    if (people.length < 2) return;
+    go.disabled = true;
+    const log = document.getElementById("together-log");
+    log.textContent = "";
+    let trouble = 0;
+    for (const person of people) {
+      const li = document.createElement("li");
+      li.textContent = "Telling " + person.dataset.name + "…";
+      log.append(li);
+      try {
+        const res = await fetch("/_admin/connections/together", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ to: Number(person.value), others: people.filter((p) => p !== person).map((p) => Number(p.value)),
+            note: form.note.value }) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "something went wrong");
+        li.textContent = "Told " + person.dataset.name + " ✓";
+      } catch (err) {
+        trouble++;
+        li.textContent = "Couldn't tell " + person.dataset.name + ": " + err.message;
+      }
+    }
+    document.getElementById("error").textContent = trouble === people.length ? "Nobody could be told. Try again later." : "";
+    if (trouble < people.length) {
+      const done = document.createElement("p");
+      done.className = "meta";
+      done.append("Done. It's up to them now. ", Object.assign(document.createElement("a"), { href: "/friend", textContent: "Back to Friends" }));
+      log.after(done);
+    }
+  });`);
 }
 
 function introducedPage(friend, other, trouble) {

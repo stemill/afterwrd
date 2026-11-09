@@ -34,7 +34,10 @@ await new Promise((r) => tokenServer.listen(8799, "127.0.0.1", r));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
 const page = await browser.newPage();
 page.on("pageerror", (e) => errors.push(e.message));
-page.on("dialog", (d) => d.accept());
+page.on("dialog", (d) => { errors.push(`a browser dialog: ${d.message()}`); d.dismiss(); });
+// afterwrd asks in its own box (ui.js): say yes, as a person would.
+await page.evaluateOnNewDocument(() => new MutationObserver(() => document.querySelector("dialog.ask[open] .chip.danger")?.click())
+  .observe(document, { childList: true, subtree: true }));
 const cdp = await page.createCDPSession();
 await cdp.send("WebAuthn.enable");
 await cdp.send("WebAuthn.addVirtualAuthenticator", { options: { protocol: "ctap2", transport: "internal",

@@ -235,12 +235,15 @@ own Cloudflare account. Friends see each other's posts and photos, and nobody el
 ${escape(name)} in one step.</p>
 <a class="button" id="install" href="${escape(installer)}" data-name="${escape(invitedAs ?? "")}">Set up your own afterwrd</a>
 <h2>Already have an afterwrd site?</h2>
+<p>Copy this link, then open your own afterwrd site and paste it into <b>Add a friend</b>.</p>
+<button id="copy-link">Copy this link</button>
+<details class="meta" style="margin-top: 16px"><summary>Or type your site's address</summary>
 <form id="site">
   <input name="site" placeholder="e.g. afterwrd.your-name.workers.dev" required autocomplete="url" inputmode="url" aria-label="Your site's address">
   <p id="error" role="alert"></p>
   <button class="secondary">Continue on my site</button>
 </form>
-<p class="meta" style="margin-top: 16px">Or copy this page's address and paste it into <b>Add a friend</b> on your site.</p>
+</details>
 <p class="meta" style="margin-top: 16px">Opened this inside an app, like WhatsApp or Instagram? Open it in your
 browser instead (usually in the app's ⋯ menu): passkeys often don't work inside apps.</p>`, `
   // The installer gets this link (and the name it was made for, to suggest an address) after the #.
@@ -248,6 +251,14 @@ browser instead (usually in the app's ⋯ menu): passkeys often don't work insid
   const carry = new URLSearchParams({ invite: location.origin + location.pathname });
   if (install.dataset.name) carry.set("name", install.dataset.name);
   install.href += "#" + carry.toString();
+  document.getElementById("copy-link").addEventListener("click", async (e) => {
+    try {
+      await navigator.clipboard.writeText(location.origin + location.pathname);
+      e.target.textContent = "Copied: now paste it into Add a friend on your site";
+    } catch {
+      e.target.textContent = "Copy this page's address from the address bar instead";
+    }
+  });
   document.getElementById("site").addEventListener("submit", (e) => {
     e.preventDefault();
     let site = e.target.site.value.trim();
@@ -266,13 +277,26 @@ export function groupLinkPage(group, owner) {
   return page("Join a group", `
 <h1>Join ${escape(group)}</h1>
 <p>${escape(owner)} has invited you to ${escape(group)}, a group on afterwrd. Its members read it from their own
-afterwrd sites, and can post and comment there. Where is your afterwrd site?</p>
+afterwrd sites, and can post and comment there.</p>
+<p>Copy this link, then open your own afterwrd site and paste it into <b>Groups</b>.</p>
+<button id="copy-link">Copy this link</button>
+<details class="meta" style="margin-top: 16px"><summary>Or type your site's address</summary>
 <form id="site">
-  <input name="site" placeholder="e.g. jo.example.workers.dev" required autocomplete="url" inputmode="url" aria-label="Your site's address">
+  <input name="site" placeholder="e.g. afterwrd.your-name.workers.dev" required autocomplete="url" inputmode="url" aria-label="Your site's address">
   <p id="error" role="alert"></p>
   <button>Continue on my site</button>
 </form>
-<p style="margin-top: 20px">No afterwrd site yet? <a href="https://afterwrd.app/">Set one up</a>, then open this link again.</p>`, `
+</details>
+<p style="margin-top: 20px">No afterwrd site yet? <a href="https://afterwrd.app/">Set one up</a>, then paste this link into
+<b>Groups</b> on it.</p>`, `
+  document.getElementById("copy-link").addEventListener("click", async (e) => {
+    try {
+      await navigator.clipboard.writeText(location.href);
+      e.target.textContent = "Copied: now paste it into Groups on your site";
+    } catch {
+      e.target.textContent = "Copy this page's address from the address bar instead";
+    }
+  });
   document.getElementById("site").addEventListener("submit", (e) => {
     e.preventDefault();
     let site = e.target.site.value.trim();

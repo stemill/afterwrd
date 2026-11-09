@@ -29,7 +29,10 @@ async function device() {
   await cdp.send("WebAuthn.enable");
   await cdp.send("WebAuthn.addVirtualAuthenticator", { options: { protocol: "ctap2", transport: "internal",
     hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } });
-  page.on("dialog", (d) => d.accept());
+  page.on("dialog", (d) => { errors.push(`a browser dialog: ${d.message()}`); d.dismiss(); });
+  // afterwrd asks in its own box (ui.js): say yes, as a person would.
+  await page.evaluateOnNewDocument(() => new MutationObserver(() => document.querySelector("dialog.ask[open] .chip.danger")?.click())
+    .observe(document, { childList: true, subtree: true }));
   return page;
 }
 async function register(page, link) {

@@ -36,7 +36,10 @@ async function owner(site, name) {
   const context = await browser.createBrowserContext();
   const page = await context.newPage();
   page.on("pageerror", (e) => errors.push(`${site}: ${e.message}`));
-  page.on("dialog", (d) => d.accept());
+  page.on("dialog", (d) => { errors.push(`a browser dialog: ${d.message()}`); d.dismiss(); });
+  // afterwrd asks in its own box (ui.js): say yes, as a person would.
+  await page.evaluateOnNewDocument(() => new MutationObserver(() => document.querySelector("dialog.ask[open] .chip.danger")?.click())
+    .observe(document, { childList: true, subtree: true }));
   const cdp = await page.createCDPSession();
   await cdp.send("WebAuthn.enable");
   await cdp.send("WebAuthn.addVirtualAuthenticator", { options: { protocol: "ctap2", transport: "internal",
@@ -63,10 +66,22 @@ async function comment(page, card, words) {
   await page.type(`#${card} form.say textarea`, words);
   await Promise.all([page.waitForNavigation({ timeout: 30_000 }), page.click(`#${card} form.say button`)]);
 }
-async function join(page, site, link) {
-  await page.goto(link);
-  await page.type("#site input", site);
-  await Promise.all([page.waitForNavigation(), page.click("#site button")]);
+// Joining the way the page suggests (pasting the link into Groups on your own site), or by opening the link and
+// typing your site's address.
+async function join(page, site, link, { typed = false } = {}) {
+  if (typed) {
+    await page.goto(link);
+    page.joinPage = await page.$eval("main", (m) => m.textContent.replace(/\s+/g, " "));
+    page.joinFolded = await page.$eval("#site", (f) => !f.closest("details").open);
+    await page.$eval("#site", (f) => { f.closest("details").open = true; });
+    await page.type("#site input", site);
+    await Promise.all([page.waitForNavigation(), page.click("#site button")]);
+  } else {
+    await page.goto(`${site}/groups`);
+    page.joinBoxFirst = await page.$eval("main form", (f) => f.id === "join");
+    await page.type("#join input[name=link]", link);
+    await Promise.all([page.waitForNavigation(), page.click("#join button:not([type=button])")]);
+  }
   const asked = (await page.$eval("h1", (h) => h.textContent).catch(() => "")) === "Join Book club?";
   await Promise.all([page.waitForNavigation({ timeout: 30_000 }), page.click("#go")]);
   return asked;
@@ -122,12 +137,13 @@ await stranger.goto(link);
 check("the link opens a page naming the group, without signing in", (await stranger.$eval("h1", (h) => h.textContent)) === "Join Book club");
 
 // Bob and Cat ask to join, from their own sites.
-check("Bob is sent to his site to confirm", await join(bob, B, link));
+check("Bob pastes the link into Groups on his own site (the box comes first there), and is asked to confirm", await join(bob, B, link) && bob.joinBoxFirst);
 check("Bob waits to be let in", (await text(bob)).includes("Waiting for Ann Example to let you in"), await text(bob));
 const bobKey = sql(stateB, "SELECT their_key FROM groups")[0]?.their_key;
 check("Bob's key can't read the group yet", (await call(G, "/_group/posts", bobKey)).status === 403);
 check("…nor anything on Ann's site", (await call(A, "/_peer/feed", bobKey)).status === 401 && (await call(A, "/_group/posts", bobKey)).status !== 200);
-check("Cat asks too", await join(cat, C, link));
+check("Cat opens the link instead: it says to paste it into Groups on her site, with the address box folded away, which still works",
+  await join(cat, C, link, { typed: true }) && cat.joinPage.includes("paste it into Groups") && cat.joinFolded);
 const catKey = sql(stateC, "SELECT their_key FROM groups")[0]?.their_key;
 
 await ann.goto(`${A}/groups/${annGroup}`);
@@ -452,6 +468,29 @@ await ann.goto(`${A}/groups/${annGroup}/members`);
 await ask(ann, B);
 check("Ann can't ask again another way", (await text(ann, "body")).includes("already asked") && n(stateB, `connections WHERE origin = '${A}'`) === 0
   && n(stateA, `connections WHERE origin = '${B}'`) === 0);
+
+// Several friends introduced to each other at once: Cat ticks Ann and Bob (finding Bob by typing), with a note.
+await cat.goto(`${C}/_admin/connections/together`);
+check("Introduce friends to each other lists Cat's friends to tick", (await cat.$$eval("input[name=friend]", (l) => l.map((b) => b.dataset.name))).join() === "Ann Example,Bob Example"
+  && await cat.$eval("#together-go", (b) => b.disabled));
+await cat.type("#together-filter", "an");
+check("…typing narrows the list", (await cat.$$eval(".together-friend:not([hidden])", (l) => l.map((x) => x.textContent.trim()))).join() === "Ann Example");
+await cat.click(`input[name=friend][value="${catsAnn}"]`);
+await cat.$eval("#together-filter", (i) => { i.value = ""; });
+await cat.type("#together-filter", "bo");
+check("…keeping anyone ticked", (await cat.$$eval(".together-friend:not([hidden])", (l) => l.map((x) => x.textContent.trim()))).join() === "Ann Example,Bob Example"
+  && (await cat.$$eval(".together-friend[hidden]", (l) => l.length)) === 0);
+await cat.click(`input[name=friend][value="${catsBob}"]`);
+await cat.type("textarea[name=note]", "Book club, all of you");
+await cat.click("#together-go");
+await cat.waitForFunction(() => document.querySelectorAll("#together-log li").length === 2 && ![...document.querySelectorAll("#together-log li")].some((l) => l.textContent.endsWith("…")), { timeout: 30_000 })
+  .catch(async () => { throw new Error(`Introducing stuck: ${await cat.$eval("main", (m) => m.textContent.replace(/\s+/g, " ").slice(-400))} / go disabled: ${await cat.$eval("#together-go", (b) => b.disabled)} / url: ${cat.url()} / errors: ${errors.join(" | ")}`); });
+const togetherLog = await cat.$$eval("#together-log li", (l) => l.map((x) => x.textContent));
+check("…each is told about the others, one at a time", togetherLog.join() === "Told Ann Example ✓,Told Bob Example ✓", togetherLog.join(" | "));
+check("…as introductions with the note (Bob, who declined Ann, isn't bothered again)", n(stateA, `introductions WHERE origin = '${B}' AND note = 'Book club, all of you'`) === 1
+  && n(stateB, `introductions WHERE origin = '${A}'`) === 0);
+check("…and only friends can be introduced", (await cat.evaluate(() => fetch("/_admin/connections/together", { method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ to: 999, others: [1] }) }).then((r) => r.status))) === 400);
 await bob.goto(`${B}/groups/${bobGroup}/members`);
 await ask(bob, A);
 check("Bob can still ask Ann himself", n(stateA, `connections WHERE origin = '${B}' AND approved_at IS NULL`) === 1 && n(stateB, "declined_asks") === 0);

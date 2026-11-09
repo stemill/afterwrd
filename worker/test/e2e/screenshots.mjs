@@ -103,6 +103,9 @@ const photo = (name) => `${PAINTED}/${name}.jpg`;
 async function owner(site, name) {
   const page = await (await browser.createBrowserContext()).newPage();
   page.on("dialog", (d) => d.accept());
+  // afterwrd asks in its own box (ui.js): say yes, as a person would.
+  await page.evaluateOnNewDocument(() => new MutationObserver(() => document.querySelector("dialog.ask[open] .chip.danger")?.click())
+    .observe(document, { childList: true, subtree: true }));
   const cdp = await page.createCDPSession();
   await cdp.send("WebAuthn.enable");
   await cdp.send("WebAuthn.addVirtualAuthenticator", { options: { protocol: "ctap2", transport: "internal",
@@ -130,6 +133,7 @@ async function connect(host, hostSite, guest, guestSite) {
   await host.waitForSelector("#link:not([hidden])");
   const link = await host.$eval("#link-url", (i) => i.value);
   await guest.goto(link);
+  await guest.$eval("#site", (f) => { f.closest("details").open = true; });
   await guest.type("#site input", guestSite);
   await Promise.all([guest.waitForNavigation(), guest.click("#site button")]);
   await Promise.all([guest.waitForNavigation({ timeout: 30_000 }), guest.click("#go")]);
@@ -197,6 +201,7 @@ await ann.waitForSelector("#link:not([hidden])");
 const invite = await ann.$eval("#link-url", (i) => i.value);
 for (const [page, site] of [[ben, B], [cath, C]]) {
   await page.goto(invite);
+  await page.$eval("#site", (f) => { f.closest("details").open = true; });
   await page.type("#site input", site);
   await Promise.all([page.waitForNavigation(), page.click("#site button")]);
   await Promise.all([page.waitForNavigation({ timeout: 30_000 }), page.click("#go")]);

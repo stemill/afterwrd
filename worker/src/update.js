@@ -366,7 +366,7 @@ ${forget}
   const pasted = () => document.getElementById("token")?.value.trim() || "";
   const forget = document.getElementById("forget");
   if (forget) forget.addEventListener("click", async () => {
-    if (!confirm("Forget the old token? Afterwards, delete it in Cloudflare too.")) return;
+    if (!(await askFirst("Forget the old token? Afterwards, delete it in Cloudflare too.", { ok: "Forget it" }))) return;
     try {
       await post("forget", {});
       location.assign("${TOKENS_PAGE}");

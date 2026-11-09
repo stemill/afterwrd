@@ -31,7 +31,10 @@ async function owner(site, name) {
   const context = await browser.createBrowserContext();
   const page = await context.newPage();
   page.on("pageerror", (e) => errors.push(`${site}: ${e.message}`));
-  page.on("dialog", (d) => d.accept());
+  page.on("dialog", (d) => { errors.push(`a browser dialog: ${d.message()}`); d.dismiss(); });
+  // afterwrd asks in its own box (ui.js): say yes, as a person would.
+  await page.evaluateOnNewDocument(() => new MutationObserver(() => document.querySelector("dialog.ask[open] .chip.danger")?.click())
+    .observe(document, { childList: true, subtree: true }));
   const cdp = await page.createCDPSession();
   await cdp.send("WebAuthn.enable");
   await cdp.send("WebAuthn.addVirtualAuthenticator", { options: { protocol: "ctap2", transport: "internal",
@@ -86,9 +89,15 @@ check("friend link made, with a message to send", /^http:\/\/localhost:8787\/_co
 const stranger = await (await browser.createBrowserContext()).newPage();
 await stranger.goto(link);
 check("link opens a welcome naming Ann, without signing in", (await stranger.$eval("h1", (h) => h.textContent)) === "Ann Example would like to be friends");
-await bob.goto(link);
-await bob.type("#site input", B);
-await Promise.all([bob.waitForNavigation(), bob.click("#site button")]);
+check("…which tells someone with a site to copy the link into their own, with a button for it, the address box folded away",
+  (await stranger.$eval("main", (m) => m.textContent)).includes("paste it into Add a friend") && (await stranger.$("#copy-link")) !== null
+  && await stranger.$eval("#site", (f) => !f.closest("details").open));
+check("the message says the same", (await ann.$eval("#link-message", (t) => t.value)).includes("paste it into Add a friend on your site"));
+// Bob pastes it into Add a friend on his own site: the box comes first there.
+await bob.goto(`${B}/_admin/connections`);
+check("Add a friend starts with the box for a friend's link", (await bob.$eval("main h2", (h) => h.textContent)) === "Got a link from a friend?");
+await bob.type("#paste input[name=link]", link);
+await Promise.all([bob.waitForNavigation(), bob.click("#paste button:not([type=button])")]);
 check("Bob is sent to his own site to confirm", bob.url().startsWith(`${B}/_admin/connections/new?link=`)
   && (await bob.$eval("h1", (h) => h.textContent)) === "Add Ann Example as a friend?");
 await Promise.all([bob.waitForNavigation({ timeout: 30_000 }), bob.click("#go")]);
@@ -438,6 +447,7 @@ async function invite(name) {
 }
 async function connectFrom(page, site, link) {
   await page.goto(link);
+  await page.$eval("#site", (f) => { f.closest("details").open = true; }); // typing the address still works
   await page.type("#site input", site);
   await Promise.all([page.waitForNavigation(), page.click("#site button")]);
   await Promise.all([page.waitForNavigation({ timeout: 30_000 }), page.click("#go")]);
