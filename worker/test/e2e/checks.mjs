@@ -102,7 +102,8 @@ const server = createServer(async (req, res) => {
     return send(200, { success: true, result: { deployments: [{ id: "d1", versions: [{ version_id: token === "tok-elsewhere" ? "v-2" : "v-1", percentage: 100 }] }] } });
   }
   if (api === `/accounts/${ACCOUNT}/workers/scripts/localhost/versions/v-1` || api === `/accounts/${ACCOUNT}/workers/scripts/localhost/versions/v-2`) {
-    const bindings = token === "tok-setup" ? [...BINDINGS, { type: "plain_text", name: "OAUTH_TOKEN_URL", text: "https://evil.example/token" }] : BINDINGS;
+    const bindings = token === "tok-setup" ? [...BINDINGS, { type: "plain_text", name: "OAUTH_TOKEN_URL", text: "https://evil.example/token" }]
+      : token === "tok-noversion" ? BINDINGS.filter((b) => b.type !== "version_metadata") : BINDINGS;
     return send(200, { success: true, result: { id: "v-1", resources: { bindings, script_runtime: { compatibility_date: "2026-10-01", compatibility_flags: ["nodejs_compat"] } } } });
   }
   if (api === `/accounts/${ACCOUNT}/logs/audit`) {
@@ -130,6 +131,12 @@ const friendSite = createServer((req, res) => {
 });
 await new Promise((r) => friendSite.listen(8788, "127.0.0.1", r));
 await new Promise((r) => direct.listen(8798, "127.0.0.1", r));
+// A site whose Worker lost its version piece: it can't say which upload it is.
+const unversioned = createServer((req, res) => {
+  if (req.url === "/_version") { res.setHeader("Content-Type", "application/json"); return res.end(JSON.stringify({ id: null })); }
+  res.statusCode = 302; res.setHeader("Location", "/_auth/login"); res.end();
+});
+await new Promise((r) => unversioned.listen(8794, "127.0.0.1", r));
 
 // --- the owner, and the friend's browser -------------------------------------------------------------------------
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
@@ -266,6 +273,10 @@ check("another Worker connected to the site's database is reported, whatever it'
   && backdoor.after.includes(": other."), backdoor.after.slice(0, 600));
 
 // --- a Worker that isn't the one at the address -------------------------------------------------------------------
+const noversion = await runCheck("noversion", "http://localhost:8794");
+check("a site missing its version piece gets one plain explanation, saying how to put it back", noversion.after.includes("missing the piece Cloudflare uses")
+  && noversion.after.includes("Updating the site from its Update page puts it back") && !noversion.after.includes("isn't the Worker that was checked")
+  && !noversion.after.includes("version_metadata"), noversion.after.slice(0, 700));
 const elsewhere = await runCheck("elsewhere");
 check("a Worker that isn't the one answering at the address is reported", elsewhere.after.includes("isn't the Worker that was checked"), elsewhere.after.slice(0, 500));
 
@@ -314,7 +325,7 @@ check("…and leaves the link usable", (await fetch(`${failed.link}/start`, { me
 await owner.goto(`${BASE}/friend`);
 const listed = await owner.$$eval(".checks > li", (l) => l.map((li) => li.textContent.replace(/\s+/g, " ")));
 const count = (word) => listed.filter((t) => t.includes(word)).length;
-check("Friends lists the checks with a verdict each", count("check again later") === 1 && count("all good") === 2 && count("needs a look") === 5 && count("couldn't check") === 1,
+check("Friends lists the checks with a verdict each", count("check again later") === 1 && count("all good") === 2 && count("needs a look") === 6 && count("couldn't check") === 1,
   `${listed.length}: ${listed.map((t) => t.slice(0, 60)).join(" | ")}`);
 check("…with no image injected from Cloudflare's answers", (await owner.$$(".checks img")).length === 0);
 
@@ -352,5 +363,6 @@ await browser.close();
 server.close();
 direct.close();
 friendSite.close();
+unversioned.close();
 console.log(`\n${results.filter(Boolean).length}/${results.length} passed`);
 process.exit(results.every(Boolean) ? 0 : 1);

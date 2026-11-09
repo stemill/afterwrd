@@ -122,7 +122,9 @@ const STEPS = {
   // Which of the token's accounts this Worker is in, whether it's already afterwrd, which release goes in, and the
   // Worker afterwrd goes into: this one for an update, or the chosen name (which mustn't be taken) for a new site.
   async check({ name }, script, url, token) {
-    const { account, settings } = await findWorker(token, script); // the token is checked before anything is fetched
+    // The token is checked before anything is fetched. By this installer's address (<script>.<name>.workers.dev), so
+    // it's this account's Worker, not one of the same name in another account the token can see (0.34.1).
+    const { account, settings } = await findWorker(token, url.hostname);
     const { manifest } = await loadRelease(RELEASE, MANIFEST_SHA256);
     const upgrade = Boolean(existingDatabase(settings));
     const target = upgrade ? script : siteName(name ?? script);

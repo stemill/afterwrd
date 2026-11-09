@@ -343,14 +343,22 @@ export async function checkSite(token, site, env, here, { latest = {} } = {}, fe
       // Cloudflare says which version of this Worker is serving. A Worker of the same name in another account, or one
       // in an account that isn't the one at that address, won't match.
       const said = await fetcher(`${site}/_version`, { redirect: "manual" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-      if (said?.id !== serving[0].version_id) {
-        problems.push(`The site at ${new URL(site).host} isn't the Worker that was checked: they're different uploads. Was the right Cloudflare account allowed?`);
-      }
       const detail = (await getJSON(`${at}/versions/${encodeURIComponent(serving[0].version_id)}`)).result ?? {};
       const have = (detail.resources?.bindings ?? []).map((b) => b?.type === "durable_object_namespace"
         ? `${b.type} ${b.name} ${b.class_name}` : `${text(b?.type, 40)} ${text(b?.name, 60)}`);
       const extra = have.filter((b) => !BINDINGS.includes(b) && !(b.startsWith("secret_text ") && SECRETS.has(b.slice(12))));
       const missing = BINDINGS.filter((b) => !have.includes(b));
+      // Without its version piece a site can't say which upload it is, so the comparison can't be made: one plain
+      // problem, rather than that and a mismatch that only follows from it.
+      const noVersion = missing.includes("version_metadata VERSION") && !said?.id;
+      if (noVersion) {
+        missing.splice(missing.indexOf("version_metadata VERSION"), 1);
+        problems.push("It's missing the piece Cloudflare uses to tell a site which upload it is (afterwrd's installs and updates "
+          + "have added it since 0.29), so this check can't be sure the Worker it read is the one answering at the address. "
+          + "Updating the site from its Update page puts it back; then ask for another check an hour later.");
+      } else if (said?.id !== serving[0].version_id) {
+        problems.push(`The site at ${new URL(site).host} isn't the Worker that was checked: they're different uploads. Was the right Cloudflare account allowed?`);
+      }
       if (extra.length) problems.push(`It's connected to things afterwrd doesn't use: ${extra.slice(0, 8).join(", ")}.`);
       if (missing.length) problems.push(`It's missing parts afterwrd needs: ${missing.join(", ")}.`);
       // Any other Worker connected to this site's database could read and change everything in it, whatever it's
