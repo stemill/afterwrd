@@ -7,9 +7,9 @@ import { actorId, commentId, targetId } from "../public/static/activity.js";
 import { MAX_COMMENT } from "./archive/comments.js";
 import { safeNext } from "./auth.js";
 import { cleanFeed } from "./friends.js";
-import { messagePage } from "./pages.js";
+import { messagePage } from "./views/pages.js";
 import { callSite } from "./peers.js";
-import { html, now } from "./util.js";
+import { html, now, Refusal, withoutKeys } from "./util.js";
 import { INBOX_JOIN } from "./notify.js";
 
 // Home asks friends' sites for their newest posts when it opens. Each is a request, and the free plan allows 50 per
@@ -104,68 +104,94 @@ export async function loadFeed(db, ownOrigin) {
   for (const r of replies) if (r.feed) r.connection.avatar = r.feed.avatar;
   const pictures = replies.map((r) => r.feed?.avatar && rememberPicture(db, r.connection, r.feed.avatar)).filter(Boolean);
   if (pictures.length) await db.batch(pictures);
+  // What Home shows, with each friend as it's shown: without the keys to their site (util.js pageData).
+  const shown = new Map(connections.map((c) => [c, withoutKeys(c)]));
   const posts = [];
   for (const r of replies) {
     for (const p of r.feed?.posts ?? []) {
-      posts.push({ ...p, connection: r.connection, comments: await markMine(db, r.connection.id, p.key, p.comments, ownOrigin) });
+      posts.push({ ...p, connection: shown.get(r.connection), comments: await markMine(db, r.connection.id, p.key, p.comments, ownOrigin) });
     }
   }
   posts.sort((a, b) => b.created_at - a.created_at);
   // Home only mentions a friend's site that's just stopped answering; one that's gone quiet is on Friends instead.
   const unreachable = replies.filter((r) => r.error && !gone(r.connection, checked))
-    .map((r) => ({ connection: r.connection, error: r.error.message }));
-  return { posts, connections, unreachable };
+    .map((r) => ({ connection: shown.get(r.connection), error: r.error.message }));
+  return { posts, connections: [...shown.values()], unreachable };
 }
 
 export async function handleFeed(request, env, url) {
-  const db = env.DB;
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
   if (request.headers.get("Origin") !== url.origin) return new Response("Request from another site", { status: 403 });
 
   const form = await request.formData().catch(() => new FormData());
   const back = new URL(safeNext(String(form.get("back") ?? "/"), url), url.origin);
-  if (url.pathname === "/_feed/comments") {
-    const connection = await connectionById(db, form.get("connection"));
-    const target = String(form.get("target") ?? "");
-    const text = String(form.get("text") ?? "").replace(/\r\n?/g, "\n").trim();
-    if (!connection) return problem("You're no longer connected with them.", back);
-    if (!TARGET_RE.test(target)) return problem("That isn't something you can comment on.", back);
-    if (!text) return Response.redirect(back, 303);
-    if (text.length > MAX_COMMENT) return problem(`Comments can be up to ${MAX_COMMENT} characters.`, back);
-    const owner = await db.prepare("SELECT name FROM users LIMIT 1").first();
-    try {
-      const reply = await callSite(connection.origin, "/_peer/comments", {
-        key: connection.their_key,
-        body: {
-          "@context": "https://www.w3.org/ns/activitystreams", type: "Note", mediaType: "text/plain", content: text,
-          attributedTo: { type: "Person", id: actorId(url.origin), name: owner?.name }, inReplyTo: targetId(connection.origin, target),
-        },
+  try {
+    if (url.pathname === "/_feed/comments") {
+      const made = await commentOnFriend(env, url.origin, {
+        connection: form.get("connection"), target: String(form.get("target") ?? ""), text: String(form.get("text") ?? ""),
       });
-      // Their address for it: <the post's or photo's address>#c<n>.
-      const n = /#c(\d{1,15})$/.exec(typeof reply.id === "string" ? reply.id : "");
-      if (!n || reply.id !== commentId(connection.origin, target, n[1])) throw new Error("Their site sent something unexpected.");
-      const id = Number(n[1]);
-      await db.prepare(`INSERT INTO comments_elsewhere (connection_id, site, remote_id, target, text, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)`).bind(connection.id, connection.origin, id, target, text, now()).run();
-      back.hash = `r${connection.id}-${id}`;
+      if (made) back.hash = `r${made.connection}-${made.id}`;
       return Response.redirect(back, 303);
-    } catch (error) {
-      return problem(`Couldn't send your comment: ${error.message}`, back);
     }
-  }
-  const del = /^\/_feed\/comments\/(\d+)\/(\d+)\/delete$/.exec(url.pathname);
-  if (del) {
-    const connection = await connectionById(db, del[1]);
-    if (!connection) return problem("You're no longer connected with them.", back);
-    try {
-      await callSite(connection.origin, `/_peer/comments/${Number(del[2])}/delete`, { key: connection.their_key, body: {} });
-      await db.prepare("DELETE FROM comments_elsewhere WHERE connection_id = ? AND remote_id = ?").bind(connection.id, Number(del[2])).run();
+    const del = /^\/_feed\/comments\/(\d+)\/(\d+)\/delete$/.exec(url.pathname);
+    if (del) {
+      await deleteFriendComment(env, { connection: del[1], id: Number(del[2]) });
       return Response.redirect(back, 303);
-    } catch (error) {
-      return problem(`Couldn't delete your comment: ${error.message}`, back);
     }
+  } catch (error) {
+    if (error instanceof Refusal) return problem(error.message, back);
+    throw error;
   }
   return new Response("Not found", { status: 404 });
+}
+
+// --- actions (see util.js Refusal) -----------------------------------------------------------------------------------
+
+/**
+ * The owner comments on a friend's post or photo (`target`, its key): the comment goes to their site, which keeps it,
+ * and this site keeps the owner's own copy. Returns { connection, id } (their number for it), or null if there's
+ * nothing to send.
+ */
+export async function commentOnFriend(env, origin, { connection: connectionId, target, text }) {
+  const db = env.DB;
+  const connection = await connectionById(db, connectionId);
+  text = text.replace(/\r\n?/g, "\n").trim();
+  if (!connection) throw new Refusal("You're no longer connected with them.");
+  if (!TARGET_RE.test(target)) throw new Refusal("That isn't something you can comment on.");
+  if (!text) return null;
+  if (text.length > MAX_COMMENT) throw new Refusal(`Comments can be up to ${MAX_COMMENT} characters.`);
+  const owner = await db.prepare("SELECT name FROM users LIMIT 1").first();
+  try {
+    const reply = await callSite(connection.origin, "/_peer/comments", {
+      key: connection.their_key,
+      body: {
+        "@context": "https://www.w3.org/ns/activitystreams", type: "Note", mediaType: "text/plain", content: text,
+        attributedTo: { type: "Person", id: actorId(origin), name: owner?.name }, inReplyTo: targetId(connection.origin, target),
+      },
+    });
+    // Their address for it: <the post's or photo's address>#c<n>.
+    const n = /#c(\d{1,15})$/.exec(typeof reply.id === "string" ? reply.id : "");
+    if (!n || reply.id !== commentId(connection.origin, target, n[1])) throw new Error("Their site sent something unexpected.");
+    const id = Number(n[1]);
+    await db.prepare(`INSERT INTO comments_elsewhere (connection_id, site, remote_id, target, text, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).bind(connection.id, connection.origin, id, target, text, now()).run();
+    return { connection: connection.id, id };
+  } catch (error) {
+    throw new Refusal(`Couldn't send your comment: ${error.message}`);
+  }
+}
+
+/** The owner deletes their comment `id` (their number for it) on friend `connection`'s site, and their copy here. */
+export async function deleteFriendComment(env, { connection: connectionId, id }) {
+  const db = env.DB;
+  const connection = await connectionById(db, connectionId);
+  if (!connection) throw new Refusal("You're no longer connected with them.");
+  try {
+    await callSite(connection.origin, `/_peer/comments/${id}/delete`, { key: connection.their_key, body: {} });
+    await db.prepare("DELETE FROM comments_elsewhere WHERE connection_id = ? AND remote_id = ?").bind(connection.id, id).run();
+  } catch (error) {
+    throw new Refusal(`Couldn't delete your comment: ${error.message}`);
+  }
 }
 
 const problem = (message, back = null) =>

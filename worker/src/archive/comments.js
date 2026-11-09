@@ -5,8 +5,8 @@
 // See migrations/0006_site_comments.sql for how `target` survives a re-import.
 import { postKey } from "../../public/static/activity.js";
 import { safeNext } from "../auth.js";
-import { messagePage } from "../pages.js";
-import { html, now } from "../util.js";
+import { messagePage } from "../views/pages.js";
+import { html, now, Refusal } from "../util.js";
 import { INBOX_JOIN, notifyComment } from "../notify.js";
 
 export const MAX_COMMENT = 2000;
@@ -92,36 +92,52 @@ export async function handleComments(request, env, url, user) {
   if (request.headers.get("Origin") !== url.origin) return new Response("Request from another site", { status: 403 });
   const form = await request.formData().catch(() => new FormData());
   const back = new URL(safeNext(String(form.get("back") ?? "/"), url), url.origin);
-  const db = env.DB;
-
-  if (url.pathname === "/_comments") {
-    const target = String(form.get("target") ?? "");
-    const text = String(form.get("text") ?? "").replace(/\r\n?/g, "\n").trim();
-    if (!text) return Response.redirect(back, 303);
-    if (text.length > MAX_COMMENT) return message(`Comments can be up to ${MAX_COMMENT} characters.`, back, 400);
-    if (!(await findTarget(db, target))) return message("That's no longer in the archive.", back, 404);
-    // The limits are checked in the same statement as the insert, so comments sent all at once can't slip past.
-    const row = await db.prepare(`INSERT INTO site_comments (target, author_id, author_name, text, created_at, origin)
-      SELECT ?1, ?2, ?3, ?4, ?5, ?6
-      WHERE (SELECT COUNT(*) FROM site_comments WHERE author_id = ?2 AND created_at > ?5 - ?7) < ?8
-        AND (SELECT COUNT(*) FROM site_comments WHERE author_id = ?2 AND created_at > ?5 - 86400) < ?9
-      RETURNING id`).bind(target, user.id, user.name, text, now(), "site", RATE.seconds, RATE.count, DAILY).first();
-    if (!row) return message("That's a lot of comments for now. Try again later.", back, 429);
-    await notifyComment(env, url.origin, target, { name: user.name, text });
-    back.hash = `c${row.id}`;
-    return Response.redirect(back, 303);
-  }
-
-  const del = /^\/_comments\/(\d+)\/delete$/.exec(url.pathname);
-  if (del) {
-    const comment = await db.prepare("SELECT * FROM site_comments WHERE id = ?").bind(Number(del[1])).first();
-    if (comment) {
-      await db.prepare("DELETE FROM site_comments WHERE id = ?").bind(comment.id).run();
-      back.hash = `t-${comment.target}`;
+  try {
+    if (url.pathname === "/_comments") {
+      const made = await addComment(env, url.origin, user, { target: String(form.get("target") ?? ""), text: String(form.get("text") ?? "") });
+      if (made) back.hash = `c${made.id}`;
+      return Response.redirect(back, 303);
     }
-    return Response.redirect(back, 303);
+    const del = /^\/_comments\/(\d+)\/delete$/.exec(url.pathname);
+    if (del) {
+      const gone = await deleteComment(env, Number(del[1]));
+      if (gone) back.hash = `t-${gone.target}`;
+      return Response.redirect(back, 303);
+    }
+  } catch (error) {
+    if (error instanceof Refusal) return message(error.message, back, error.status);
+    throw error;
   }
   return new Response("Not found", { status: 404 });
+}
+
+// --- actions (see util.js Refusal) -----------------------------------------------------------------------------------
+
+/** The owner comments on their own post or photo (`target`, its key). Returns { id }, or null if there's nothing to say. */
+export async function addComment(env, origin, user, { target, text }) {
+  const db = env.DB;
+  text = text.replace(/\r\n?/g, "\n").trim();
+  if (!text) return null;
+  if (text.length > MAX_COMMENT) throw new Refusal(`Comments can be up to ${MAX_COMMENT} characters.`, 400);
+  if (!(await findTarget(db, target))) throw new Refusal("That's no longer in the archive.", 404);
+  // The limits are checked in the same statement as the insert, so comments sent all at once can't slip past.
+  const row = await db.prepare(`INSERT INTO site_comments (target, author_id, author_name, text, created_at, origin)
+    SELECT ?1, ?2, ?3, ?4, ?5, ?6
+    WHERE (SELECT COUNT(*) FROM site_comments WHERE author_id = ?2 AND created_at > ?5 - ?7) < ?8
+      AND (SELECT COUNT(*) FROM site_comments WHERE author_id = ?2 AND created_at > ?5 - 86400) < ?9
+    RETURNING id`).bind(target, user.id, user.name, text, now(), "site", RATE.seconds, RATE.count, DAILY).first();
+  if (!row) throw new Refusal("That's a lot of comments for now. Try again later.", 429);
+  await notifyComment(env, origin, target, { name: user.name, text });
+  return { id: row.id };
+}
+
+/** Deletes a comment here. Returns { target } (what it was on), or null if it wasn't here. */
+export async function deleteComment(env, id) {
+  const db = env.DB;
+  const comment = await db.prepare("SELECT * FROM site_comments WHERE id = ?").bind(id).first();
+  if (!comment) return null;
+  await db.prepare("DELETE FROM site_comments WHERE id = ?").bind(comment.id).run();
+  return { target: comment.target };
 }
 
 function message(text, back, status) {

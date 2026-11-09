@@ -6,7 +6,7 @@
 // tables by mirror().
 import { photoKey, postKey } from "./archive/comments.js";
 import { HASH_RE, mediaStore } from "./media.js";
-import { json, now } from "./util.js";
+import { json, now, Refusal } from "./util.js";
 import { notifyNewPost } from "./notify.js";
 
 // Copies take ids from here up, far beyond any an import gives out.
@@ -84,34 +84,48 @@ export async function removeUnusedFiles(env, files) {
 
 export async function handlePosts(request, env, url) {
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
-  if (url.pathname === "/_admin/posts") return create(env, await request.json().catch(() => ({})), url);
+  if (url.pathname === "/_admin/posts") {
+    try {
+      await createPost(env, url.origin, await request.json().catch(() => ({})));
+      return json({ ok: true });
+    } catch (error) {
+      if (error instanceof Refusal) return json({ error: error.message }, error.status);
+      throw error;
+    }
+  }
   const del = /^\/_admin\/posts\/(\d+)\/delete$/.exec(url.pathname);
-  if (del) return remove(env, url, Number(del[1]) - SITE_ID);
+  if (del) {
+    await deletePost(env, Number(del[1]));
+    return Response.redirect(`${url.origin}/posts`, 303);
+  }
   return new Response("Not found", { status: 404 });
 }
 
-async function create(env, body, url) {
+// --- actions (see util.js Refusal) -----------------------------------------------------------------------------------
+
+/** A new post: {text, photos: [{hash, thumb_hash, width, height, size}]}, the photos already uploaded. Friends are told. */
+export async function createPost(env, origin, body) {
   const db = env.DB;
   const text = typeof body.text === "string" ? body.text.replace(/\r\n?/g, "\n").trim() : "";
   const photos = Array.isArray(body.photos) ? body.photos : [];
-  if (text.length > MAX_TEXT) return json({ error: `Posts can be up to ${MAX_TEXT} characters.` }, 400);
-  if (!text && !photos.length) return json({ error: "Write something or add a photo." }, 400);
+  if (text.length > MAX_TEXT) throw new Refusal(`Posts can be up to ${MAX_TEXT} characters.`);
+  if (!text && !photos.length) throw new Refusal("Write something or add a photo.");
   const problem = await checkPhotos(env, photos);
-  if (problem) return json({ error: problem }, 400);
+  if (problem) throw new Refusal(problem);
   // One transaction: the post, its photos and the archive's copy.
   await db.batch([
     db.prepare("INSERT INTO site_posts (created_at, text) VALUES (?, ?)").bind(now(), text || null),
     ...addPhotos(db, photos, { inPost: true }),
     ...mirror(db),
   ]);
-  await notifyNewPost(env, url.origin);
-  return json({ ok: true });
+  await notifyNewPost(env, origin);
 }
 
-// Deletes the post and the comments on it. Its photos go too (files included, unless something else uses them),
-// apart from any that were added to an album, which stay there.
-async function remove(env, url, id) {
+// Deletes a post made here (by its archive id) and the comments on it. Its photos go too (files included, unless
+// something else uses them), apart from any that were added to an album, which stay there. Nothing if it isn't one.
+export async function deletePost(env, postId) {
   const db = env.DB;
+  const id = postId - SITE_ID;
   const post = await db.prepare("SELECT * FROM posts WHERE id = ?").bind(SITE_ID + id).first();
   if (post && id > 0) {
     const { results: photos } = await db.prepare("SELECT * FROM site_photos WHERE post_id = ?").bind(id).all();
@@ -128,5 +142,4 @@ async function remove(env, url, id) {
     ]);
     await removeUnusedFiles(env, going.flatMap((f) => [f.hash, f.thumb_hash]));
   }
-  return Response.redirect(`${url.origin}/posts`, 303);
 }

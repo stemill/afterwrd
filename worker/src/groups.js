@@ -45,7 +45,7 @@ import { ANSWERS, eventChanged, eventObject, FINISHED_SQL, finishedAt, parseEven
 import { signedLink } from "./friends.js";
 import { mediaStore } from "./media.js";
 import { notifyEventChange, notifyGroupComment } from "./notify.js";
-import { groupLinkPage, messagePage } from "./pages.js";
+import { groupLinkPage, messagePage } from "./views/pages.js";
 import { callSite, KEY_RE, PROTOCOL, siteOrigin } from "./peers.js";
 import { removeUnusedFiles } from "./posts.js";
 import { signedFile } from "./share.js";

@@ -8,10 +8,10 @@
 // Visitors keep seeing the previous import until finish swaps the tables in one transaction.
 import { ARCHIVE, MAX_FILE, SERVABLE_TYPES } from "../public/static/import/schema.js";
 import { SECTIONS } from "../public/static/import/select.js";
-import { importPage } from "./importpage.js";
+import { importPage } from "./views/import.js";
 import { mirror, SITE_ID } from "./posts.js";
 import { HASH_RE, mediaStore } from "./media.js";
-import { html, json } from "./util.js";
+import { html, json, pageData } from "./util.js";
 
 // D1 limits statements to 100 KB of UTF-8; a JavaScript character is at most 3 bytes of it.
 const STATEMENT_CHARS = 30_000;
@@ -19,7 +19,7 @@ const SHARDS = [..."0123456789abcdef"];
 
 export async function handleImport(request, env, url, owner) {
   const path = url.pathname.slice("/_admin/import".length);
-  if (request.method === "GET" && path === "") return html(importPage(owner));
+  if (request.method === "GET" && path === "") return html(importPage(pageData(env, { owner: owner.name })));
 
   const file = /^\/files\/([0-9a-f]{64})$/.exec(path);
   if (request.method === "PUT" && file) return storeFile(request, env, file[1]);

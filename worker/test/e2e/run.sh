@@ -45,11 +45,13 @@ restore() {
 }
 trap restore EXIT
 
+# Every page's data is checked as it's made (src/util.js pageData): plain, and never carrying a key.
+CHECKS="--var CHECK_PAGE_DATA:1"
 wait_for() { for _ in $(seq 1 90); do curl -s -o /dev/null "http://localhost:$1/_auth/login" && return 0; sleep 1; done; echo "Site on $1 didn't start" >&2; return 1; }
 start() { # [code dir] [extra wrangler args…] — one fresh site on 8787
   local dir="$WORKER"
   if [ "${1:-}" != "" ] && [ -d "$1" ]; then dir="$1"; shift; fi
-  (cd "$dir" && "$WRANGLER" dev --port 8787 --ip 127.0.0.1 --var SETUP_CODE:local-test-setup-code "$@" > "$OUT/dev.log" 2>&1 &)
+  (cd "$dir" && "$WRANGLER" dev --port 8787 --ip 127.0.0.1 --var SETUP_CODE:local-test-setup-code $CHECKS "$@" > "$OUT/dev.log" 2>&1 &)
   wait_for 8787
 }
 stop() { pkill -f "wrangler dev --port 8787" 2>/dev/null; sleep 2; }
@@ -83,7 +85,7 @@ three_sites() { # $1: the suite, run against three sites, each with its own data
     if [ "$name" = G ]; then mode="--var GROUP_KEY:local-test-group-key"; fi
     rm -rf "$OUT/state$name"
     (cd "$WORKER" && "$WRANGLER" dev --name "afterwrd-$port" --port "$port" --ip 127.0.0.1 --inspector-port $((port + 500)) \
-      --persist-to "$OUT/state$name" $mode --var ALLOW_LOCAL_SITES:1 --var TEST_VERSION_AT:2026-01-01T00:00:00Z > "$OUT/dev$port.log" 2>&1 &)
+      --persist-to "$OUT/state$name" $mode $CHECKS --var ALLOW_LOCAL_SITES:1 --var TEST_VERSION_AT:2026-01-01T00:00:00Z > "$OUT/dev$port.log" 2>&1 &)
   done
   wait_for 8787 && wait_for 8788 && wait_for 8789 && { [ "${2:-}" != group ] || wait_for 8790; }
   suite "$1" "$OUT/fake-export.zip" "$PHOTOS" "$OUT/stateA" "$OUT/stateB" "$OUT/stateC" "$OUT/stateG"
@@ -122,7 +124,7 @@ run_upgrade() { # $1: an older release tag
   stop
   (cd "$OUT/old/worker" && "$WRANGLER" dev --port 8787 --ip 127.0.0.1 --persist-to "$OUT/stateU" --var SETUP_CODE:local-test-setup-code > "$OUT/dev.log" 2>&1 &)
   wait_for 8787; suite upgrade.mjs before "$PHOTOS"; stop
-  (cd "$WORKER" && "$WRANGLER" dev --port 8787 --ip 127.0.0.1 --persist-to "$OUT/stateU" --var SETUP_CODE:local-test-setup-code > "$OUT/dev.log" 2>&1 &)
+  (cd "$WORKER" && "$WRANGLER" dev --port 8787 --ip 127.0.0.1 --persist-to "$OUT/stateU" --var SETUP_CODE:local-test-setup-code $CHECKS > "$OUT/dev.log" 2>&1 &)
   wait_for 8787; suite upgrade.mjs after "$PHOTOS"; stop
   git -C "$WORKER" worktree remove --force "$OUT/old"
 }

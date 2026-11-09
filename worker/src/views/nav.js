@@ -1,8 +1,8 @@
 // The site header shared by every signed-in page: the logo, the main menu (Home, Photos, Friends, Groups, Notifications),
 // and the person's picture, behind which sits everything else (profile, Memories, the owner's tools, Sign out).
 // Icons are inline SVG so nothing is fetched.
-import pkg from "../package.json";
-import { escape, now } from "./util.js";
+import pkg from "../../package.json";
+import { escape, now } from "../util.js";
 
 // Site files are fetched by a versioned address, so a browser holding an old copy fetches each release's afresh.
 export const asset = (path) => `${path}?v=${pkg.version}`;

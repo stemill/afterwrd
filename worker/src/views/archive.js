@@ -1,13 +1,15 @@
-// Page templates, ported from afterwrd/templates. `ctx` carries me, the published sections, the signed-in user
-// and the request URL.
-import { resultHtml, verdict } from "../checks.js";
+// The signed-in pages (routes in archive/routes.js). Each view is given `ctx`, the page's frame (routes.js frame():
+// who's signed in, the request URL, their picture, the published sections and the menu's counts), and the data its
+// loader gathered. Views only draw: they read nothing and change nothing.
+import { verdict } from "../checks.js";
+import { resultHtml } from "./checks.js";
 import { connectLink } from "../cloudflare.js";
-import { MAX_COMMENT } from "./comments.js";
+import { MAX_COMMENT } from "../archive/comments.js";
 import {
   aspect, dateRange, EMOJI, fmtAgo, fmtDate, fmtDatetime, linkify, mediaUrl, number, safeUrl, summary, thumbUrl,
 } from "./format.js";
 import { eventDay, eventFormValues, eventWhen, finishedAt } from "../calendar.js";
-import { asset, FAVICON, icon, ownerMain, ownerMenu, siteHeader } from "../nav.js";
+import { asset, FAVICON, icon, ownerMain, ownerMenu, siteHeader } from "./nav.js";
 import { gone } from "../feed.js";
 import { host } from "../peers.js";
 import { SITE_ID } from "../posts.js";
@@ -627,7 +629,7 @@ ${body}
 ${pager(ctx, paging)}`);
 }
 
-export function postPage(ctx, p) {
+export function postPage(ctx, { post: p }) {
   return page(ctx, summary(p.title, ctx.me.name) || "Post", html`
 ${has(ctx, "posts") && html`<p class="crumbs"><a href="/posts">Posts</a> /</p>`}
 <div class="feed">${postCard(ctx, p)}</div>`);
@@ -1013,14 +1015,14 @@ ${c.cover && html`<section class="profile"><div class="cover"><img src="${c.cove
 </nav>`;
 }
 
-export function friendPostsPage(ctx, c, { posts, paging }) {
+export function friendPostsPage(ctx, { friend: c, posts, paging }) {
   return page(ctx, c.name, html`
 ${friendHead(ctx, c, "posts")}
 ${feed(posts, (p) => remoteCard(ctx, c, p), "Nothing posted yet.")}
 ${(paging.page > 1 || paging.hasNext) && pager(ctx, paging)}`);
 }
 
-export function friendPhotosPage(ctx, c, albums) {
+export function friendPhotosPage(ctx, { friend: c, albums }) {
   return page(ctx, `${c.name}: photos`, html`
 ${friendHead(ctx, c, "photos")}
 ${albums.length ? html`<div class="albums">
@@ -1037,7 +1039,7 @@ ${albums.length ? html`<div class="albums">
 </div>` : html`<p class="empty">No photos yet.</p>`}`, "wide");
 }
 
-export function friendAlbumPage(ctx, c, album) {
+export function friendAlbumPage(ctx, { friend: c, album }) {
   return page(ctx, album.name, html`
 <p class="crumbs"><a href="${friendBase(c)}/photos">${c.name}'s photos</a> /</p>
 <header class="album-head">
@@ -1051,7 +1053,7 @@ export function friendAlbumPage(ctx, c, album) {
 ${(album.paging.page > 1 || album.paging.hasNext) && pager(ctx, album.paging)}`, "wide");
 }
 
-export function friendPhotoPage(ctx, c, m) {
+export function friendPhotoPage(ctx, { friend: c, photo: m }) {
   const back = m.album ? `${friendBase(c)}/photos/album/${m.album.key}` : `${friendBase(c)}/photos`;
   const main = html`
 <main class="theatre">
@@ -1082,7 +1084,7 @@ export function friendPhotoPage(ctx, c, m) {
   return layout(ctx, { title: m.album?.name ?? c.name, bodyClass: "viewer", main });
 }
 
-export function friendProblem(ctx, c, message) {
+export function friendProblem(ctx, { friend: c, message }) {
   return page(ctx, c.name, html`
 ${friendHead(ctx, c, "")}
 <p class="notice">${friendSilence(c) ?? html`Couldn't load this from ${c.name}'s site: ${message}`}</p>`);
@@ -1384,7 +1386,7 @@ function groupCard(ctx, g, p) {
 </article>`;
 }
 
-export function groupPage(ctx, g, { group: info, posts, paging }, { maxPhotos }) {
+export function groupPage(ctx, { membership: g, group: info, posts, paging, maxPhotos }) {
   g.ownerFrom = info.ownerFrom;
   return page(ctx, info.name, html`
 ${groupHead(ctx, g, info, "posts")}
@@ -1393,7 +1395,7 @@ ${feed(posts, (p) => groupCard(ctx, g, p), "Nothing posted yet. Write the first 
 ${(paging.page > 1 || paging.hasNext) && pager(ctx, paging)}`);
 }
 
-export function groupPostPage(ctx, g, { group: info, post }) {
+export function groupPostPage(ctx, { membership: g, group: info, post }) {
   g.ownerFrom = info.ownerFrom;
   return page(ctx, info.name, html`
 ${groupHead(ctx, g, info, "")}
@@ -1434,7 +1436,7 @@ function eventBlock(ctx, g, p, { full = false } = {}) {
     ${ANSWER_LABELS.map(([value, label]) => html`<button class="chip${e.answer === value ? " primary" : ""}" name="answer" value="${value}"
       aria-pressed="${e.answer === value ? "true" : "false"}">${label}</button>`)}
   </form>`}
-  ${full && html`<dl class="who">
+  ${full && html`<dl class="answered">
     ${[["Going", e.going], ["Maybe", e.maybe], ["Can't go", e.cantGo]].filter(([, list]) => list.length)
       .map(([label, list]) => html`<dt>${label}</dt><dd>${names(list)}</dd>`)}
   </dl>
@@ -1474,7 +1476,7 @@ function eventForm({ action, back, values = {}, text = "", submit }) {
 }
 
 /** A group's calendar: what's coming up, by month, adding an event, and recent ones. */
-export function groupCalendarPage(ctx, g, { outdated, group: info, upcoming, past }) {
+export function groupCalendarPage(ctx, { membership: g, outdated, group: info, upcoming, past }) {
   if (info) g.ownerFrom = info.ownerFrom;
   const months = [];
   for (const p of upcoming) {
@@ -1499,7 +1501,7 @@ ${past.length > 0 && html`<h2 class="month">Before</h2><div class="feed">${past.
 }
 
 /** Changing an event the owner here added. */
-export function groupEventEditPage(ctx, g, { group: info, post }) {
+export function groupEventEditPage(ctx, { membership: g, group: info, post }) {
   g.ownerFrom = info.ownerFrom;
   return page(ctx, `${info.name}: change the event`, html`
 ${groupHead(ctx, g, info, "calendar")}
@@ -1513,7 +1515,7 @@ ${groupHead(ctx, g, info, "calendar")}
 }
 
 /** Who's in a group. For its admins: requests to join, the invite link, roles, and (its owner) deleting it. */
-export function groupMembersPage(ctx, g, { group: info, members }, { max, connected, friends = [] }) {
+export function groupMembersPage(ctx, { membership: g, group: info, members, max, connected, friends = [] }) {
   const owner = g.role === "owner";
   const here = `/groups/${g.id}/members`;
   // Friends with them, asked them, asked by them, or a button to ask: everyone in a group can see who's in it.
@@ -1628,7 +1630,7 @@ ${owner ? html`<section class="card" id="delete">
 </script>`);
 }
 
-export function groupProblem(ctx, g, message) {
+export function groupProblem(ctx, { membership: g, message }) {
   const waiting = /^Waiting for /.test(message);
   const gone = /^Not a member/.test(message);
   return page(ctx, g.name, html`

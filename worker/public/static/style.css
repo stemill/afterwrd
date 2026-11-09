@@ -353,9 +353,10 @@ form.stack p { margin: 0; }
 .event-what p { margin: 0.2rem 0 0; }
 .event.cancelled .event-title { text-decoration: line-through; color: var(--muted); }
 .answers { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.event .who { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 1rem; margin: 0; font-size: 0.9rem; }
-.event .who dt { color: var(--muted); }
-.event .who dd { margin: 0; }
+/* Who's going, maybe or can't (not .who, the round pictures: that made this a big coloured oval). */
+.event .answered { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 1rem; margin: 0; font-size: 0.9rem; }
+.event .answered dt { color: var(--muted); }
+.event .answered dd { margin: 0; }
 .event .actions-row { margin: 0; }
 .event .actions-row form { display: contents; }
 .event-form label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.9rem; }

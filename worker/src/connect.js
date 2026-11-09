@@ -22,11 +22,11 @@
 import { safeNext } from "./auth.js";
 import { testingHere } from "./cloudflare.js";
 import { loadMembers } from "./membership.js";
-import { asset, FAVICON, ownerHeader } from "./nav.js";
-import { connectLinkPage, messagePage } from "./pages.js";
+import { connectLinkPage, messagePage } from "./views/pages.js";
 import { callSite, host, KEY_RE, ownerName, siteOrigin } from "./peers.js";
 import { lastChecked } from "./checks.js";
-import { escape, html, json, now, randomToken, sha256 } from "./util.js";
+import { html, json, now, pageData, randomToken, Refusal, sha256, withoutKeys } from "./util.js";
+import { confirmPage, connectionsMessage, connectionsPage, introducedPage, introducePage, togetherPage } from "./views/connections.js";
 
 // A friend link lasts 30 days, enough for someone new to set up their own site first (and wait for Facebook's
 // download, if they want it). It works once, and only asks: nothing is shared until its owner approves.
@@ -233,124 +233,223 @@ export async function handleConnections(request, env, url) {
   const db = env.DB;
   const path = url.pathname.slice("/_admin/connections".length);
   if (request.method === "GET" && path === "") {
-    const { results } = await db.prepare(`SELECT * FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NOT NULL
-      ORDER BY name COLLATE NOCASE`).all();
-    return html(connectionsPage(results, !(await lastChecked(db))));
+    const { results } = await db.prepare(`SELECT id, origin, name, connected_at FROM connections WHERE connected_at IS NOT NULL
+      AND approved_at IS NOT NULL ORDER BY name COLLATE NOCASE`).all();
+    return html(connectionsPage(pageData(env, { friends: results, unchecked: !(await lastChecked(db)) })));
   }
   if (path === "/new") {
-    const target = parseLink(url.searchParams.get("link") ?? "", url, env);
+    const link = url.searchParams.get("link") ?? "";
     if (request.method === "GET") {
-      if (target.error) return html(connectionsMessage(target.error), 400);
+      const target = parseLink(link, url, env);
+      if (target.error) return html(connectionsMessage({ message: target.error }), 400);
       try {
         const info = await callSite(target.origin, `/_connect/${target.token}/info`);
-        return html(confirmPage(cleanName(info.name), target.origin));
+        return html(confirmPage(pageData(env, { name: cleanName(info.name), origin: target.origin })));
       } catch (error) {
-        return html(connectionsMessage(error.message), 400);
+        return html(connectionsMessage({ message: error.message }), 400);
       }
     }
-    if (request.method === "POST") return connect(env, url, target);
+    if (request.method === "POST") return answerJson(async () => ({ ok: true, ...await addFriendByLink(env, url.origin, link) }));
   }
-  if (request.method === "POST" && path === "/link") {
-    const token = randomToken();
-    await db.batch([
-      db.prepare("DELETE FROM connect_links WHERE expires_at < ?").bind(now()),
-      db.prepare("INSERT INTO connect_links (token_hash, expires_at, created_at) VALUES (?, ?, ?)").bind(await sha256(token), now() + LINK_SECONDS, now()),
-    ]);
-    const link = `${url.origin}/_connect/${token}`;
-    return json({ link, message: `I'm on afterwrd, a small private social network where each of us has our own site, `
-      + `free. Let's be friends! Already on afterwrd? Copy this link and paste it into Add a friend on your site. New `
-      + `to it? Open the link, and it shows you how to set up your own. ${link}` });
-  }
+  if (request.method === "POST" && path === "/link") return json(await makeFriendLink(env, url.origin));
   // An invitation for someone in the Facebook download: a friend link for them alone, and a message to send.
   if (request.method === "POST" && path === "/invite") {
     const body = await request.json().catch(() => ({}));
-    const person = await db.prepare("SELECT name FROM people WHERE is_me = 0 AND name = ? COLLATE NOCASE LIMIT 1")
-      .bind(String(body.name ?? "").trim()).first();
-    if (!person) return json({ error: "That name isn't in your Facebook download." }, 404);
-    const token = randomToken();
-    await db.batch([
-      db.prepare("DELETE FROM connect_links WHERE (person_name = ? AND used_at IS NULL) OR expires_at < ?").bind(person.name, now()),
-      db.prepare("INSERT INTO connect_links (token_hash, expires_at, person_name, created_at) VALUES (?, ?, ?, ?)")
-        .bind(await sha256(token), now() + LINK_SECONDS, person.name, now()),
-    ]);
-    const link = `${url.origin}/_connect/${token}`;
-    const first = person.name.split(" ")[0];
-    const message = `Hi ${first}, I've moved my posts and photos to afterwrd, a small private social network where each `
-      + `of us has our own site, free. Let's be friends! Open this link, and it shows you how to set up your own first. `
-      + `(Already on afterwrd? Copy the link and paste it into Add a friend on your site.) ${link}`;
-    return json({ name: person.name, link, message });
+    return answerJson(() => inviteFromFacebook(env, url.origin, String(body.name ?? "")));
   }
-  // Someone asked to be friends: approve (share, and link them to who the invite was for) or decline (forget them;
-  // if they asked without a link, they can't again that way). From Home's line (?back=home) it goes back to Home,
-  // from a group's members to there (?back=<path>); otherwise to Friends.
+  // Someone asked to be friends: approve or decline. From Home's line (?back=home) it goes back to Home, from a
+  // group's members to there (?back=<path>); otherwise to Friends.
   const decide = /^\/(\d+)\/(approve|decline)$/.exec(path);
   if (request.method === "POST" && decide) {
-    const connection = await db.prepare("SELECT * FROM connections WHERE id = ? AND connected_at IS NOT NULL AND approved_at IS NULL")
-      .bind(Number(decide[1])).first();
-    if (connection && decide[2] === "approve") await approve(db, connection);
-    else if (connection) {
-      await callSite(connection.origin, "/_peer/disconnect", { key: connection.their_key, body: {} }).catch(() => {});
-      await db.batch([
-        db.prepare("DELETE FROM connections WHERE id = ?").bind(connection.id),
-        db.prepare("DELETE FROM introductions WHERE origin = ?").bind(connection.origin),
-        ...(connection.via_kind ? [db.prepare("INSERT OR REPLACE INTO declined_asks (origin, declined_at) VALUES (?, ?)").bind(connection.origin, now())] : []),
-      ]);
-    }
+    await decideRequest(env, Number(decide[1]), decide[2] === "approve");
     const back = url.searchParams.get("back");
     return Response.redirect(`${url.origin}${back === "home" ? "/" : back ? safeNext(back, url) : "/friend"}`, 303);
   }
   // Asking someone to be friends without a link: someone in one of the owner's groups, or someone a friend introduced.
-  if (request.method === "POST" && path === "/ask") return askFrom(env, url, await request.formData().catch(() => new FormData()));
+  if (request.method === "POST" && path === "/ask") {
+    const form = await request.formData().catch(() => new FormData());
+    const back = safeNext(String(form.get("back") ?? "/friend"), url);
+    try {
+      const asked = await askToBeFriends(env, url.origin, { origin: form.get("origin"), group: form.get("group") });
+      // A request from an invite is decided on Friends, which warns if the name isn't the one invited.
+      return Response.redirect(`${url.origin}${asked.decideOnFriends ? "/friend" : back}`, 303);
+    } catch (error) {
+      if (error instanceof Refusal) return html(messagePage(error.message, { href: back, label: "Go back" }), error.status);
+      throw error;
+    }
+  }
   // Introducing several friends to each other at once: the page, then one friend's site told about the rest per call.
-  if (path === "/together") return introduceTogether(request, env);
+  if (path === "/together") {
+    if (request.method === "GET") {
+      const friends = await introducible(env.DB);
+      return html(togetherPage(pageData(env, { friends: friends.map(withoutKeys), max: TOGETHER_MAX, maxNote: MAX_NOTE })));
+    }
+    if (request.method !== "POST") return new Response("Not found", { status: 404 });
+    const body = await request.json().catch(() => ({}));
+    return answerJson(async () => {
+      await introduceTogether(env, body);
+      return { ok: true };
+    });
+  }
   // Introducing a friend to another friend: each of their sites is told about the other.
   const introduce = /^\/(\d+)\/introduce$/.exec(path);
-  if (introduce) return introduceFriends(request, env, url, Number(introduce[1]));
+  if (introduce) return introducing(request, env, Number(introduce[1]));
   const dismiss = /^\/introductions\/(\d+)\/dismiss$/.exec(path);
   if (request.method === "POST" && dismiss) {
-    await db.prepare("DELETE FROM introductions WHERE id = ?").bind(Number(dismiss[1])).run();
+    await dismissIntroduction(env, Number(dismiss[1]));
     return Response.redirect(`${url.origin}${url.searchParams.get("back") === "home" ? "/" : "/friend"}`, 303);
   }
   // Which person in the owner's Facebook download a friend is (a form from Friends); kept by name.
   const facebook = /^\/(\d+)\/facebook$/.exec(path);
   if (request.method === "POST" && facebook) {
-    const id = Number(facebook[1]);
     const form = await request.formData().catch(() => new FormData());
-    if (await db.prepare("SELECT 1 FROM connections WHERE id = ? AND connected_at IS NOT NULL AND approved_at IS NOT NULL").bind(id).first()) {
-      if (form.get("unlink")) {
-        await db.prepare("DELETE FROM friend_links WHERE connection_id = ?").bind(id).run();
-      } else {
-        // "none" means the suggestion wasn't them; otherwise the name must be someone in the download.
-        const person = form.get("none") ? { name: null }
-          : await db.prepare("SELECT name FROM people WHERE is_me = 0 AND name = ? COLLATE NOCASE LIMIT 1").bind(String(form.get("name") ?? "").trim()).first();
-        if (person) {
-          await db.prepare("INSERT OR REPLACE INTO friend_links (connection_id, person_name, created_at) VALUES (?, ?, ?)")
-            .bind(id, person.name, now()).run();
-        }
-      }
-    }
+    await linkToFacebook(env, Number(facebook[1]), { unlink: Boolean(form.get("unlink")), none: Boolean(form.get("none")),
+      name: String(form.get("name") ?? "") });
     return Response.redirect(`${url.origin}/friend`, 303);
   }
   const disconnect = /^\/(\d+)\/disconnect$/.exec(path);
   if (request.method === "POST" && disconnect) {
-    const connection = await db.prepare("SELECT * FROM connections WHERE id = ?").bind(Number(disconnect[1])).first();
-    if (connection) {
-      // Tell them, if they can be reached; either way this side forgets them.
-      await callSite(connection.origin, "/_peer/disconnect", { key: connection.their_key, body: {} }).catch(() => {});
-      // The owner's copies of what they said on that site (comments_elsewhere) stay: they're theirs.
-      await db.batch([
-        db.prepare("DELETE FROM connections WHERE id = ?").bind(connection.id),
-        db.prepare("DELETE FROM friend_links WHERE connection_id = ?").bind(connection.id),
-        db.prepare("DELETE FROM introductions WHERE connection_id = ? OR origin = ?").bind(connection.id, connection.origin),
-        // Someone the owner removed can't ask again without a link (the owner still can).
-        db.prepare("INSERT OR REPLACE INTO declined_asks (origin, declined_at) VALUES (?, ?)").bind(connection.origin, now()),
-      ]);
-    }
+    await removeFriend(env, Number(disconnect[1]));
     // From a form (Remove friend on their page, or on Friends), back to Friends; from this site's script, JSON.
     const form = /form/.test(request.headers.get("Content-Type") ?? "");
     return form ? Response.redirect(`${url.origin}/friend`, 303) : json({ ok: true });
   }
   return new Response("Not found", { status: 404 });
+}
+
+/** An action's result as JSON, or {error} with its status if it said no. */
+async function answerJson(act) {
+  try {
+    return json(await act());
+  } catch (error) {
+    if (error instanceof Refusal) return json({ error: error.message }, error.status);
+    throw error;
+  }
+}
+
+/** Introducing friend `id` to another: GET the page to choose who, POST {to, note} (a form) to do it. */
+async function introducing(request, env, id) {
+  if (request.method === "POST") {
+    const form = await request.formData().catch(() => new FormData());
+    try {
+      const { friend, other, trouble } = await introduceFriend(env, id, { to: Number(form.get("to")), note: String(form.get("note") ?? "") });
+      return html(introducedPage(pageData(env, { friend, other, trouble })), trouble.length === 2 ? 400 : 200);
+    } catch (error) {
+      if (error instanceof Refusal) return html(connectionsMessage({ message: error.message }), error.status);
+      throw error;
+    }
+  }
+  const friends = await introducible(env.DB);
+  const friend = friends.find((c) => c.id === id);
+  if (!friend) return html(connectionsMessage({ message: NOT_INTRODUCIBLE }), 404);
+  if (request.method !== "GET") return new Response("Not found", { status: 404 });
+  const others = friends.filter((c) => c.id !== id);
+  return html(introducePage(pageData(env, { friend: withoutKeys(friend), others: others.map(withoutKeys), maxNote: MAX_NOTE })));
+}
+
+// --- actions (see util.js Refusal) -----------------------------------------------------------------------------------
+
+/** Adds a friend from their friend link: this site asks theirs, and is approved here at once. Returns { name }. */
+export async function addFriendByLink(env, origin, link) {
+  const here = new URL(origin);
+  const target = parseLink(link, here, env);
+  if (target.error) throw new Refusal(target.error, 400);
+  const done = await handshake(env, here, target.origin, `/_connect/${target.token}/accept`);
+  if (done.error) throw new Refusal(done.error, done.status);
+  return { name: done.name };
+}
+
+/** A new friend link (it works once, for 30 days), and a message to send with it: { link, message }. */
+export async function makeFriendLink(env, origin) {
+  const db = env.DB;
+  const token = randomToken();
+  await db.batch([
+    db.prepare("DELETE FROM connect_links WHERE expires_at < ?").bind(now()),
+    db.prepare("INSERT INTO connect_links (token_hash, expires_at, created_at) VALUES (?, ?, ?)").bind(await sha256(token), now() + LINK_SECONDS, now()),
+  ]);
+  const link = `${origin}/_connect/${token}`;
+  return { link, message: `I'm on afterwrd, a small private social network where each of us has our own site, `
+    + `free. Let's be friends! Already on afterwrd? Copy this link and paste it into Add a friend on your site. New `
+    + `to it? Open the link, and it shows you how to set up your own. ${link}` };
+}
+
+/** A friend link for someone in the Facebook download alone (replacing one made for them before): { name, link, message }. */
+export async function inviteFromFacebook(env, origin, name) {
+  const db = env.DB;
+  const person = await db.prepare("SELECT name FROM people WHERE is_me = 0 AND name = ? COLLATE NOCASE LIMIT 1")
+    .bind(name.trim()).first();
+  if (!person) throw new Refusal("That name isn't in your Facebook download.", 404);
+  const token = randomToken();
+  await db.batch([
+    db.prepare("DELETE FROM connect_links WHERE (person_name = ? AND used_at IS NULL) OR expires_at < ?").bind(person.name, now()),
+    db.prepare("INSERT INTO connect_links (token_hash, expires_at, person_name, created_at) VALUES (?, ?, ?, ?)")
+      .bind(await sha256(token), now() + LINK_SECONDS, person.name, now()),
+  ]);
+  const link = `${origin}/_connect/${token}`;
+  const first = person.name.split(" ")[0];
+  const message = `Hi ${first}, I've moved my posts and photos to afterwrd, a small private social network where each `
+    + `of us has our own site, free. Let's be friends! Open this link, and it shows you how to set up your own first. `
+    + `(Already on afterwrd? Copy the link and paste it into Add a friend on your site.) ${link}`;
+  return { name: person.name, link, message };
+}
+
+/**
+ * Someone asked to be friends (`id`, still waiting): approve (share, and link them to who the invite was for) or
+ * decline (forget them; if they asked without a link, they can't again that way). Nothing if there's no such request.
+ */
+export async function decideRequest(env, id, approving) {
+  const db = env.DB;
+  const connection = await db.prepare("SELECT * FROM connections WHERE id = ? AND connected_at IS NOT NULL AND approved_at IS NULL")
+    .bind(id).first();
+  if (connection && approving) await approve(db, connection);
+  else if (connection) {
+    await callSite(connection.origin, "/_peer/disconnect", { key: connection.their_key, body: {} }).catch(() => {});
+    await db.batch([
+      db.prepare("DELETE FROM connections WHERE id = ?").bind(connection.id),
+      db.prepare("DELETE FROM introductions WHERE origin = ?").bind(connection.origin),
+      ...(connection.via_kind ? [db.prepare("INSERT OR REPLACE INTO declined_asks (origin, declined_at) VALUES (?, ?)").bind(connection.origin, now())] : []),
+    ]);
+  }
+}
+
+/** Forgets an introduction. */
+export async function dismissIntroduction(env, id) {
+  await env.DB.prepare("DELETE FROM introductions WHERE id = ?").bind(id).run();
+}
+
+/**
+ * Which person in the Facebook download friend `id` is: `name` (someone in the download), `none` (the suggestion
+ * wasn't them), or `unlink`. Nothing changes if they aren't a friend, or the name isn't in the download.
+ */
+export async function linkToFacebook(env, id, { unlink, none, name }) {
+  const db = env.DB;
+  if (!(await db.prepare("SELECT 1 FROM connections WHERE id = ? AND connected_at IS NOT NULL AND approved_at IS NOT NULL").bind(id).first())) return;
+  if (unlink) {
+    await db.prepare("DELETE FROM friend_links WHERE connection_id = ?").bind(id).run();
+    return;
+  }
+  const person = none ? { name: null }
+    : await db.prepare("SELECT name FROM people WHERE is_me = 0 AND name = ? COLLATE NOCASE LIMIT 1").bind(name.trim()).first();
+  if (person) {
+    await db.prepare("INSERT OR REPLACE INTO friend_links (connection_id, person_name, created_at) VALUES (?, ?, ?)")
+      .bind(id, person.name, now()).run();
+  }
+}
+
+/** Removes friend `id`: their site is told if it can be reached; either way this side forgets them. */
+export async function removeFriend(env, id) {
+  const db = env.DB;
+  const connection = await db.prepare("SELECT * FROM connections WHERE id = ?").bind(id).first();
+  if (!connection) return;
+  await callSite(connection.origin, "/_peer/disconnect", { key: connection.their_key, body: {} }).catch(() => {});
+  // The owner's copies of what they said on that site (comments_elsewhere) stay: they're theirs.
+  await db.batch([
+    db.prepare("DELETE FROM connections WHERE id = ?").bind(connection.id),
+    db.prepare("DELETE FROM friend_links WHERE connection_id = ?").bind(connection.id),
+    db.prepare("DELETE FROM introductions WHERE connection_id = ? OR origin = ?").bind(connection.id, connection.origin),
+    // Someone the owner removed can't ask again without a link (the owner still can).
+    db.prepare("INSERT OR REPLACE INTO declined_asks (origin, declined_at) VALUES (?, ?)").bind(connection.origin, now()),
+  ]);
 }
 
 function parseLink(link, url, env) {
@@ -365,13 +464,6 @@ function parseLink(link, url, env) {
   if (!origin || !match) return { error: "That isn't a friend link. It should look like https://…/_connect/…" };
   if (origin === url.origin) return { error: "That's a link to your own site. Send it to a friend instead." };
   return { origin, token: match[1] };
-}
-
-// The friend's side of the handshake: run on their site when they confirm.
-async function connect(env, url, target) {
-  if (target.error) return json({ error: target.error }, 400);
-  const done = await handshake(env, url, target.origin, `/_connect/${target.token}/accept`);
-  return done.error ? json({ error: done.error }, done.status) : json({ ok: true, name: done.name });
 }
 
 /**
@@ -416,63 +508,65 @@ async function approve(db, connection) {
   ]);
 }
 
-/** The owner asks someone to be friends without a link (a form: origin, group or introduction, back). */
-async function askFrom(env, url, form) {
+/**
+ * The owner asks someone to be friends without a link: someone (`origin`) in one of their groups (`group`, its id
+ * here), or else someone a friend introduced. If they've already asked, asking back is saying yes, apart from a
+ * request from an invite, which is decided on Friends: then { decideOnFriends: true }.
+ */
+export async function askToBeFriends(env, here, { origin: asked, group: groupId }) {
   const db = env.DB;
-  const back = safeNext(String(form.get("back") ?? "/friend"), url);
-  const origin = siteOrigin(form.get("origin"), env);
-  const fail = (message) => html(messagePage(message, { href: back, label: "Go back" }), 400);
-  if (!origin || origin === url.origin) return fail("That isn't someone to ask.");
-  // If they've already asked, asking back is saying yes (but a request from an invite is decided on Friends, which
-  // warns if the name isn't the one invited).
+  const url = new URL(here);
+  const origin = siteOrigin(asked, env);
+  if (!origin || origin === url.origin) throw new Refusal("That isn't someone to ask.");
   const theirs = await db.prepare("SELECT * FROM connections WHERE origin = ? AND connected_at IS NOT NULL").bind(origin).first();
-  if (theirs?.invited_as && !theirs.approved_at) return Response.redirect(`${url.origin}/friend`, 303);
+  if (theirs?.invited_as && !theirs.approved_at) return { decideOnFriends: true };
   if (theirs && !theirs.approved_at) await approve(db, theirs);
-  if (theirs) return Response.redirect(`${url.origin}${back}`, 303);
+  if (theirs) return {};
   let via;
   let name = host(origin);
-  if (form.get("group")) {
-    const group = await db.prepare("SELECT origin, remote_id FROM groups WHERE id = ? AND joined_at IS NOT NULL").bind(Number(form.get("group"))).first();
-    if (!group) return fail("That group isn't here any more.");
+  if (groupId) {
+    const group = await db.prepare("SELECT origin, remote_id FROM groups WHERE id = ? AND joined_at IS NOT NULL").bind(Number(groupId)).first();
+    if (!group) throw new Refusal("That group isn't here any more.");
     via = { group: group.origin, id: group.remote_id };
   } else {
     const made = await liveIntroduction(db, origin);
-    if (!made) return fail("That introduction isn't here any more.");
+    if (!made) throw new Refusal("That introduction isn't here any more.");
     via = { introduction: true };
     name = made.name;
   }
   const done = await handshake(env, url, origin, "/_connect/ask", { via });
   if (done.error) {
-    return fail(done.gone ? `${name}'s site needs a newer afterwrd before you can ask this way. Send them a friend link instead.`
+    throw new Refusal(done.gone ? `${name}'s site needs a newer afterwrd before you can ask this way. Send them a friend link instead.`
       : `Couldn't ask ${name}: ${done.error}`);
   }
   // Asking someone answers any introduction to them (and, in handshake, takes back having turned them down).
   await db.prepare("DELETE FROM introductions WHERE origin = ?").bind(origin).run();
-  return Response.redirect(`${url.origin}${back}`, 303);
+  return {};
 }
 
-/** Introducing friend `id` to another friend (`to`), with a note: GET shows the choice, POST tells both their sites. */
-async function introduceFriends(request, env, url, id) {
-  const db = env.DB;
+const NOT_INTRODUCIBLE = "You can introduce friends once you've seen their posts here (they've approved you too).";
+
+/**
+ * Introduces friend `id` to another friend (`to`), with a note: both their sites are told. Returns { friend, other,
+ * trouble } (the two, and what went wrong telling either; both going wrong is a failure too, shown as such).
+ */
+export async function introduceFriend(env, id, { to, note }) {
   // Friends both ways: their sites have answered this one, so they've approved the owner here too.
-  const { results: friends } = await db.prepare(`SELECT * FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NOT NULL
-    AND reached_at IS NOT NULL ORDER BY name COLLATE NOCASE`).all();
+  const friends = await introducible(env.DB);
   const friend = friends.find((c) => c.id === id);
-  if (!friend) return html(connectionsMessage("You can introduce friends once you've seen their posts here (they've approved you too)."), 404);
+  if (!friend) throw new Refusal(NOT_INTRODUCIBLE, 404);
   const others = friends.filter((c) => c.id !== id);
-  if (request.method === "GET") return html(introducePage(friend, others));
-  if (request.method !== "POST") return new Response("Not found", { status: 404 });
-  const form = await request.formData().catch(() => new FormData());
-  const other = others.find((c) => c.id === Number(form.get("to")));
-  if (!other) return html(connectionsMessage("Choose who to introduce them to."), 400);
-  const note = String(form.get("note") ?? "").replace(/\r\n?/g, "\n").trim().slice(0, MAX_NOTE);
-  const tell = (to, about) => callSite(to.origin, "/_peer/introduce", { key: to.their_key,
+  const other = others.find((c) => c.id === to);
+  if (!other) throw new Refusal("Choose who to introduce them to.", 400);
+  note = note.replace(/\r\n?/g, "\n").trim().slice(0, MAX_NOTE);
+  const tell = (whom, about) => callSite(whom.origin, "/_peer/introduce", { key: whom.their_key,
     body: { type: "Introduce", origin: about.origin, name: about.name, ...(note && { content: note }) } });
   const told = await Promise.allSettled([tell(friend, other), tell(other, friend)]);
   const trouble = told.map((t, i) => t.status === "rejected" && `${[friend, other][i].name}'s site: ${t.reason.status === 404
     ? "it needs a newer afterwrd first" : t.reason.message}`).filter(Boolean);
-  return html(introducedPage(friend, other, trouble), trouble.length === 2 ? 400 : 200);
+  return { friend: withoutKeys(friend), other: withoutKeys(other), trouble };
 }
+
 /** Friends both ways (their sites have answered this one, so they've approved the owner here too), by name. */
 const introducible = async (db) => (await db.prepare(`SELECT * FROM connections WHERE connected_at IS NOT NULL
   AND approved_at IS NOT NULL AND reached_at IS NOT NULL ORDER BY name COLLATE NOCASE`).all()).results;
@@ -480,266 +574,23 @@ const introducible = async (db) => (await db.prepare(`SELECT * FROM connections 
 const TOGETHER_MAX = 10; // people introduced to each other at once (each site takes 20 introductions a day from one friend)
 
 /**
- * Several friends introduced to each other, as if each pair had been: nothing is made or kept here. GET: the page,
- * to choose them. POST {to, others, note}: tells one of them (to) about each of the rest; the page calls it once for
- * each person chosen, so a call never needs more than TOGETHER_MAX - 1 of the 50 calls to other sites a request gets.
+ * Several friends introduced to each other, as if each pair had been: nothing is made or kept here. Each call
+ * {to, others, note} tells one of them (to) about each of the rest; the page calls it once for each person chosen, so
+ * a call never needs more than TOGETHER_MAX - 1 of the 50 calls to other sites a request gets.
  */
-async function introduceTogether(request, env) {
+export async function introduceTogether(env, body) {
   const friends = await introducible(env.DB);
-  if (request.method === "GET") return html(togetherPage(friends));
-  if (request.method !== "POST") return new Response("Not found", { status: 404 });
-  const body = await request.json().catch(() => ({}));
   const byId = new Map(friends.map((c) => [c.id, c]));
   const friend = byId.get(Number(body.to));
   const ids = [...new Set(Array.isArray(body.others) ? body.others.map(Number) : [])].filter((id) => id !== friend?.id);
   const others = ids.map((id) => byId.get(id)).filter(Boolean);
-  if (!friend || !others.length || others.length !== ids.length) return json({ error: "Choose friends who've approved you too." }, 400);
-  if (others.length > TOGETHER_MAX - 1) return json({ error: `Up to ${TOGETHER_MAX} people at a time.` }, 400);
+  if (!friend || !others.length || others.length !== ids.length) throw new Refusal("Choose friends who've approved you too.", 400);
+  if (others.length > TOGETHER_MAX - 1) throw new Refusal(`Up to ${TOGETHER_MAX} people at a time.`, 400);
   const note = String(body.note ?? "").replace(/\r\n?/g, "\n").trim().slice(0, MAX_NOTE);
   const told = await Promise.allSettled(others.map((about) => callSite(friend.origin, "/_peer/introduce", { key: friend.their_key,
     body: { type: "Introduce", origin: about.origin, name: about.name, ...(note && { content: note }) } })));
   const failed = told.find((t) => t.status === "rejected")?.reason;
-  if (!failed) return json({ ok: true });
-  return json({ error: failed.status === 404 ? "their site needs a newer afterwrd first"
-    : failed.status === 429 ? "their site has had a lot of introductions today; try tomorrow" : failed.message }, 502);
-}
-
-// --- pages -------------------------------------------------------------------------------------------------------
-
-function shell(title, body, script = "") {
-  return `<!doctype html>
-<html lang="en-GB">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escape(title)} · afterwrd</title>
-<link rel="stylesheet" href="${asset("/static/style.css")}">
-${FAVICON}
-</head>
-<body>
-${ownerHeader("connections")}
-<main class="connections">
-${body}
-</main>
-${script ? `<script>${script}</script>` : ""}
-</body>
-</html>`;
-}
-
-const day = (ts) => new Date(ts * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-
-const POST_SCRIPT = `
-  async function post(path, body) {
-    const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "Something went wrong.");
-    return data;
-  }
-  const error = document.getElementById("error");`;
-
-function connectionsPage(connections, unchecked = false) {
-  return shell("Add a friend", `
-<p class="crumbs"><a href="/friend">Friends</a> /</p>
-<h1>Add a friend</h1>
-<h2>Got a link from a friend?</h2>
-<form class="filters" id="paste" action="/_admin/connections/new" method="get">
-  <input type="search" name="link" placeholder="Paste their friend link here" required autocomplete="off" aria-label="A friend link">
-  <button type="button" class="chip" id="paste-clip" hidden>Paste</button>
-  <button>Add friend</button>
-</form>
-
-<h2>Invite someone</h2>
-<p class="meta">Send a friend link to someone, whether or not they have an afterwrd site yet: if they haven't, it shows
-them how to set one up first. Once you're friends, you'll each see the other's new posts on <a href="/">Home</a>, and
-can read each other's posts and photos (everything you've published) on your own site. Your comments are kept on
-their site. Removing a friend ends all of it at once.</p>
-${unchecked ? `<p class="meta" id="unchecked">Your site hasn't been checked yet. Once a friend with afterwrd is here, it's worth
-<a href="/_admin/update#check">asking them to check it</a>, before you invite many others.</p>` : ""}
-
-<div class="actions-row">
-  <button class="chip primary" id="make">Make a friend link</button>
-</div>
-<p id="error" role="alert"></p>
-<section class="card" id="link" hidden>
-  <strong>Send this to your friend</strong>
-  <p class="meta">However you usually would. The link works once, for 30 days; when they use it, you'll be asked to
-  approve on Home.</p>
-  <textarea id="link-message" readonly rows="5" aria-label="Message with a friend link"></textarea>
-  <input id="link-url" readonly aria-label="Friend link" hidden>
-  <button class="chip primary" id="copy">Copy message</button>
-  <button class="chip" id="share" hidden>Share…</button>
-</section>
-
-${connections.length ? `<table class="numbers">
-  <thead><tr><th>Friend</th><th>Site</th><th>Since</th><th></th></tr></thead>
-  <tbody>${connections.map((c) => `<tr>
-    <th><a href="/friend/${c.id}/posts">${escape(c.name)}</a></th>
-    <td><a href="${escape(c.origin)}" target="_blank" rel="noopener noreferrer">${escape(host(c.origin))}</a></td>
-    <td>${day(c.connected_at)}</td>
-    <td><button class="chip" data-disconnect="${c.id}" data-name="${escape(c.name)}">Remove friend</button></td>
-  </tr>`).join("")}</tbody>
-</table>` : `<p class="empty">You're not connected with anyone yet.</p>`}`, `${POST_SCRIPT}
-  // Paste in one tap where the browser allows reading what was copied (it may ask first).
-  const pasteClip = document.getElementById("paste-clip");
-  if (navigator.clipboard?.readText) {
-    pasteClip.hidden = false;
-    pasteClip.addEventListener("click", async () => {
-      const box = document.querySelector("#paste input[name=link]");
-      try { box.value = (await navigator.clipboard.readText()).trim(); } catch { box.focus(); return; }
-      if (box.value) document.getElementById("paste").requestSubmit();
-    });
-  }
-  const panel = document.getElementById("link");
-  const linkUrl = document.getElementById("link-url");
-  document.getElementById("make").addEventListener("click", async () => {
-    try {
-      const made = await post("/_admin/connections/link");
-      linkUrl.value = made.link;
-      document.getElementById("link-message").value = made.message;
-      panel.hidden = false;
-      document.getElementById("link-message").select();
-    } catch (err) { error.textContent = err.message; }
-  });
-  document.getElementById("copy").addEventListener("click", async (e) => {
-    await navigator.clipboard.writeText(document.getElementById("link-message").value);
-    e.target.textContent = "Copied";
-    setTimeout(() => { e.target.textContent = "Copy message"; }, 1500);
-  });
-  const share = document.getElementById("share");
-  if (navigator.share) {
-    share.hidden = false;
-    share.addEventListener("click", () => navigator.share({ text: document.getElementById("link-message").value }).catch(() => {}));
-  }
-  document.querySelector("main").addEventListener("click", async (e) => {
-    const button = e.target.closest("button[data-disconnect]");
-    if (!button || !(await askFirst("Remove " + button.dataset.name + " as a friend? You'll stop seeing each other's posts and photos. Comments already made stay where they are.", { ok: "Remove" }))) return;
-    try {
-      await post("/_admin/connections/" + button.dataset.disconnect + "/disconnect");
-      location.reload();
-    } catch (err) { error.textContent = err.message; }
-  });`);
-}
-
-function confirmPage(name, origin) {
-  return shell("Connect", `
-<p class="crumbs"><a href="/_admin/connections">Add a friend</a> /</p>
-<h1>Add ${escape(name)} as a friend?</h1>
-<p>Their site is <strong>${escape(host(origin))}</strong>. Once they approve, you're friends: you'll each see the other's
-posts and photos on your own site, and can comment on them. Either of you can remove the other at any time, which ends all of it.</p>
-<p id="error" role="alert"></p>
-<div class="actions-row">
-  <button class="chip primary" id="go">Add friend</button>
-  <a class="chip" href="/_admin/connections">Not now</a>
-</div>`, `${POST_SCRIPT}
-  document.getElementById("go").addEventListener("click", async (e) => {
-    e.target.disabled = true;
-    error.textContent = "";
-    try {
-      await post(location.pathname + location.search);
-      location.assign("/");
-    } catch (err) {
-      error.textContent = err.message;
-      e.target.disabled = false;
-    }
-  });`);
-}
-
-function introducePage(friend, others) {
-  return shell("Introduce", `
-<p class="crumbs"><a href="/friend">Friends</a> /</p>
-<h1>Introduce ${escape(friend.name)}</h1>
-${others.length ? `<p class="meta">Choose a friend who'd like to know ${escape(friend.name)}. Both of them are told who you
-introduced them to, and that it was you, and either can then ask the other to be friends. Nobody else is told anything.</p>
-<form class="stack" method="post">
-  <label>Introduce them to <select name="to" required data-search="Type a friend's name" aria-label="The friend to introduce them to">${others.map((c) => `<option value="${c.id}">${escape(c.name)}</option>`).join("")}</select></label>
-  <textarea name="note" rows="2" maxlength="${MAX_NOTE}" placeholder="Why they'd get on (optional)" aria-label="A note for both of them"></textarea>
-  <div class="actions-row"><button class="chip primary" id="introduce">Introduce them</button><a class="chip" href="/friend">Not now</a></div>
-</form>` : `<p>You'll need at least one other friend on afterwrd to introduce ${escape(friend.name)} to.</p>`}`);
-}
-
-function togetherPage(friends) {
-  return shell("Introduce friends to each other", `
-<p class="crumbs"><a href="/friend">Friends</a> /</p>
-<h1>Introduce friends to each other</h1>
-${friends.length < 2 ? `<p>You'll need at least two friends on afterwrd who've approved you too.</p>` : `<p class="meta">Choose friends who'd like to know each other: a
-book club, a family, old school friends. Each of them is told about all the others, and that it was you; any of them can
-then ask another to be friends. Nobody else is told anything, and nothing is kept: it's like introducing each pair.</p>
-<form class="stack" id="together">
-  <input type="search" id="together-filter" placeholder="Type a name to find them" aria-label="Find a friend" autocomplete="off">
-  <fieldset class="together-list"><legend class="hidden">Friends</legend>
-    ${friends.map((c) => `<label class="together-friend"><input type="checkbox" name="friend" value="${c.id}" data-name="${escape(c.name)}"> ${escape(c.name)}</label>`).join("")}
-  </fieldset>
-  <p class="meta" id="together-count">Choose at least two, and up to ${TOGETHER_MAX}.</p>
-  <textarea name="note" rows="2" maxlength="${MAX_NOTE}" placeholder="Why they'd get on (optional): everyone sees this" aria-label="A note for all of them"></textarea>
-  <div class="actions-row"><button class="chip primary" id="together-go" disabled>Introduce them to each other</button><a class="chip" href="/friend">Not now</a></div>
-</form>
-<ol class="together-log" id="together-log"></ol>
-<p id="error" role="alert"></p>`}`, friends.length < 2 ? "" : `
-  const form = document.getElementById("together");
-  const boxes = [...form.querySelectorAll("input[name=friend]")];
-  const go = document.getElementById("together-go");
-  const count = document.getElementById("together-count");
-  const chosen = () => boxes.filter((b) => b.checked);
-  const update = () => {
-    const n = chosen().length;
-    go.disabled = n < 2 || n > ${TOGETHER_MAX};
-    count.textContent = n < 2 ? "Choose at least two, and up to ${TOGETHER_MAX}." : n > ${TOGETHER_MAX}
-      ? "That's more than ${TOGETHER_MAX}: untick some, or do it in two goes." : n + " chosen: each will be told about the other " + (n - 1) + ".";
-  };
-  form.addEventListener("change", update);
-  document.getElementById("together-filter").addEventListener("input", (e) => {
-    const words = e.target.value.trim().toLowerCase();
-    for (const b of boxes) b.closest("label").hidden = Boolean(words) && !b.dataset.name.toLowerCase().includes(words) && !b.checked;
-  });
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const people = chosen();
-    if (people.length < 2) return;
-    go.disabled = true;
-    const log = document.getElementById("together-log");
-    log.textContent = "";
-    let trouble = 0;
-    for (const person of people) {
-      const li = document.createElement("li");
-      li.textContent = "Telling " + person.dataset.name + "…";
-      log.append(li);
-      try {
-        const res = await fetch("/_admin/connections/together", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ to: Number(person.value), others: people.filter((p) => p !== person).map((p) => Number(p.value)),
-            note: form.note.value }) });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || "something went wrong");
-        li.textContent = "Told " + person.dataset.name + " ✓";
-      } catch (err) {
-        trouble++;
-        li.textContent = "Couldn't tell " + person.dataset.name + ": " + err.message;
-      }
-    }
-    document.getElementById("error").textContent = trouble === people.length ? "Nobody could be told. Try again later." : "";
-    if (trouble < people.length) {
-      const done = document.createElement("p");
-      done.className = "meta";
-      done.append("Done. It's up to them now. ", Object.assign(document.createElement("a"), { href: "/friend", textContent: "Back to Friends" }));
-      log.after(done);
-    }
-  });`);
-}
-
-function introducedPage(friend, other, trouble) {
-  const both = `${escape(friend.name)} and ${escape(other.name)}`;
-  return shell("Introduce", `
-<p class="crumbs"><a href="/friend">Friends</a> /</p>
-<h1>${trouble.length === 2 ? "Couldn't introduce them" : `Introduced ${both}`}</h1>
-${trouble.length ? `<p>Couldn't reach ${trouble.map(escape).join("; ")}.</p>` : ""}
-<p class="meta">${trouble.length === 2 ? "Try again later." : trouble.length
-  ? "The other one has been told, and can ask to be friends."
-  : "Each has been told about the other. It's up to them now."}</p>
-<p><a class="chip" href="/friend">Back to Friends</a></p>`);
-}
-
-function connectionsMessage(message) {
-  return shell("Connect", `
-<p class="crumbs"><a href="/_admin/connections">Add a friend</a> /</p>
-<h1>Couldn't connect</h1>
-<p>${escape(message)}</p>`);
+  if (!failed) return;
+  throw new Refusal(failed.status === 404 ? "their site needs a newer afterwrd first"
+    : failed.status === 429 ? "their site has had a lot of introductions today; try tomorrow" : failed.message, 502);
 }

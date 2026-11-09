@@ -8,7 +8,7 @@ import {
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
 import { createDeviceLink, DEVICE_LINK_SECONDS } from "./admin.js";
-import { deviceLinkPage, loginPage, messagePage, setupPage, signOutPage } from "./pages.js";
+import { deviceLinkPage, loginPage, messagePage, setupPage, signOutPage } from "./views/pages.js";
 import { fromBase64Url, html, json, now, randomToken, sha256, toBase64Url } from "./util.js";
 
 // __Host- cookies can only be set by this exact site, over HTTPS, for the whole site.

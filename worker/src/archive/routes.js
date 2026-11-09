@@ -15,9 +15,9 @@ import { profilePictures } from "../photos.js";
 import { newDevices } from "../admin.js";
 import { checkRequests, lastChecked, recentChecks } from "../checks.js";
 import { securityFixWaiting, waitingRelease } from "../update.js";
-import { now } from "../util.js";
-import { fmtDate, fmtMonth } from "./format.js";
-import * as views from "./views.js";
+import { now, pageData, withoutKeys } from "../util.js";
+import { fmtDate, fmtMonth } from "../views/format.js";
+import * as views from "../views/archive.js";
 
 const PAGE_SIZE = 50;
 const PHOTO_PAGE_SIZE = 150;
@@ -42,41 +42,51 @@ const PERSON_TABS = {
   photos: ["Photos of you", "SELECT * FROM tagged_photos t WHERE t.owner_id = ? ORDER BY t.timestamp DESC"],
 };
 
-// [pattern, section(s) any of which must be published (null: always), handler]; handlers return a page, a
-// Response, or null for 404.
+// [pattern, section(s) any of which must be published (null: always), loader, view]. A loader gathers the page's
+// data and returns it as plain data (no HTML, and never a key: util.js pageData), or a Response (a redirect, a file),
+// or null for 404; the view (views/archive.js) turns the data into the page. A loader that can't reach a friend's or
+// group's site throws a Problem, shown by that view instead.
 const ROUTES = [
-  [/^\/$/, null, home],
-  [/^\/overview$/, "overview", overview],
-  [/^\/memories$/, null, memories],
-  [/^\/timeline$/, "timeline", timeline],
-  [/^\/posts$/, "posts", posts],
-  [/^\/posts\/(post-\d+-[0-9a-f]{8})$/, ["posts", "timeline", "friends"], post],
-  [/^\/comments$/, "comments", comments],
-  [/^\/likes$/, "likes", likes],
-  [/^\/photos$/, "photos", photos],
-  [/^\/photos\/tagged$/, "photos", tagged],
-  [/^\/photos\/album\/([^/]+)$/, "photos", album],
-  [/^\/photos\/(\d+)$/, "photos", photo],
-  [/^\/photos\/sha256\/([0-9a-f]{64})$/, "photos", photoByHash],
-  [/^\/friends$/, "friends", friends],
-  [/^\/people\/(\d+)$/, "friends", person],
-  [/^\/activity$/, null, activity],
-  [/^\/friend$/, null, friendsIndex],
-  [/^\/friend\/(\d+)$/, null, friendHome],
-  [/^\/friend\/(\d+)\/posts$/, null, friendPosts],
-  [/^\/friend\/(\d+)\/photos$/, null, friendPhotos],
-  [/^\/friend\/(\d+)\/photos\/album\/(\d+|other|videos)$/, null, friendAlbum],
-  [/^\/friend\/(\d+)\/photos\/([0-9a-f]{64})$/, null, friendPhoto],
-  [/^\/groups$/, null, groupsIndex],
-  [/^\/groups\/new$/, null, groupNew],
-  [/^\/groups\/join$/, null, groupJoin],
-  [/^\/groups\/(\d{1,15})$/, null, groupHome],
-  [/^\/groups\/(\d{1,15})\/posts\/(\d{1,15})$/, null, groupPost],
-  [/^\/groups\/(\d{1,15})\/members$/, null, groupMembers],
-  [/^\/groups\/(\d{1,15})\/calendar$/, null, groupCalendar],
-  [/^\/groups\/(\d{1,15})\/posts\/(\d{1,15})\/edit$/, null, groupEventEdit],
-  [/^\/groups\/(\d{1,15})\/posts\/(\d{1,15})\/event\.ics$/, null, groupEventFile],
+  [/^\/$/, null, home, views.homePage],
+  [/^\/overview$/, "overview", overview, views.overviewPage],
+  [/^\/memories$/, null, memories, views.memoriesPage],
+  [/^\/timeline$/, "timeline", timeline, views.timelinePage],
+  [/^\/posts$/, "posts", posts, views.postsPage],
+  [/^\/posts\/(post-\d+-[0-9a-f]{8})$/, ["posts", "timeline", "friends"], post, views.postPage],
+  [/^\/comments$/, "comments", comments, views.commentsPage],
+  [/^\/likes$/, "likes", likes, views.likesPage],
+  [/^\/photos$/, "photos", photos, views.photosPage],
+  [/^\/photos\/tagged$/, "photos", tagged, views.taggedPage],
+  [/^\/photos\/album\/([^/]+)$/, "photos", album, views.albumPage],
+  [/^\/photos\/(\d+)$/, "photos", photo, views.photoPage],
+  [/^\/photos\/sha256\/([0-9a-f]{64})$/, "photos", photoByHash, null],
+  [/^\/friends$/, "friends", friends, views.friendsPage],
+  [/^\/people\/(\d+)$/, "friends", person, views.personPage],
+  [/^\/activity$/, null, activity, views.activityPage],
+  [/^\/friend$/, null, friendsIndex, views.friendsIndexPage],
+  [/^\/friend\/(\d+)$/, null, friendHome, null],
+  [/^\/friend\/(\d+)\/posts$/, null, friendPosts, views.friendPostsPage],
+  [/^\/friend\/(\d+)\/photos$/, null, friendPhotos, views.friendPhotosPage],
+  [/^\/friend\/(\d+)\/photos\/album\/(\d+|other|videos)$/, null, friendAlbum, views.friendAlbumPage],
+  [/^\/friend\/(\d+)\/photos\/([0-9a-f]{64})$/, null, friendPhoto, views.friendPhotoPage],
+  [/^\/groups$/, null, groupsIndex, views.groupsIndexPage],
+  [/^\/groups\/new$/, null, groupNew, views.groupNewPage],
+  [/^\/groups\/join$/, null, groupJoin, views.groupJoinPage],
+  [/^\/groups\/(\d{1,15})$/, null, groupHome, views.groupPage],
+  [/^\/groups\/(\d{1,15})\/posts\/(\d{1,15})$/, null, groupPost, views.groupPostPage],
+  [/^\/groups\/(\d{1,15})\/members$/, null, groupMembers, views.groupMembersPage],
+  [/^\/groups\/(\d{1,15})\/calendar$/, null, groupCalendar, views.groupCalendarPage],
+  [/^\/groups\/(\d{1,15})\/posts\/(\d{1,15})\/edit$/, null, groupEventEdit, views.groupEventEditPage],
+  [/^\/groups\/(\d{1,15})\/posts\/(\d{1,15})\/event\.ics$/, null, groupEventFile, null],
 ];
+
+/** A friend's or group's site couldn't give a page what it needed: `view` shows `data` instead. */
+class Problem extends Error {
+  constructor(view, data) {
+    super(data.message);
+    Object.assign(this, { view, data });
+  }
+}
 
 export async function renderArchive(request, env, url, user, work) {
   const db = env.DB;
@@ -107,15 +117,40 @@ export async function renderArchive(request, env, url, user, work) {
   if (ctx.profile.profile) Object.assign(ctx.me, { profile_hash: ctx.profile.profile.hash, profile_media_id: ctx.profile.profile.id });
   if (ctx.profile.cover) Object.assign(ctx.me, { cover_hash: ctx.profile.cover.hash, cover_media_id: ctx.profile.cover.id });
 
-  for (const [pattern, section, handler] of ROUTES) {
+  for (const [pattern, section, load, view] of ROUTES) {
     const match = pattern.exec(url.pathname);
     if (!match || (section && ![section].flat().some((s) => sections.includes(s)))) continue;
-    const result = await handler(ctx, url.searchParams, ...match.slice(1));
-    if (result instanceof Response) return result;
-    if (result) return page(result);
-    break;
+    let data;
+    let show = view;
+    try {
+      data = await load(ctx, url.searchParams, ...match.slice(1));
+    } catch (error) {
+      if (!(error instanceof Problem)) throw error;
+      [show, data] = [error.view, error.data];
+    }
+    if (data instanceof Response) return data;
+    if (!data) break;
+    const shown = pageData(env, data);
+    try {
+      return page(show(frame(ctx), shown));
+    } catch (error) {
+      // Something from a friend's or group's site that its page couldn't show: said on the page, as it always was.
+      if (show !== view || !(data.friend || data.membership)) throw error;
+      return page(data.friend ? views.friendProblem(frame(ctx), { friend: data.friend, message: error.message })
+        : views.groupProblem(frame(ctx), { membership: data.membership, message: error.message }));
+    }
   }
   return new Response("Not found", { status: 404 });
+}
+
+/**
+ * What every page's header and links need, apart from its own data: who's signed in, where they are, their
+ * picture, what they've published, and the counts on the menu. No database or secrets: views only draw.
+ */
+function frame(ctx) {
+  const { url, chosen, sections, newComments, zone, requests, updateWaiting, me, ownerName, profile, friendFaces } = ctx;
+  return { url, user: { id: ctx.user.id, name: ctx.user.name }, chosen, sections, newComments, zone, requests, updateWaiting,
+    me, ownerName, profile, friendFaces };
 }
 
 function page(body) {
@@ -219,7 +254,7 @@ async function overview(ctx) {
       (SELECT COUNT(*) FROM reactions r WHERE r.target_owner_id = p.id) AS reactions
     FROM people p WHERE p.is_me = 0
     ORDER BY comments + reactions DESC LIMIT 15`);
-  return views.overviewPage(ctx, { counts, byYear, topPeople });
+  return { counts, byYear, topPeople };
 }
 
 async function timeline(ctx, params) {
@@ -250,7 +285,7 @@ async function timeline(ctx, params) {
   const items = rows.map((r) => [r.type, lookup[r.type].get(r.id)]);
   const allYears = [...new Set([...await years(db, "posts"), ...await years(db, "comments"), ...await years(db, "reactions")])]
     .sort().reverse();
-  return views.timelinePage(ctx, { items, paging, years: allYears, year });
+  return { items, paging, years: allYears, year };
 }
 
 async function posts(ctx, params) {
@@ -266,7 +301,7 @@ async function posts(ctx, params) {
   const kinds = (await all(db, `SELECT kind FROM posts ${own} GROUP BY kind ORDER BY COUNT(*) DESC`)).map((r) => r.kind);
   const postYears = (await all(db, `SELECT DISTINCT strftime('%Y', timestamp, 'unixepoch') AS y FROM posts ${own} ORDER BY y DESC`))
     .map((r) => r.y);
-  return views.postsPage(ctx, { posts: await loadPosts(db, rows), paging, q, year, kind, years: postYears, kinds });
+  return { posts: await loadPosts(db, rows), paging, q, year, kind, years: postYears, kinds };
 }
 
 async function comments(ctx, params) {
@@ -279,9 +314,9 @@ async function comments(ctx, params) {
   const { rows, paging } = await paginate(db, `${COMMENT_SQL} ${f.sql} ORDER BY c.timestamp DESC`, f.params, pageNumber(params));
   const kinds = (await all(db, `SELECT target_kind FROM comments WHERE target_kind IS NOT NULL
     GROUP BY target_kind ORDER BY COUNT(*) DESC`)).map((r) => r.target_kind);
-  return views.commentsPage(ctx, {
+  return {
     comments: await loadComments(db, rows), paging, q, year, kind, years: await years(db, "comments"), kinds,
-  });
+  };
 }
 
 async function likes(ctx, params) {
@@ -294,7 +329,7 @@ async function likes(ctx, params) {
   const { rows, paging } = await paginate(db, `${REACTION_SQL} ${f.sql} ORDER BY r.timestamp DESC`, f.params, pageNumber(params));
   const reactionTypes = (await all(db, "SELECT reaction FROM reactions GROUP BY reaction ORDER BY COUNT(*) DESC"))
     .map((r) => r.reaction);
-  return views.likesPage(ctx, { reactions: rows, paging, q, year, reaction, years: await years(db, "reactions"), reactionTypes });
+  return { reactions: rows, paging, q, year, reaction, years: await years(db, "reactions"), reactionTypes };
 }
 
 /** Filter for a photo set: an album id, 'other' (unalbumed photos) or 'videos'. */
@@ -329,7 +364,7 @@ async function photos(ctx) {
     if (cover) collections.push({ key, title, cover, ...stats });
   }
   const taggedCount = imported ? (await first(db, "SELECT COUNT(*) AS n FROM tagged_photos")).n : 0;
-  return views.photosPage(ctx, { byYear, collections, tagged: taggedCount });
+  return { byYear, collections, tagged: taggedCount };
 }
 
 async function album(ctx, params, key) {
@@ -349,7 +384,7 @@ async function album(ctx, params, key) {
   // Long-running sets read better split by month; a single trip's album doesn't need it.
   const spansMonths = fmtMonth(stats.first_ts) !== fmtMonth(stats.last_ts);
   const groups = spansMonths ? groupBy(rows, (m) => fmtMonth(m.timestamp)) : [[null, rows]];
-  return views.albumPage(ctx, { key, title, info, stats, groups, paging });
+  return { key, title, info, stats, groups, paging };
 }
 
 async function tagged(ctx, params) {
@@ -357,7 +392,7 @@ async function tagged(ctx, params) {
   const { rows, paging } = await paginate(ctx.db, `
     SELECT t.*, p.name AS owner_name FROM tagged_photos t LEFT JOIN people p ON p.id = t.owner_id
     ORDER BY t.timestamp DESC`, [], pageNumber(params));
-  return views.taggedPage(ctx, { tagged: rows, paging });
+  return { tagged: rows, paging };
 }
 
 async function photo(ctx, params, id) {
@@ -381,11 +416,11 @@ async function photo(ctx, params, id) {
     ? (await loadPosts(db, await all(db, `${POST_SQL} WHERE p.id = ?`, [m.post_id]), { threads: false }))[0] : null;
   const comment = m.comment_id
     ? (await loadComments(db, await all(db, `${COMMENT_SQL} WHERE c.id = ?`, [m.comment_id])))[0] : null;
-  return views.photoPage(ctx, {
+  return {
     m, setKey, setTitle, prev: prev.results[0], next: next.results[0], index: before + 1,
     total: (await setStats(db, where, setParams)).count, albumPage: Math.floor(before / PHOTO_PAGE_SIZE) + 1, post, comment,
     key: photoKey(m), thread: (await loadThreads(db, [photoKey(m)])).get(photoKey(m)),
-  });
+  };
 }
 
 async function friends(ctx, params) {
@@ -408,7 +443,7 @@ async function friends(ctx, params) {
       (SELECT COUNT(*) FROM posts x WHERE x.target_id = p.id) AS wall,
       (SELECT COUNT(*) FROM tagged_photos t WHERE t.owner_id = p.id) AS tagged
     FROM people p ${f.sql} ORDER BY ${order}`, f.params);
-  return views.friendsPage(ctx, { people, q, show, sort });
+  return { people, q, show, sort };
 }
 
 async function person(ctx, params, id) {
@@ -425,14 +460,14 @@ async function person(ctx, params, id) {
   if (tab === "comments") rows = await loadComments(db, rows);
   else if (tab === "wall" || tab === "tags") rows = await loadPosts(db, rows);
   const tabs = Object.fromEntries(keys.map((k) => [k, PERSON_TABS[k][0]]));
-  return views.personPage(ctx, { person: p, tabs, counts, tab, rows, paging });
+  return { person: p, tabs, counts, tab, rows, paging };
 }
 
 async function post(ctx, params, key) {
   const found = await findTarget(ctx.db, key);
   if (!found) return null;
   const [p] = await loadPosts(ctx.db, await all(ctx.db, `${POST_SQL} WHERE p.id = ?`, [found.post.id]));
-  return views.postPage(ctx, p);
+  return { post: p };
 }
 
 /** The newest comments from everyone, marking what's new since this person last looked. */
@@ -448,7 +483,7 @@ async function activity(ctx, params) {
   }
   const items = rows.map((c) => ({ ...c, on: c.source === "here" ? targets.get(c.target) : null,
     isNew: c.created_at > seen && (c.source === "friend" || c.author_id !== user.id) }));
-  return views.activityPage(ctx, { items, paging });
+  return { items, paging };
 }
 
 // Introductions from friends still here, to people the owner isn't connected with (or asking) yet (connect.js).
@@ -463,7 +498,7 @@ async function home(ctx, params) {
   const { db } = ctx;
   const own = await loadPosts(db, await all(db, `${POST_SQL} WHERE p.id >= ? ORDER BY p.timestamp DESC LIMIT 30`, [SITE_ID]));
   const friendsFeed = await loadFeed(db, ctx.url.origin);
-  return views.homePage(ctx, {
+  return {
     own, feed: friendsFeed, onThisDay: await onThisDay(ctx, 2), friends: friendsFeed.connections,
     newDevices: await newDevices(db, ctx.user), securityFix: await securityFixWaiting(db),
     // Until it's been checked (by a friend's site, or the owner themselves: checks.js), Home suggests a check.
@@ -475,11 +510,11 @@ async function home(ctx, params) {
       ORDER BY connected_at DESC LIMIT 3`),
     // Friends introducing the owner to someone: asked (or not) from Home too.
     introductions: await all(db, `${INTRODUCTIONS_SQL} LIMIT 3`, [now() - INTRODUCTION_DAYS * 86400]),
-  });
+  };
 }
 
 async function memories(ctx) {
-  return views.memoriesPage(ctx, { onThisDay: await onThisDay(ctx, 6) });
+  return { onThisDay: await onThisDay(ctx, 6) };
 }
 
 /** Posts from this day of the year (in London) in earlier years, newest first, with their photos. */
@@ -499,18 +534,21 @@ async function photoByHash(ctx, params, hash) {
 
 // --- a connected friend's posts and photos, read from their site (friends.js) ---------------------------------------
 
-/** Only the owner reads friends' sites from here; `load` gets the connection and returns the page. */
+/**
+ * Only the owner reads friends' sites from here. `load` gets the connection (with the key to call their site) and
+ * returns the page's data; the page is given the friend without it.
+ */
 async function fromFriend(ctx, id, load) {
   const connection = await connectionById(ctx.db, id);
   if (!connection) return null;
   connection.facebook = await facebookSelf(ctx.db, connection);
   try {
-    const page = await load(connection);
+    const data = await load(connection);
     await noteAnswer(ctx.db, connection).run();
-    return page;
+    return { ...data, friend: withoutKeys(connection) };
   } catch (error) {
     await noteAnswer(ctx.db, connection, error).run();
-    return views.friendProblem(ctx, connection, error.message);
+    throw new Problem(views.friendProblem, { friend: withoutKeys(connection), message: error.message });
   }
 }
 
@@ -533,7 +571,7 @@ async function friendsIndex(ctx) {
   const same = (a, b) => a.localeCompare(b, "en", { sensitivity: "accent" }) === 0;
   const linked = new Map(links.results.map((l) => [l.connection_id, l]));
   const taken = links.results.filter((l) => l.person_name);
-  const friends = connections.results.map((c) => {
+  const friends = connections.results.map(withoutKeys).map((c) => {
     const link = linked.get(c.id);
     if (link?.person_name) return { ...c, person: people.results.find((p) => same(p.name, link.person_name)) ?? { name: link.person_name } };
     if (link) return c; // they said the suggestion wasn't them
@@ -549,8 +587,8 @@ async function friendsIndex(ctx) {
   }));
   // Requests show only what their site said when it connected: nothing is fetched from a site you haven't approved,
   // so a stranger can't slow this page down or see when you look at it.
-  return views.friendsIndexPage(ctx, { friends, facebook, requests: requests.results, introductions: introductions.results,
-    checks: await recentChecks(db) });
+  return { friends, facebook, requests: requests.results, introductions: introductions.results,
+    checks: await recentChecks(db) };
 }
 
 /** Who a friend on afterwrd is in the owner's Facebook download, if the owner has linked them. */
@@ -569,23 +607,23 @@ async function friendPosts(ctx, params, id) {
     Object.assign(c, { avatar, cover });
     if (avatar) await rememberPicture(ctx.db, c, avatar)?.run();
     for (const p of posts) p.comments = await markMine(ctx.db, c.id, p.key, p.comments, ctx.url.origin);
-    return views.friendPostsPage(ctx, c, { posts, paging });
+    return { posts, paging };
   });
 }
 
 async function friendPhotos(ctx, params, id) {
-  return fromFriend(ctx, id, async (c) => views.friendPhotosPage(ctx, c, await friend.friendAlbums(c)));
+  return fromFriend(ctx, id, async (c) => ({ albums: await friend.friendAlbums(c) }));
 }
 
 async function friendAlbum(ctx, params, id, key) {
-  return fromFriend(ctx, id, async (c) => views.friendAlbumPage(ctx, c, await friend.friendAlbum(c, key, pageNumber(params))));
+  return fromFriend(ctx, id, async (c) => ({ album: await friend.friendAlbum(c, key, pageNumber(params)) }));
 }
 
 async function friendPhoto(ctx, params, id, hash) {
   return fromFriend(ctx, id, async (c) => {
     const m = await friend.friendPhoto(c, hash);
     m.comments = await markMine(ctx.db, c.id, `photo-${m.hash}`, m.comments, ctx.url.origin);
-    return views.friendPhotoPage(ctx, c, m);
+    return { photo: m };
   });
 }
 
@@ -601,7 +639,7 @@ async function groupsIndex(ctx) {
   await ctx.db.prepare(`DELETE FROM group_plans AS e WHERE ${FINISHED_SQL} < ?`).bind(now() - 30 * 86400).run();
   const plans = await all(ctx.db, `SELECT e.*, g.name AS group_name FROM group_plans e JOIN groups g ON g.id = e.group_id AND g.joined_at IS NOT NULL
     WHERE ${FINISHED_SQL} >= ? ORDER BY e.starts_at LIMIT 20`, [now()]);
-  return views.groupsIndexPage(ctx, { groups: list, unfinished, plans, connected: ctx.connected });
+  return { groups: list.map(withoutKeys), unfinished, plans, connected: ctx.connected };
 }
 
 /** Starting a group: its own Worker, made in the owner's Cloudflare account (groupsites.js). */
@@ -610,7 +648,7 @@ async function groupNew(ctx) {
   try {
     address = whereAmI(ctx.url);
   } catch {}
-  return views.groupNewPage(ctx, { connected: ctx.connected, domain: address?.domain ?? null, maxPhotos: MAX_GROUP_PHOTOS });
+  return { connected: ctx.connected, domain: address?.domain ?? null, maxPhotos: MAX_GROUP_PHOTOS };
 }
 
 /** Opened from a group's invite link: join it? */
@@ -619,46 +657,54 @@ async function groupJoin(ctx, params) {
   try {
     const info = await groups.linkInfo(ctx.env, ctx.url, link);
     if (info.joined) return Response.redirect(`${ctx.url.origin}/groups/${info.joined}`, 302);
-    return views.groupJoinPage(ctx, { info, link });
+    return { info, link };
   } catch (error) {
-    return views.groupJoinPage(ctx, { error: error.message });
+    return { error: error.message };
   }
 }
 
-/** Only the owner reads a group from here; `load` gets the group and returns the page. */
+/**
+ * Only the owner reads a group from here. `load` gets the owner's membership (with the key to call the group's site)
+ * and returns the page's data, or a Response, or throws to say what's wrong; the page is given the membership
+ * without its keys.
+ */
 async function fromGroup(ctx, id, load) {
-  const group = await first(ctx.db, "SELECT * FROM groups WHERE id = ? AND joined_at IS NOT NULL", [Number(id)]);
-  if (!group) return null;
+  const membership = await first(ctx.db, "SELECT * FROM groups WHERE id = ? AND joined_at IS NOT NULL", [Number(id)]);
+  if (!membership) return null;
+  let data;
   try {
-    return await load(group);
+    data = await load(membership);
   } catch (error) {
-    return views.groupProblem(ctx, group, error.message);
+    throw new Problem(views.groupProblem, { membership: withoutKeys(membership), message: error.message });
   }
+  // The membership last, so nothing the group's site said can stand in for it.
+  return data instanceof Response ? data : { ...data, membership: withoutKeys(membership) };
 }
 
 async function groupHome(ctx, params, id) {
-  return fromGroup(ctx, id, async (g) => views.groupPage(ctx, g,
-    await groups.loadGroup(ctx.env, ctx.url.origin, g, pageNumber(params)), { maxPhotos: MAX_GROUP_PHOTOS }));
+  return fromGroup(ctx, id, async (g) => ({
+    ...await groups.loadGroup(ctx.env, ctx.url.origin, g, pageNumber(params)), maxPhotos: MAX_GROUP_PHOTOS }));
 }
 
 async function groupPost(ctx, params, id, postId) {
   return fromGroup(ctx, id, async (g) => {
     const found = await groups.loadGroupPost(ctx.env, ctx.url.origin, g, postId);
-    return found?.post ? views.groupPostPage(ctx, g, found) : views.groupProblem(ctx, g, "That post isn't there any more.");
+    if (!found?.post) throw new Error("That post isn't there any more.");
+    return found;
   });
 }
 
 /** A group's calendar: events to come, and adding one. */
 async function groupCalendar(ctx, params, id) {
-  return fromGroup(ctx, id, async (g) => views.groupCalendarPage(ctx, g, await groups.loadEvents(ctx.env, ctx.url.origin, g)));
+  return fromGroup(ctx, id, async (g) => groups.loadEvents(ctx.env, ctx.url.origin, g));
 }
 
 /** Changing an event the owner here added. */
 async function groupEventEdit(ctx, params, id, postId) {
   return fromGroup(ctx, id, async (g) => {
     const found = await groups.loadGroupPost(ctx.env, ctx.url.origin, g, postId);
-    if (!found?.post?.event || !found.post.mine) return views.groupProblem(ctx, g, "That isn't an event you added.");
-    return views.groupEventEditPage(ctx, g, found);
+    if (!found?.post?.event || !found.post.mine) throw new Error("That isn't an event you added.");
+    return found;
   });
 }
 
@@ -667,7 +713,7 @@ async function groupEventFile(ctx, params, id, postId) {
   return fromGroup(ctx, id, async (g) => {
     const found = await groups.loadGroupPost(ctx.env, ctx.url.origin, g, postId);
     const p = found?.post;
-    if (!p?.event) return views.groupProblem(ctx, g, "That isn't an event.");
+    if (!p?.event) throw new Error("That isn't an event.");
     const page = `${ctx.url.origin}/groups/${g.id}/posts/${p.id}`;
     const body = icsFile(p.event, { uid: groupPostId(g.origin, g.remote_id, p.id), url: page,
       about: [p.text, `${found.group.name}: ${page}`].filter(Boolean).join("\n\n") });
@@ -678,8 +724,8 @@ async function groupEventFile(ctx, params, id, postId) {
 
 /** Who's in a group; for its admins, also requests to join, the invite link, and running it. */
 async function groupMembers(ctx, params, id) {
-  return fromGroup(ctx, id, async (g) => views.groupMembersPage(ctx, g, await groups.loadMembers(ctx.env, g), {
-    max: MAX_MEMBERS, connected: ctx.connected,
+  return fromGroup(ctx, id, async (g) => ({
+    ...await groups.loadMembers(ctx.env, g), max: MAX_MEMBERS, connected: ctx.connected,
     // Where the owner stands with each member, to offer asking them to be friends (connect.js).
     friends: await all(ctx.db, "SELECT id, origin, approved_at, reached_at, invited_as FROM connections WHERE connected_at IS NOT NULL"),
   }));

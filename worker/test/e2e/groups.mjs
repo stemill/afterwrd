@@ -317,7 +317,7 @@ check("…and no one is told who's going", inboxes() === quiet);
 await bob.goto(`${B}/groups`);
 check("Bob's Groups page shows it coming up", (await text(bob, ".coming-up")).includes("Book swap"));
 await cat.goto(`${C}/groups/${catGroup}/posts/${swap.post_id}`);
-const who = await text(cat, ".event .who");
+const who = await text(cat, ".event .answered");
 check("the event's page names who's going", who.includes("Ann Example") && who.includes("Bob Example") && who.includes("You"), who);
 
 // Changing it: words only, quietly; the time, and those going (or who might) are told.

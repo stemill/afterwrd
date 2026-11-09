@@ -17,7 +17,7 @@ import { HASH_RE, mediaStore } from "./media.js";
 import { handleGroupActions, handleMember } from "./membership.js";
 import { ensureSchema } from "./migrate.js";
 import { handlePeer } from "./peers.js";
-import { messagePage } from "./pages.js";
+import { messagePage } from "./views/pages.js";
 import { signedFor } from "./share.js";
 import { serveStatic } from "./static.js";
 import { handleCheck } from "./checks.js";

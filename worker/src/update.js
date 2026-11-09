@@ -13,22 +13,22 @@
 // it's updated, this page offers to bring its groups up to the same version.
 // Releases come from the GitHub repository in package.json (afterwrd.releases). Every file is checked against
 // the release's manifest; as with installing, trust rests on that repository.
-import { asset, FAVICON, ownerHeader } from "./nav.js";
 import pkg from "../package.json";
-import { connectedToken, connectLink, tokenFor } from "./cloudflare.js";
+import { connectedToken, tokenFor } from "./cloudflare.js";
 import { api, deployVersion, existingDatabase, findWorker, loadRelease, uploadAssets } from "./deploy.js";
 import { GROUP_RELEASE, isGroupWorker } from "./groupsites.js";
-import { escape, html, json, now } from "./util.js";
-import { checkedWords, lastChecked, tooSoonToCheck } from "./checks.js";
+import { html, json, now, pageData } from "./util.js";
+import { updatePage } from "./views/update.js";
+import { lastChecked, tooSoonToCheck } from "./checks.js";
 
 const VERSION = pkg.version;
 const REPO = pkg.afterwrd.releases;
 const TAG_RE = /^v\d+\.\d+\.\d+$/;
 // The fallback, a token made by hand: D1 too, so the same token can start and delete groups (groupsites.js).
 const PERMISSIONS = [{ key: "workers_scripts", type: "edit" }, { key: "d1", type: "edit" }, { key: "account_settings", type: "read" }];
-const TOKEN_URL = "https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys="
+export const TOKEN_URL = "https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys="
   + encodeURIComponent(JSON.stringify(PERMISSIONS)) + "&accountId=*&zoneId=all&name=afterwrd%20update";
-const TOKENS_PAGE = "https://dash.cloudflare.com/profile/api-tokens";
+export const TOKENS_PAGE = "https://dash.cloudflare.com/profile/api-tokens";
 const CHECK_SECONDS = 900; // how often the dot on the picture (and "Update available") looks for a new release
 const REFRESH_WAIT_MS = 1500; // how long a page waits for GitHub's answer when it's the one asking
 const FRESH_SECONDS = 300; // how long the Update page trusts its last answer from GitHub
@@ -36,12 +36,7 @@ const FRESH_SECONDS = 300; // how long the Update page trusts its last answer fr
 export async function handleUpdate(request, env, url, owner) {
   const path = url.pathname.slice("/_admin/update".length);
   if (request.method === "GET" && path === "") {
-    return html(updatePage(owner, await latestRelease(env.DB), {
-      site: url.host, connected: Boolean(connectedToken(request)), oldToken: Boolean(env.UPDATE_TOKEN), groups: await groupsBehind(env.DB), go: url.searchParams.get("go"),
-      checked: await lastChecked(env.DB), checkWait: tooSoonToCheck(env),
-      friends: (await env.DB.prepare(`SELECT id, name FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NOT NULL
-        AND their_key IS NOT NULL ORDER BY name COLLATE NOCASE LIMIT 200`).all()).results,
-    }));
+    return html(updatePage(pageData(env, await updateData(request, env, url, owner))));
   }
   if (request.method === "GET" && path === "/version") return json({ version: VERSION });
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
@@ -87,6 +82,21 @@ export async function handleUpdate(request, env, url, owner) {
     return json({ error: error.message }, 400);
   }
   return new Response("Not found", { status: 404 });
+}
+
+/** What the Update page shows: this version, the latest release, groups behind, and asking a friend for a check. */
+async function updateData(request, env, url, owner) {
+  const latest = await latestRelease(env.DB);
+  return {
+    owner: owner.name, version: VERSION, latest,
+    available: Boolean(latest.version && newer(latest.version, VERSION)),
+    // The newest release that fixed a security problem, if this site is older than it.
+    securityFix: latest.securityFix && newer(latest.securityFix, VERSION) ? latest.securityFix : null,
+    site: url.host, connected: Boolean(connectedToken(request)), oldToken: Boolean(env.UPDATE_TOKEN), groups: await groupsBehind(env.DB),
+    go: url.searchParams.get("go"), checked: await lastChecked(env.DB), checkWait: tooSoonToCheck(env),
+    friends: (await env.DB.prepare(`SELECT id, name FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NOT NULL
+      AND their_key IS NOT NULL ORDER BY name COLLATE NOCASE LIMIT 200`).all()).results,
+  };
 }
 
 /** The groups this site made, with the version each is running (null if it couldn't be reached). */
@@ -195,246 +205,4 @@ function newer(a, b) {
   const [x, y] = [a, b].map((v) => v.split(".").map(Number));
   for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i];
   return false;
-}
-
-/** The Connect button for a step, or a note that it's done, with the by-hand fallback folded away. */
-function connectPart(connected, back, what) {
-  if (connected) return `<p class="meta connected">Connected to Cloudflare for the next hour.</p>`;
-  return `
-<p><a class="button" id="connect" href="${escape(connectLink(back))}">Connect Cloudflare</a>
-  <span class="meta">Cloudflare asks you to allow afterwrd ${what}, for an hour. Nothing is kept afterwards.</span></p>
-<details class="other"><summary>If connecting doesn't work, use an API token</summary>
-  <ol class="how">
-    <li><a href="${TOKEN_URL}" target="_blank" rel="noopener">Create a token</a> in Cloudflare.
-      <span class="meta">The permissions are filled in: scroll down, press <b>Continue to summary</b>, <b>Create Token</b>, and copy it.</span></li>
-    <li>Paste it here: <input id="token" type="text" autocomplete="off" spellcheck="false" placeholder="Your API token" aria-label="Your API token">
-      <span class="meta">It's used only now, and then you delete it in Cloudflare (My Profile → API Tokens).</span></li>
-  </ol>
-</details>`;
-}
-
-function updatePage(owner, latest, { site, connected, oldToken, groups, go, checked = null, friends = [], checkWait = 0 }) {
-  const available = latest.version && newer(latest.version, VERSION);
-  // Groups this site made that are behind it: brought up to this version, with the same connection.
-  const groupsPart = groups.length && !available ? `
-<section class="card" id="groups">
-  <h2>Your groups</h2>
-  <p>${groups.map((g) => `${escape(g.name)} (${escape(g.version)})`).join(", ")} ${groups.length === 1 ? "is" : "are"} behind your
-  site. Bring ${groups.length === 1 ? "it" : "them"} up to ${escape(VERSION)}:</p>
-  ${connectPart(connected, "/_admin/update?go=groups", "to change the groups' Workers")}
-  <p><button id="groups-go" data-groups="${escape(JSON.stringify(groups.map((g) => ({ id: g.id, name: g.name }))))}">Update ${groups.length === 1 ? "the group" : "the groups"}</button></p>
-  <ol id="group-log"></ol>
-  <p id="group-error" role="alert"></p>
-</section>` : "";
-  // A token kept by a version before 0.20.0, which nothing uses any more.
-  const forget = oldToken ? `
-<section class="card" id="old-token">
-  <p>An earlier version kept a Cloudflare API token on this site. afterwrd no longer needs one: updating now asks Cloudflare
-  each time, for an hour. <button class="link" id="forget">Forget it</button>, then delete the token in Cloudflare too
-  (<a href="${TOKENS_PAGE}" target="_blank" rel="noopener">My Profile → API Tokens</a>).</p>
-  <p id="forget-error" role="alert"></p>
-</section>` : "";
-  const notes = latest.notes ? `<section class="card notes"><h2>What's new</h2><p>${escape(latest.notes)}</p></section>` : "";
-  let body;
-  if (latest.error) {
-    body = `<p>Couldn't check for a newer version: ${escape(latest.error)}</p>`;
-  } else if (!available) {
-    body = `<p>You have the latest version.</p>`;
-  } else {
-    body = `
-<p><b>afterwrd ${escape(latest.version)} is available.</b> <a href="${escape(latest.page)}" target="_blank" rel="noopener">On GitHub</a></p>
-${latest.securityFix && newer(latest.securityFix, VERSION) ? `<p class="security"><b>It fixes a security problem</b> (in ${escape(latest.securityFix)}), so it's worth updating soon.</p>` : ""}
-${notes}
-<p class="meta">Updating keeps everyone's access, your archive and your photos.</p>
-${connectPart(connected, "/_admin/update?go=update", "to change this site's Worker")}
-<p><button id="go" data-tag="${escape(latest.tag)}" data-version="${escape(latest.version)}">Update to ${escape(latest.version)}</button></p>
-<ol id="log"></ol>
-<p id="error" role="alert"></p>
-<section id="done" class="card" hidden>
-  <p><b>Updated to ${escape(latest.version)}.</b></p>
-  <p class="meta">If a friend has afterwrd, it's worth <a href="#check">asking them to check your site</a> now.</p>
-  <p><a class="button" href="/_admin/update">Done</a></p>
-</section>`;
-  }
-  return `<!doctype html>
-<html lang="en-GB">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Update · afterwrd</title>
-<link rel="stylesheet" href="${asset("/static/style.css")}">
-${FAVICON}
-<style>
-  .how { padding-left: 1.2rem; }
-  .how li { margin: 0.6rem 0; }
-  .button, #go, #groups-go { display: inline-block; padding: 0.5rem 1rem; border: 0; border-radius: 999px; background: var(--button); color: var(--on-button);
-    font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
-  .button + .meta { display: block; margin-top: 0.4rem; }
-  #go:disabled, #groups-go:disabled { opacity: 0.6; cursor: default; }
-  #token { width: 100%; font: inherit; padding: 0.5rem; margin-top: 0.3rem; border: 1px solid var(--border); border-radius: 999px;
-    background: var(--bg); color: var(--text); -webkit-text-security: disc; }
-  #error, #group-error, #forget-error { color: #d93025; }
-  .security { padding: 0.6rem 0.9rem; border-left: 3px solid var(--danger); border-radius: 10px; background: var(--tint-4); }
-  #done[hidden], #done [hidden] { display: none; }
-  .notes h2, #check h2 { margin: 0 0 0.4rem; font-size: 1rem; }
-  #ask-message { width: 100%; font: inherit; padding: 0.6rem; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); color: var(--text); }
-  .notes p { margin: 0; white-space: pre-wrap; }
-  .other { margin: 1rem 0; }
-  .other summary { cursor: pointer; color: var(--muted); }
-  button.link { padding: 0; border: 0; background: none; color: var(--accent-strong); font: inherit; text-decoration: underline; cursor: pointer; }
-</style>
-</head>
-<body>
-${ownerHeader("update")}
-<main>
-<h1>Update afterwrd</h1>
-<p class="meta">Signed in as ${escape(owner.name)}. This site is afterwrd ${escape(VERSION)}.</p>
-${body}
-<section class="card" id="check">
-  <h2>Get your site checked</h2>
-  <p id="last-checked">${checked ? escape(checkedWords(checked)) : "Your site hasn't been checked yet."}</p>
-  <p class="meta">A friend's afterwrd site can check that yours is exactly the published afterwrd, with nothing else done in
-  your Cloudflare account. Worth doing when your site is new, and after updates. Ask a friend: they'll send you a link by
-  message. Open it and press Allow when Cloudflare asks.</p>
-  ${checkWait ? `<p class="notice" id="check-wait">Your site was updated less than an hour ago. Ask for a check after
-  <b>${escape(new Date(checkWait * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" }))}</b>:
-  for an hour after an update, the access it used could still change your site, so a check before then can't count.</p>` : ""}
-  ${checkWait ? "" : friends.length ? `<p class="row ask-friends">${friends.map((f) => `<button class="chip" data-ask="${f.id}">Ask ${escape(f.name)}</button>`).join(" ")}</p>
-  <p id="ask-result" role="status"></p>` : ""}
-  <details id="ask-other"${friends.length ? "" : " open"}${checkWait ? " hidden" : ""}>
-  <summary class="meta">${friends.length ? "Someone else, or their site is older? Send them a message instead" : "Ask by message"}</summary>
-  <p class="meta">This writes a message for you to send them. Their afterwrd site makes the link to send back.</p>
-  <p><button class="chip" id="ask-check">Write the message</button></p>
-  <div id="ask-panel" hidden>
-    <textarea id="ask-message" readonly rows="5" aria-label="Message asking for a check">Could you check that my afterwrd site is genuine? It's at ${escape(site)}. On your afterwrd site, go to Friends, paste this message (or just my address) under "Checking a friend's site", press "Make a check link", and send me the link it makes. Thank you!</textarea>
-    <p class="row"><button class="chip primary" id="ask-copy">Copy message</button>
-      <button class="chip" id="ask-share" hidden>Share…</button></p>
-  </div>
-  </details>
-  <form method="post" action="/_admin/checks/myself?back=update" class="meta">Or <a href="https://afterwrd.app/check/">check it
-    yourself</a>, and then <button class="link">say you've checked it</button>.</form>
-</section>
-${groupsPart}
-${forget}
-</main>
-<script>
-  const go = document.getElementById("go");
-  // Asking a friend for a check: their site is sent the request (it makes the link they send back), or, for anyone
-  // else, a message to send them.
-  document.querySelectorAll("button[data-ask]").forEach((button) => button.addEventListener("click", async () => {
-    const result = document.getElementById("ask-result");
-    button.disabled = true;
-    result.textContent = "";
-    try {
-      const res = await fetch("/_admin/checks/ask", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ connection: Number(button.dataset.ask) }) });
-      const data = await res.json().catch(() => ({}));
-      if (data.older) {
-        document.getElementById("ask-other").open = true;
-        document.getElementById("ask-check").click();
-      }
-      if (!res.ok) throw new Error(data.error || "Something went wrong.");
-      result.textContent = "Asked " + data.name + ". Their site will show them your request. When their link comes,"
-        + " open it and press Allow.";
-    } catch (err) {
-      result.textContent = err.message;
-      button.disabled = false;
-    }
-  }));
-  document.getElementById("ask-check").addEventListener("click", () => {
-    document.getElementById("ask-panel").hidden = false;
-    document.getElementById("ask-message").select();
-  });
-  document.getElementById("ask-copy").addEventListener("click", async (e) => {
-    await navigator.clipboard.writeText(document.getElementById("ask-message").value);
-    e.target.textContent = "Copied";
-    setTimeout(() => { e.target.textContent = "Copy message"; }, 1500);
-  });
-  const askShare = document.getElementById("ask-share");
-  if (navigator.share) {
-    askShare.hidden = false;
-    askShare.addEventListener("click", () => navigator.share({ text: document.getElementById("ask-message").value }).catch(() => {}));
-  }
-  const connected = ${connected};
-  const autoGo = ${JSON.stringify(go === "update" || go === "groups" ? go : null)};
-  async function post(path, body) {
-    const res = await fetch("/_admin/update/" + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "Something went wrong.");
-    return data;
-  }
-  const pasted = () => document.getElementById("token")?.value.trim() || "";
-  const forget = document.getElementById("forget");
-  if (forget) forget.addEventListener("click", async () => {
-    if (!(await askFirst("Forget the old token? Afterwards, delete it in Cloudflare too.", { ok: "Forget it" }))) return;
-    try {
-      await post("forget", {});
-      location.assign("${TOKENS_PAGE}");
-    } catch (err) {
-      document.getElementById("forget-error").textContent = "Couldn't forget it: " + err.message
-        + " You can also delete the secret UPDATE_TOKEN in the Worker's settings in Cloudflare.";
-    }
-  });
-  const groupsGo = document.getElementById("groups-go");
-  if (groupsGo) groupsGo.addEventListener("click", async () => {
-    const error = document.getElementById("group-error");
-    const log = (text) => { const li = document.createElement("li"); li.textContent = text; document.getElementById("group-log").append(li); };
-    const token = pasted();
-    error.textContent = "";
-    if (!token && !connected) { error.textContent = "Connect Cloudflare first."; return; }
-    groupsGo.disabled = true;
-    try {
-      for (const group of JSON.parse(groupsGo.dataset.groups)) {
-        log("Updating " + group.name + "…");
-        const { jwt } = await post("group-assets", { token, group: group.id });
-        await post("group-deploy", { token, group: group.id, jwt });
-      }
-      log("Done.");
-    } catch (err) {
-      error.textContent = err.message;
-      groupsGo.disabled = false;
-    }
-  });
-  if (go) go.addEventListener("click", async () => {
-    const error = document.getElementById("error");
-    const token = pasted();
-    const { tag, version } = go.dataset;
-    const log = (text) => { const li = document.createElement("li"); li.textContent = text; document.getElementById("log").append(li); };
-    error.textContent = "";
-    if (!token && !connected) { error.textContent = "Connect Cloudflare first."; return; }
-    go.disabled = true;
-    try {
-      log("Checking your Cloudflare account…");
-      const { account } = await post("check", { token, tag });
-      log("Uploading " + version + "'s site files…");
-      const { jwt } = await post("assets", { token, account, tag });
-      log("Installing " + version + "…");
-      await post("deploy", { token, account, tag, jwt });
-      const box = document.getElementById("token");
-      if (box) box.value = "";
-      log("Waiting for the new version to start…");
-      let started = false;
-      // Cloudflare can take a few minutes to send visits to a new version (9 Nov 2026: over a minute), so up to three.
-      for (let i = 0; i < 90 && !started; i++) {
-        const res = await fetch("/_admin/update/version", { cache: "no-store" }).catch(() => null);
-        started = Boolean(res && res.ok && (await res.json().catch(() => ({}))).version === version);
-        if (!started) await new Promise((r) => setTimeout(r, 2000));
-      }
-      // Never "done" unless this site is the new version: an update that went somewhere else must say so.
-      if (!started) throw new Error("Cloudflare has the update, but hasn't started using it yet. Don't update again:"
-        + " reload this page in five minutes or so, and it should say " + version + ".");
-      document.getElementById("done").hidden = false;
-    } catch (err) {
-      error.textContent = err.message;
-      go.disabled = false;
-    }
-  });
-  // Back from Connect: carry on with what was asked for.
-  if (connected && autoGo) {
-    history.replaceState(null, "", "/_admin/update");
-    (autoGo === "groups" ? groupsGo : go)?.click();
-  }
-</script>
-</body>
-</html>`;
 }

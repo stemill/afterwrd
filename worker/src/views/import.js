@@ -1,7 +1,7 @@
 // The owner's import page. The work happens in the browser (public/static/import/main.js): the export is read
 // on this computer and only the ticked sections are uploaded.
 import { asset, FAVICON, ownerHeader } from "./nav.js";
-import { escape } from "./util.js";
+import { escape } from "../util.js";
 
 const SECTION_CHOICES = [
   ["posts", "Posts", "Everything you've posted, with photos, links and places."],
@@ -14,7 +14,7 @@ const SECTION_CHOICES = [
 ];
 const DEFAULT_ON = new Set(["posts", "photos"]);
 
-export function importPage(owner) {
+export function importPage({ owner }) {
   return `<!doctype html>
 <html lang="en-GB">
 <head>
@@ -51,7 +51,7 @@ ${FAVICON}
 ${ownerHeader("import")}
 <main>
 <h1>Import your Facebook archive</h1>
-<p class="meta">Signed in as ${escape(owner.name)}. Choose the download Facebook gave you, in JSON format.
+<p class="meta">Signed in as ${escape(owner)}. Choose the download Facebook gave you, in JSON format.
 Your browser reads it on this computer and uploads only the sections you tick below. Importing replaces
 what's published now; visitors see the old version until the new one is complete.</p>
 

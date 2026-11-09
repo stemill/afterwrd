@@ -1,7 +1,8 @@
 // The only pages served to people who aren't signed in. Styles and script are inline because /static is
 // behind the login too (apart from the fonts, which are public: see index.js).
 import { FAVICON, LOGO } from "./nav.js";
-import { escape } from "./util.js";
+import { escape } from "../util.js";
+import { resultHtml } from "./checks.js";
 
 const STYLE = `
   @font-face { font-family: "Nunito"; src: url("/static/fonts/nunito.woff2") format("woff2"); font-weight: 200 1000; font-display: swap; }
@@ -179,8 +180,8 @@ export function messagePage(message, link = { href: "/_auth/login", label: "Go t
 }
 
 // Opened from a check link (checks.js): a friend's site asking to check this person's site, read-only, through
-// Cloudflare. `result` is what a finished check found, already HTML.
-export function checkLinkPage({ owner, checker, site, fixed, result, reading = false }) {
+// Cloudflare. `result` is what a finished check found, and `by` the site that checked.
+export function checkLinkPage({ owner, checker, site, fixed, result, by = null, reading = false }) {
   const style = `<style>
   .check-good { color: #a8d49a; } .check-bad { color: #ff8070; }
   .check-good, .check-bad { margin: 0 0 14px; } .check-good b, .check-bad b { color: var(--text); }
@@ -188,7 +189,7 @@ export function checkLinkPage({ owner, checker, site, fixed, result, reading = f
   .meta { font-size: 0.9rem; } main { max-width: 520px; }
   .check-who { color: var(--text); padding: 12px 16px; border-radius: 16px; background: var(--sunken); word-break: break-word; }
 </style>`;
-  if (result && !reading) return page("Site check", `${style}<h1>${escape(owner)}'s site checked yours</h1>\n${result}`);
+  if (result && !reading) return page("Site check", `${style}<h1>${escape(owner)}'s site checked yours</h1>\n${resultHtml(result, "yours", by)}`);
   return page("Check my site", `${style}
 ${reading ? `<p class="check-bad">This check didn't finish. Start it again:</p>` : ""}
 <h1>${escape(owner)} would like to check your site</h1>

@@ -33,10 +33,10 @@
 import pkg from "../package.json";
 import { CODE_RE, donePage, exchangeCode, readCookie, relayLink, testingHere, withCookie } from "./cloudflare.js";
 import { API } from "./deploy.js";
-import { checkLinkPage, messagePage } from "./pages.js";
+import { checkLinkPage, messagePage } from "./views/pages.js";
 import { callSite, ownerName, siteOrigin } from "./peers.js";
 import { knownLatest, newer } from "./update.js";
-import { escape, html, json, now, randomToken, sha256 } from "./util.js";
+import { html, json, now, pageData, randomToken, Refusal, sha256 } from "./util.js";
 
 const REPO = pkg.afterwrd.releases;
 const LINK_SECONDS = 14 * 86400;
@@ -59,62 +59,90 @@ export async function handleCheckAdmin(request, env, url) {
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
   // The owner checked their own site (afterwrd.app/check/): a form on Home and Update. Their word for it.
   if (url.pathname === "/_admin/checks/myself") {
-    await keepChecked(env.DB, null, null, null);
+    await checkedMyself(env);
     const back = url.searchParams.get("back") === "update" ? "/_admin/update#check" : "/";
     return Response.redirect(`${url.origin}${back}`, 303);
   }
   // "Not now" on a friend's request for a check (a form on Home).
   const dismiss = /^\/_admin\/checks\/requests\/(\d+)\/dismiss$/.exec(url.pathname);
   if (dismiss) {
-    await env.DB.prepare("DELETE FROM check_requests WHERE connection_id = ?").bind(Number(dismiss[1])).run();
+    await dismissCheckRequest(env, Number(dismiss[1]));
     return Response.redirect(`${url.origin}/`, 303);
   }
   const body = await request.json().catch(() => ({}));
-  // The owner asking a friend to check their site: their site is sent the request, and shows it on its Home.
-  if (url.pathname === "/_admin/checks/ask") return askForCheck(env, Number(body.connection));
-  if (url.pathname === "/_admin/checks/new") {
-    // For a friend who asked (their request on Home), for a site whose address (or whole "please check" message) was
-    // pasted, or, with neither, for whichever site the person opening it names. Never for a friend who didn't ask:
-    // checks start with the person being checked.
-    const connection = body.connection == null ? null : Number(body.connection);
-    let friend = null;
-    let site = null;
-    if (connection !== null) {
-      friend = await env.DB.prepare("SELECT id, name, origin FROM connections WHERE id = ? AND approved_at IS NOT NULL").bind(connection).first();
-      if (!friend) return json({ error: "That isn't one of your friends." }, 404);
-      const asked = await env.DB.prepare("SELECT 1 FROM check_requests WHERE connection_id = ?").bind(friend.id).first();
-      if (!asked) return json({ error: `${friend.name} hasn't asked for a check. They can, from their site's Update page.` }, 409);
-      site = friend.origin;
-    } else if (typeof body.site === "string" && body.site.trim()) {
-      site = siteIn(body.site, env, url.origin);
-      if (!site) return json({ error: "Couldn't find an afterwrd site's address (something.their-name.workers.dev) in that." }, 400);
-      friend = await env.DB.prepare("SELECT id FROM connections WHERE origin = ? AND approved_at IS NOT NULL").bind(site).first();
+  try {
+    // The owner asking a friend to check their site: their site is sent the request, and shows it on its Home.
+    if (url.pathname === "/_admin/checks/ask") return json({ ok: true, ...await askForCheck(env, Number(body.connection)) });
+    if (url.pathname === "/_admin/checks/new") {
+      return json(await makeCheckLink(env, url.origin, { connection: body.connection == null ? null : Number(body.connection), site: body.site }));
     }
-    const token = randomToken();
-    const made = await env.DB.prepare(`INSERT INTO site_checks (token_hash, connection_id, site, site_fixed, created_at, expires_at)
-      SELECT ?1, ?2, ?3, ?4, ?5, ?6 WHERE (SELECT COUNT(*) FROM site_checks WHERE checked_at IS NULL AND expires_at > ?5) < ?7`)
-      .bind(await sha256(token), friend?.id ?? null, site, site ? 1 : 0, now(), now() + LINK_SECONDS, OPEN_LINKS).run();
-    if (!made.meta.changes) return json({ error: `You have ${OPEN_LINKS} check links nobody has used yet; wait for those first.` }, 429);
-    const link = `${url.origin}/_check/${token}`;
-    if (connection !== null) {
-      await env.DB.prepare("DELETE FROM check_requests WHERE connection_id = ?").bind(friend.id).run();
-      return json({ link, message: `Here's the link to check your afterwrd site, as you asked. Open it, press "Check my site", `
-        + `then press Allow when Cloudflare asks (it's read-only: it can't change anything). It works once, for 14 days.\n\n${link}` });
-    }
-    const me = await ownerName(env.DB);
-    return json({
-      link,
-      message: `${me} would like to check that your afterwrd site is genuine: exactly the published afterwrd, with `
-        + `nothing else done in your Cloudflare account. Open this link and, when Cloudflare asks, allow read-only `
-        + `access (it can't change anything). The link works once, for 14 days.\n\n${link}`,
-    });
+  } catch (error) {
+    if (error instanceof Refusal) return json({ error: error.message, ...error.more }, error.status);
+    throw error;
   }
   const forget = /^\/_admin\/checks\/(\d+)\/delete$/.exec(url.pathname);
   if (forget) {
-    await env.DB.prepare("DELETE FROM site_checks WHERE id = ?").bind(Number(forget[1])).run();
+    await forgetCheck(env, Number(forget[1]));
     return Response.redirect(`${url.origin}/friend#checks`, 303);
   }
   return new Response("Not found", { status: 404 });
+}
+
+// --- the owner's actions (see util.js Refusal) -------------------------------------------------------------------------
+
+/** The owner says they've checked their own site themselves (afterwrd.app/check/). */
+export async function checkedMyself(env) {
+  await keepChecked(env.DB, null, null, null);
+}
+
+/** "Not now" on friend `connectionId`'s request for a check. */
+export async function dismissCheckRequest(env, connectionId) {
+  await env.DB.prepare("DELETE FROM check_requests WHERE connection_id = ?").bind(connectionId).run();
+}
+
+/** Forgets a check this site made. */
+export async function forgetCheck(env, id) {
+  await env.DB.prepare("DELETE FROM site_checks WHERE id = ?").bind(id).run();
+}
+
+/**
+ * A link for checking a site, and a message to send with it: { link, message }. For a friend who asked
+ * (`connection`, their request on Home), for a site whose address (or whole "please check" message) was pasted
+ * (`site`), or, with neither, for whichever site the person opening it names. Never for a friend who didn't ask:
+ * checks start with the person being checked.
+ */
+export async function makeCheckLink(env, origin, { connection = null, site: pasted }) {
+  let friend = null;
+  let site = null;
+  if (connection !== null) {
+    friend = await env.DB.prepare("SELECT id, name, origin FROM connections WHERE id = ? AND approved_at IS NOT NULL").bind(connection).first();
+    if (!friend) throw new Refusal("That isn't one of your friends.", 404);
+    const asked = await env.DB.prepare("SELECT 1 FROM check_requests WHERE connection_id = ?").bind(friend.id).first();
+    if (!asked) throw new Refusal(`${friend.name} hasn't asked for a check. They can, from their site's Update page.`, 409);
+    site = friend.origin;
+  } else if (typeof pasted === "string" && pasted.trim()) {
+    site = siteIn(pasted, env, origin);
+    if (!site) throw new Refusal("Couldn't find an afterwrd site's address (something.their-name.workers.dev) in that.", 400);
+    friend = await env.DB.prepare("SELECT id FROM connections WHERE origin = ? AND approved_at IS NOT NULL").bind(site).first();
+  }
+  const token = randomToken();
+  const made = await env.DB.prepare(`INSERT INTO site_checks (token_hash, connection_id, site, site_fixed, created_at, expires_at)
+    SELECT ?1, ?2, ?3, ?4, ?5, ?6 WHERE (SELECT COUNT(*) FROM site_checks WHERE checked_at IS NULL AND expires_at > ?5) < ?7`)
+    .bind(await sha256(token), friend?.id ?? null, site, site ? 1 : 0, now(), now() + LINK_SECONDS, OPEN_LINKS).run();
+  if (!made.meta.changes) throw new Refusal(`You have ${OPEN_LINKS} check links nobody has used yet; wait for those first.`, 429);
+  const link = `${origin}/_check/${token}`;
+  if (connection !== null) {
+    await env.DB.prepare("DELETE FROM check_requests WHERE connection_id = ?").bind(friend.id).run();
+    return { link, message: `Here's the link to check your afterwrd site, as you asked. Open it, press "Check my site", `
+      + `then press Allow when Cloudflare asks (it's read-only: it can't change anything). It works once, for 14 days.\n\n${link}` };
+  }
+  const me = await ownerName(env.DB);
+  return {
+    link,
+    message: `${me} would like to check that your afterwrd site is genuine: exactly the published afterwrd, with `
+      + `nothing else done in your Cloudflare account. Open this link and, when Cloudflare asks, allow read-only `
+      + `access (it can't change anything). The link works once, for 14 days.\n\n${link}`,
+  };
 }
 
 /** The latest checks, with what they found, for the Friends page. */
@@ -143,8 +171,8 @@ export async function handleCheck(request, env, url) {
     const result = check.result ? JSON.parse(check.result) : null;
     const owner = await ownerName(env.DB);
     const by = { name: owner, host: url.host };
-    return html(checkLinkPage({ owner, checker: url.host, site: check.site, fixed: Boolean(check.site_fixed),
-      result: result ? resultHtml(result, "yours", by) : null, reading: Boolean(result && !check.checked_at) }));
+    return html(checkLinkPage(pageData(env, { owner, checker: url.host, site: check.site, fixed: Boolean(check.site_fixed),
+      result, by, reading: Boolean(result && !check.checked_at) })));
   }
   if (request.method === "POST" && match[2]) return start(env, url, check, token, await request.json().catch(() => ({})));
   return new Response("Not found", { status: 404 });
@@ -460,58 +488,7 @@ async function readAuditPage(access, env, here, result, cursor, fetcher = fetch)
 
 // --- showing it --------------------------------------------------------------------------------------------------
 
-const when = (seconds) => new Date(seconds * 1000).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) + " UTC";
-
-/** What a check found, as HTML (everything from Cloudflare escaped). `whose`: "yours" for the person checked, else "theirs". */
-export function resultHtml(r, whose = "theirs", by = null) {
-  const site = escape(r.site ? new URL(r.site).host : "");
-  const your = whose === "yours" ? "your" : "their";
-  const Your = whose === "yours" ? "Your" : "Their";
-  // Which site was checked, and by whom, first: with one person playing both parts it's easy to lose track.
-  const lines = [`<p class="check-who">Site checked: <b>${site}</b>${r.account ? ` <span class="meta">(Worker ${escape(r.script ?? "")}, Cloudflare account ending ${escape(r.account)})</span>` : ""}`
-    + (by ? `<br>Checked by: <b>${escape(by.name)}'s site</b> <span class="meta">(${escape(by.host)})</span>` : "") + "</p>"];
-  const say = (good, words) => lines.push(`<p class="check-${good ? "good" : "bad"}">${good ? "✓" : "✗"} ${words}</p>`);
-  if (r.problem === "missing") say(false, `No Worker called <b>${escape(r.script)}</b> in the Cloudflare account that was allowed. Was it the account ${site} is in?`);
-  else if (r.problem === "several") say(false, `More than one account that was allowed has a Worker called <b>${escape(r.script)}</b>. Check again, allowing only the account ${site} is in.`);
-  else if (r.problem === "unreadable") say(false, `Cloudflare wouldn't hand over the code of <b>${escape(r.script)}</b>.`);
-  else {
-    if (r.code === "matches") say(true, `${Your} site is running exactly <b>afterwrd ${escape(r.version)}</b>, every file the same as the published release.`);
-    else if (r.code === "different") {
-      say(false, `${Your} site's code is <b>not</b> the published afterwrd ${escape(r.version)}. Don't use it yet: see <a href="https://afterwrd.app/check/#wrong">what to do</a>.`);
-      lines.push(`<ul class="check-files">${(r.files ?? []).map((f) => `<li>${escape(f.name)}: ${escape(f.why)}</li>`).join("")}</ul>`);
-    } else if (r.code === "no-release") say(false, `It says it's afterwrd ${escape(r.version)}, but there's no such release.`);
-    else if (r.code === "release-unavailable") say(false, `Couldn't download afterwrd ${escape(r.version)} from GitHub to compare with. Check again later.`);
-    else say(false, "This Worker doesn't look like afterwrd: its version couldn't be read.");
-    for (const p of r.problems ?? []) say(false, escape(p));
-    if (!(r.problems ?? []).length && r.code === "matches") say(true, "It's connected to exactly what afterwrd uses, and hands out its files only through its code.");
-    if (r.newer) lines.push(`<p class="meta">afterwrd ${escape(r.newer)} is out: worth updating.</p>`);
-    if (recent(r)) {
-      lines.push(`<p class="check-bad">⏳ ${Your} site was installed or updated less than an hour before this check. Access given to an
-        installer or an update lasts an hour and can't be cut short, so ask for another check after <b>${escape(when(r.modified + HOUR))}</b>.</p>`);
-    }
-    const a = r.audit;
-    if (a) {
-      const odd = a.unexpected ?? [];
-      if (a.error) say(false, `Couldn't read all of ${your} account's audit log: ${escape(a.error)}`);
-      else if (!a.complete) say(false, a.stopped ? `${Your} account's audit log was too long to read all of, so it isn't checked.` : `Still reading ${your} account's audit log…`);
-      if (!odd.length && a.complete) say(true, `Since it was installed, apps and API tokens did only what installing, updating and groups do (${a.count} ${a.count === 1 ? "change" : "changes"}).`);
-      if (odd.length) {
-        say(false, `${odd.length === 1 ? "One change" : `${odd.length} changes`} to ${your} site or ${your} Cloudflare account, made through an app or API token, isn't something afterwrd does. Check ${whose === "yours" ? "you" : "they"} recognise ${odd.length === 1 ? "it" : "them"}:`);
-        lines.push(changeList(odd, r));
-        lines.push(`<p class="meta">“App” is something given access through Cloudflare's sign-in, such as wrangler; “API token” is a token
-          made in the Cloudflare profile.${odd.some((e) => r.database && e.resource === r.database) ? ` Changes to the site's database
-          matter even when the code is genuine: they could, say, add someone else's passkey.` : ""}</p>`);
-      }
-      const other = a.other ?? [];
-      if (other.length) {
-        lines.push(`<details class="check-other"><summary class="meta">${other.length === 1 ? "One change" : `${other.length} changes`} to other things in ${your}
-          account (not ${your} site, so they don't count against it)</summary>${changeList(other, r)}</details>`);
-      }
-    }
-  }
-  lines.push(`<p class="meta">Checked ${escape(when(r.checkedAt))}, read-only. The access Cloudflare gave was used for this check and not kept.</p>`);
-  return lines.join("\n");
-}
+export const when = (seconds) => new Date(seconds * 1000).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) + " UTC";
 
 // --- asking a friend for a check, and being asked ------------------------------------------------------------------
 
@@ -534,20 +511,21 @@ export function tooSoonToCheck(env) {
   return at && now() < at + HOUR ? at + HOUR : 0;
 }
 
-async function askForCheck(env, connection) {
+/** Asks friend `connection` to check this site: their site shows the request on its Home. Returns { name }. */
+export async function askForCheck(env, connection) {
   const wait = tooSoonToCheck(env);
-  if (wait) return json({ error: `Your site was updated less than an hour ago. Ask after ${when(wait)}.` }, 409);
+  if (wait) throw new Refusal(`Your site was updated less than an hour ago. Ask after ${when(wait)}.`, 409);
   const friend = Number.isInteger(connection) && await env.DB.prepare(`SELECT name, origin, their_key FROM connections WHERE id = ?
     AND connected_at IS NOT NULL AND approved_at IS NOT NULL AND their_key IS NOT NULL`).bind(connection).first();
-  if (!friend) return json({ error: "That isn't one of your friends." }, 404);
+  if (!friend) throw new Refusal("That isn't one of your friends.", 404);
   try {
     await callSite(friend.origin, "/_peer/check-request", { key: friend.their_key, body: { type: "CheckRequest" } });
   } catch (error) {
     // A site from before 0.35.0 doesn't know the request: the page offers the message to send instead.
-    if (error.status === 404) return json({ error: `${friend.name}'s site is on an older afterwrd, so send them a message instead.`, older: true }, 409);
-    return json({ error: `Couldn't reach ${friend.name}'s site: ${error.message}` }, 502);
+    if (error.status === 404) throw new Refusal(`${friend.name}'s site is on an older afterwrd, so send them a message instead.`, 409, { older: true });
+    throw new Refusal(`Couldn't reach ${friend.name}'s site: ${error.message}`, 502);
   }
-  return json({ ok: true, name: friend.name });
+  return { name: friend.name };
 }
 
 /** A friend's site asking for a check (POST /_peer/check-request). Returns [body, status]. */
@@ -615,31 +593,9 @@ async function keepChecked(db, connectionId, name, version) {
 /** This site's newest check, as { name (null: the owner's own), version, checked_at }, or null if it's never been checked. */
 export const lastChecked = (db) => db.prepare("SELECT name, version, checked_at FROM checked ORDER BY id DESC LIMIT 1").first();
 
-/** "Last checked by Sam Taylor's site on 9 Nov 2026 (afterwrd 0.34.0)." or "You last checked it yourself on …". */
-export function checkedWords(last) {
-  const day = new Date(last.checked_at * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Europe/London" });
-  return last.name === null
-    ? `You last checked it yourself, on ${day}.`
-    : `Last checked by ${last.name}'s site on ${day}${last.version ? ` (afterwrd ${last.version})` : ""}.`;
-}
-
-/** Changes, the same ones together ("Upload Version · afterwrd-install × 6"), newest first. */
-function changeList(changes, r) {
-  const groups = new Map();
-  for (const e of changes) {
-    const key = `${e.description || `${e.type} ${e.what}`}|${e.resource}|${e.context}`;
-    const group = groups.get(key);
-    if (group) { group.n++; if (e.time < group.first) group.first = e.time; } else groups.set(key, { ...e, n: 1, first: e.time });
-  }
-  const day = (t) => escape(t.replace("T", " ").slice(0, 16));
-  return `<ul class="check-files">${[...groups.values()].map((g) => `<li>${g.n > 1 ? `${day(g.first)} to ${day(g.time)}` : day(g.time)} · `
-    + `${escape(g.description || `${g.type} ${g.what}`)}${g.resource ? ` · ${escape(g.resource)}${g.resource === r.database ? " (its database)" : ""}` : ""}`
-    + ` (${g.context === "api" ? "API token" : "app"})${g.n > 1 ? ` × ${g.n}` : ""}</li>`).join("")}</ul>`;
-}
-
 // Changed less than an hour before the check: whoever was given access for the install or update still had it.
-const HOUR = 3600;
-const recent = (r) => Boolean(r.modified && r.checkedAt - r.modified < HOUR);
+export const HOUR = 3600;
+export const recent = (r) => Boolean(r.modified && r.checkedAt - r.modified < HOUR);
 
 /** A few words for the Friends page. */
 export function verdict(r) {

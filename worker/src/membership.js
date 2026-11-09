@@ -33,11 +33,11 @@ import { parseMedia } from "./friends.js";
 import { cleanName, cleanText, MAX_GROUP_ABOUT, MAX_GROUP_NAME, MAX_GROUP_PHOTOS, MAX_GROUP_TEXT } from "./groups.js";
 import { handleGroupSites } from "./groupsites.js";
 import { receiveGroupNote } from "./notify.js";
-import { messagePage } from "./pages.js";
+import { messagePage } from "./views/pages.js";
 import { callSite, KEY_RE, ownerName, PROTOCOL, siteOrigin } from "./peers.js";
 import { checkPhotos, removeUnusedFiles } from "./posts.js";
 import { signedFile } from "./share.js";
-import { html, json, now, randomToken, sha256 } from "./util.js";
+import { html, json, now, randomToken, Refusal, sha256 } from "./util.js";
 
 const PENDING_SECONDS = 600; // a join half made is given up after this
 const MAX_PLANS = 200; // events in one group the owner's said they're going to and that aren't long over
@@ -350,13 +350,24 @@ export async function claimGroup(env, url, id) {
   }));
 }
 
-// --- the owner's part in a group -------------------------------------------------------------------------------------------
+// --- the owner's part in a group (actions: see util.js Refusal) -----------------------------------------------------------
 
-/** Sends a post to a group; its photos (already uploaded here) go as signed links, and are copied there. */
-async function postToGroup(env, site, group, { text: words, photos }) {
+/** One of the owner's groups by its id here (or, `unfinished`, one whose Worker this site made but didn't set up). */
+export async function findGroup(db, id, { unfinished = false } = {}) {
+  const also = unfinished ? "OR (joined_at IS NULL AND script != '')" : "";
+  return db.prepare(`SELECT * FROM groups WHERE id = ? AND (joined_at IS NOT NULL ${also})`).bind(Number(id)).first();
+}
+
+/**
+ * Sends a post to a group; its photos (already uploaded here) go as signed links, and are copied there. Returns
+ * { id }, its number there.
+ */
+export async function postToGroup(env, site, group, { text: words, photos }) {
   const db = env.DB;
-  if (words.length > MAX_GROUP_TEXT) return { error: `Posts can be up to ${MAX_GROUP_TEXT} characters.` };
-  if (!words && !photos.length) return { error: "Write something or add a photo." };
+  const trouble = await checkPhotos(env, photos, MAX_GROUP_PHOTOS);
+  if (trouble) throw new Refusal(trouble);
+  if (words.length > MAX_GROUP_TEXT) throw new Refusal(`Posts can be up to ${MAX_GROUP_TEXT} characters.`);
+  if (!words && !photos.length) throw new Refusal("Write something or add a photo.");
   const attachment = await Promise.all(photos.map(async (f) => ({
     type: "Image", url: fileUrl(site, f.hash), mediaType: "image/jpeg", width: f.width, height: f.height, "afterwrd:size": f.size,
     "afterwrd:fetch": await signedFile(env, site, f.hash),
@@ -372,25 +383,27 @@ async function postToGroup(env, site, group, { text: words, photos }) {
       JSON.stringify(photos.map((f) => f.hash)), now()).run();
     return { id: Number(id) };
   } catch (error) {
-    return { error: `Couldn't post in ${group.name}: ${error.message}` };
+    throw new Refusal(`Couldn't post in ${group.name}: ${error.message}`);
   } finally {
     // The group has its own copies now; these were only uploaded to be sent.
     await removeUnusedFiles(env, photos.flatMap((f) => [f.hash, f.thumb_hash]));
   }
 }
 
-async function commentInGroup(env, group, postId, words) {
-  if (!/^\d{1,15}$/.test(postId)) return { error: "That isn't a post in this group." };
-  if (words.length > MAX_COMMENT) return { error: `Comments can be up to ${MAX_COMMENT} characters.` };
+/** Comments on post `postId` in a group. Returns { id }, its number there, or null if there's nothing to say. */
+export async function commentInGroup(env, group, postId, words) {
+  if (!words) return null;
+  if (!/^\d{1,15}$/.test(postId)) throw new Refusal("That isn't a post in this group.");
+  if (words.length > MAX_COMMENT) throw new Refusal(`Comments can be up to ${MAX_COMMENT} characters.`);
   const post = groupPostId(group.origin, group.remote_id, postId);
   let reply;
   try {
     reply = await call(group, "/_group/comments", { "@context": CONTEXT, type: "Note", mediaType: "text/plain", content: words, inReplyTo: post });
   } catch (error) {
-    return { error: `Couldn't send your comment: ${error.message}` };
+    throw new Refusal(`Couldn't send your comment: ${error.message}`);
   }
   const n = /^#c(\d{1,15})$/.exec(typeof reply.id === "string" && reply.id.startsWith(post) ? reply.id.slice(post.length) : "");
-  if (!n) return { error: "Couldn't send your comment: the group sent something unexpected." };
+  if (!n) throw new Refusal("Couldn't send your comment: the group sent something unexpected.");
   await env.DB.prepare(`INSERT INTO group_mine (group_id, site, remote_group, kind, post_id, remote_id, text, created_at)
     VALUES (?, ?, ?, 'comment', ?, ?, ?, ?)`).bind(group.id, group.origin, group.remote_id, Number(postId), Number(n[1]), words, now()).run();
   return { id: Number(n[1]) };
@@ -409,9 +422,9 @@ async function keepReply(env, site, group, reply, id, answer = null) {
 const keptEvent = (e) => JSON.stringify({ title: e.title, starts_at: e.starts_at, ends_at: e.ends_at, all_day: e.all_day,
   time_zone: e.time_zone, place: e.place });
 
-/** Adds an event to a group: a post with the event; the owner here is going to start with. Returns { id } or { error }. */
-async function addEvent(env, site, group, { text: words, event }) {
-  if (words.length > MAX_GROUP_TEXT) return { error: `Posts can be up to ${MAX_GROUP_TEXT} characters.` };
+/** Adds an event to a group: a post with the event; the owner here is going to start with. Returns { id }. */
+export async function addEvent(env, site, group, { text: words, event }) {
+  if (words.length > MAX_GROUP_TEXT) throw new Refusal(`Posts can be up to ${MAX_GROUP_TEXT} characters.`);
   let id;
   try {
     const reply = await call(group, "/_group/posts", { "@context": CONTEXT, type: "Note", mediaType: "text/plain", content: words,
@@ -420,64 +433,71 @@ async function addEvent(env, site, group, { text: words, event }) {
     id = typeof reply.id === "string" && reply.id.startsWith(prefix) ? reply.id.slice(prefix.length) : "";
     if (!/^\d{1,15}$/.test(id)) throw unexpected();
   } catch (error) {
-    return { error: `Couldn't add the event to ${group.name}: ${error.message}` };
+    throw new Refusal(`Couldn't add the event to ${group.name}: ${error.message}`);
   }
   await env.DB.prepare(`INSERT INTO group_mine (group_id, site, remote_group, kind, post_id, remote_id, text, photos, event, created_at)
     VALUES (?, ?, ?, 'post', ?, ?, ?, '[]', ?, ?)`).bind(group.id, group.origin, group.remote_id, Number(id), Number(id), words || null,
     keptEvent(event), now()).run();
-  await answerEvent(env, site, group, id, "going");
+  // The event's added even if its answer couldn't be sent.
+  await answerEvent(env, site, group, id, "going").catch((error) => {
+    if (!(error instanceof Refusal)) throw error;
+  });
   return { id: Number(id) };
 }
 
 /** The owner's answer to an event: going, maybe or no. */
-async function answerEvent(env, site, group, id, answer) {
-  if (!ANSWERS.includes(answer)) return { error: "Going, maybe, or can't go?" };
+export async function answerEvent(env, site, group, id, answer) {
+  if (!ANSWERS.includes(answer)) throw new Refusal("Going, maybe, or can't go?");
   try {
     await keepReply(env, site, group, await call(group, `/_group/events/${Number(id)}/answer`, { answer }), id, answer);
-    return {};
   } catch (error) {
-    return { error: `Couldn't send your answer: ${error.message}` };
+    throw new Refusal(`Couldn't send your answer: ${error.message}`);
   }
 }
 
 /** Changes an event the owner here added. */
-async function editEvent(env, site, group, id, { text: words, event }) {
-  if (words.length > MAX_GROUP_TEXT) return { error: `Posts can be up to ${MAX_GROUP_TEXT} characters.` };
+export async function editEvent(env, site, group, id, { text: words, event }) {
+  if (words.length > MAX_GROUP_TEXT) throw new Refusal(`Posts can be up to ${MAX_GROUP_TEXT} characters.`);
   let reply;
   try {
     reply = await call(group, `/_group/events/${Number(id)}/edit`, { "@context": CONTEXT, type: "Note", mediaType: "text/plain",
       content: words, "afterwrd:event": eventObject(event) });
   } catch (error) {
-    return { error: `Couldn't change the event: ${error.message}` };
+    throw new Refusal(`Couldn't change the event: ${error.message}`);
   }
   await env.DB.prepare("UPDATE group_mine SET text = ?, event = ? WHERE site = ? AND remote_group = ? AND kind = 'post' AND remote_id = ?")
     .bind(words || null, keptEvent(event), group.origin, group.remote_id, Number(id)).run();
   await keepReply(env, site, group, reply, id);
-  return {};
 }
 
-async function cancelEvent(env, site, group, id) {
+/** Calls off an event (the writer's, or, running the group, anyone's). */
+export async function cancelEvent(env, site, group, id) {
   try {
     await keepReply(env, site, group, await call(group, `/_group/events/${Number(id)}/cancel`, {}), id);
-    return {};
   } catch (error) {
-    return { error: `Couldn't call it off: ${error.message}` };
+    throw new Refusal(`Couldn't call it off: ${error.message}`);
   }
 }
 
 /** Deletes a post or comment (`kind`: posts or comments): the owner's own, or, running the group, anyone's. */
-async function deleteInGroup(env, group, kind, id) {
+export async function deleteInGroup(env, group, kind, id) {
   try {
     await call(group, `/_group/${kind}/${Number(id)}/delete`, {});
   } catch (error) {
-    return { error: `Couldn't delete it: ${error.message}` };
+    throw new Refusal(`Couldn't delete it: ${error.message}`);
   }
   await env.DB.batch([
     env.DB.prepare("DELETE FROM group_mine WHERE site = ? AND remote_group = ? AND kind = ? AND remote_id = ?")
       .bind(group.origin, group.remote_id, kind === "posts" ? "post" : "comment", Number(id)),
     ...(kind === "posts" ? [env.DB.prepare("DELETE FROM group_plans WHERE group_id = ? AND post_id = ?").bind(group.id, Number(id))] : []),
   ]);
-  return {};
+}
+
+/** Leaves a group (its owner can't: they delete it instead), and forgets it here. */
+export async function leaveGroup(env, group) {
+  if (group.role === "owner") throw new Refusal("You own this group: delete it instead.");
+  await call(group, "/_group/leave", {}).catch(() => {});
+  await forgetGroup(env.DB, group);
 }
 
 /** Forgets a group here (its notes and plans too). The owner's copies of what they said stay. */
@@ -487,13 +507,17 @@ export const forgetGroup = (db, group) => db.batch([
   db.prepare("DELETE FROM groups WHERE id = ?").bind(group.id),
 ]);
 
-/** An admin's request to the group; returns { error } if it said no. */
-async function admin(group, path, body = {}) {
+/** An admin's request to the group (its invite link, its name and about, deciding on members); returns its answer. */
+export async function admin(group, path, body = {}) {
+  let reply;
   try {
-    return await call(group, `/_group/admin/${path}`, body);
+    reply = await call(group, `/_group/admin/${path}`, body);
   } catch (error) {
-    return { error: error.message };
+    throw new Refusal(error.message);
   }
+  // A group saying no in its answer, rather than with its status, is a no too.
+  if (reply?.error) throw new Refusal(reply.error);
+  return reply;
 }
 
 export async function handleGroupActions(request, env, url) {
@@ -514,22 +538,20 @@ export async function handleGroupActions(request, env, url) {
 
   const match = /^\/(\d{1,15})(\/.*)$/.exec(path);
   // A group whose Worker this site made but couldn't finish setting up can still be deleted.
-  const unfinished = match?.[2] === "/delete" ? "OR (joined_at IS NULL AND script != '')" : "";
-  const group = match && await db.prepare(`SELECT * FROM groups WHERE id = ? AND (joined_at IS NOT NULL ${unfinished})`).bind(Number(match[1])).first();
+  const group = match && await findGroup(db, match[1], { unfinished: match[2] === "/delete" });
   if (!group) return problem("That group isn't here any more.", new URL("/groups", site), 404);
   const action = match[2];
   if (action === "/delete") return handleGroupSites(request, env, url, group);
-  if (action === "/posts") {
-    const body = await request.json().catch(() => ({}));
-    const photos = Array.isArray(body.photos) ? body.photos : [];
-    const trouble = await checkPhotos(env, photos, MAX_GROUP_PHOTOS);
-    if (trouble) return json({ error: trouble }, 400);
-    const made = await postToGroup(env, site, group, { text: cleanText(body.text), photos });
-    return made.error ? json({ error: made.error }, 400) : json({ ok: true });
-  }
-  if (action === "/link") {
-    const made = await admin(group, "link");
-    return made.error ? json({ error: made.error }, 400) : json({ link: made.link });
+  try {
+    if (action === "/posts") {
+      const body = await request.json().catch(() => ({}));
+      await postToGroup(env, site, group, { text: cleanText(body.text), photos: Array.isArray(body.photos) ? body.photos : [] });
+      return json({ ok: true });
+    }
+    if (action === "/link") return json({ link: (await admin(group, "link")).link });
+  } catch (error) {
+    if (error instanceof Refusal) return json({ error: error.message }, error.status);
+    throw error;
   }
 
   // Everything else is a form, landing back where it came from.
@@ -537,46 +559,51 @@ export async function handleGroupActions(request, env, url) {
   const home = `/groups/${group.id}`;
   let back = new URL(safeNext(String(form.get("back") ?? home), url), site);
   const members = new URL(`${home}/members`, site);
-  let done = {};
   const del = /^\/(posts|comments)\/(\d{1,15})\/delete$/.exec(action);
   const ev = /^\/events\/(\d{1,15})\/(answer|edit|cancel)$/.exec(action);
   const decision = /^\/members\/(\d{1,15})\/(approve|decline|remove|admin|member)$/.exec(action);
-  if (action === "/comments") {
-    const words = cleanText(String(form.get("text") ?? ""));
-    const post = String(form.get("post") ?? "");
-    if (!words) return Response.redirect(back, 303);
-    done = await commentInGroup(env, group, post, words);
-    if (!done.error) back.hash = `g${post}-${done.id}`;
-  } else if (del) {
-    done = await deleteInGroup(env, group, del[1], del[2]);
-  } else if (action === "/events" || ev?.[2] === "edit") {
-    const read = readEventForm(form, request.cf?.timezone);
-    if (read.error) return problem(read.error, back);
-    const words = cleanText(String(form.get("text") ?? ""));
-    done = ev ? await editEvent(env, site, group, ev[1], { text: words, event: read.event })
-      : await addEvent(env, site, group, { text: words, event: read.event });
-    if (!done.error) back = new URL(`${home}/posts/${ev ? ev[1] : done.id}`, site);
-  } else if (ev?.[2] === "answer") {
-    done = await answerEvent(env, site, group, ev[1], String(form.get("answer") ?? ""));
-  } else if (ev?.[2] === "cancel") {
-    done = await cancelEvent(env, site, group, ev[1]);
-  } else if (action === "/leave") {
-    if (group.role === "owner") return problem("You own this group: delete it instead.", members);
-    await call(group, "/_group/leave", {}).catch(() => {});
-    await forgetGroup(db, group);
-    return Response.redirect(`${site}/groups`, 303);
-  } else if (action === "/about") {
-    done = await admin(group, "about", {
-      name: String(form.get("name") ?? "").slice(0, MAX_GROUP_NAME), about: String(form.get("about") ?? "").slice(0, MAX_GROUP_ABOUT),
-    });
-    back.pathname = members.pathname;
-  } else if (decision) {
-    done = await admin(group, `members/${decision[1]}/${decision[2]}`);
-    back.pathname = members.pathname;
-  } else {
-    return new Response("Not found", { status: 404 });
+  try {
+    if (action === "/comments") {
+      const post = String(form.get("post") ?? "");
+      const made = await commentInGroup(env, group, post, cleanText(String(form.get("text") ?? "")));
+      if (made) back.hash = `g${post}-${made.id}`;
+    } else if (del) {
+      await deleteInGroup(env, group, del[1], del[2]);
+    } else if (action === "/events" || ev?.[2] === "edit") {
+      const read = readEventForm(form, request.cf?.timezone);
+      if (read.error) return problem(read.error, back);
+      const words = cleanText(String(form.get("text") ?? ""));
+      if (ev) await editEvent(env, site, group, ev[1], { text: words, event: read.event });
+      const id = ev ? ev[1] : (await addEvent(env, site, group, { text: words, event: read.event })).id;
+      back = new URL(`${home}/posts/${id}`, site);
+    } else if (ev?.[2] === "answer") {
+      await answerEvent(env, site, group, ev[1], String(form.get("answer") ?? ""));
+    } else if (ev?.[2] === "cancel") {
+      await cancelEvent(env, site, group, ev[1]);
+    } else if (action === "/leave") {
+      try {
+        await leaveGroup(env, group);
+      } catch (error) {
+        if (error instanceof Refusal) return problem(error.message, members);
+        throw error;
+      }
+      return Response.redirect(`${site}/groups`, 303);
+    } else if (action === "/about") {
+      back.pathname = members.pathname;
+      await admin(group, "about", {
+        name: String(form.get("name") ?? "").slice(0, MAX_GROUP_NAME), about: String(form.get("about") ?? "").slice(0, MAX_GROUP_ABOUT),
+      });
+    } else if (decision) {
+      back.pathname = members.pathname;
+      await admin(group, `members/${decision[1]}/${decision[2]}`);
+    } else {
+      return new Response("Not found", { status: 404 });
+    }
+  } catch (error) {
+    if (error instanceof Refusal) return problem(error.message, back, error.status);
+    throw error;
   }
-  return done.error ? problem(done.error, back) : Response.redirect(back, 303);
+  return Response.redirect(back, 303);
 }
 
 const problem = (message, back, status = 400) =>

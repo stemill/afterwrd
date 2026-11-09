@@ -8,9 +8,9 @@
 // Album and photo ids are the archive's copies (SITE_ID and up, see posts.js); only those made here can change.
 import { photoKey } from "./archive/comments.js";
 import { safeNext } from "./auth.js";
-import { asset, FAVICON, ownerHeader } from "./nav.js";
 import { addPhotos, checkPhotos, mirror, removeUnusedFiles, SITE_ID } from "./posts.js";
-import { escape, html, json, now } from "./util.js";
+import { html, json, now, pageData, Refusal } from "./util.js";
+import { addPage } from "./views/photos.js";
 import { notifyNewPost } from "./notify.js";
 
 const MAX_BATCH = 50;
@@ -39,68 +39,110 @@ export async function handlePhotos(request, env, url) {
   if (request.method === "GET" && url.pathname === "/_admin/photos/add") {
     const { results: albums } = await db.prepare("SELECT id, name FROM site_albums ORDER BY created_at DESC").all();
     const role = Object.hasOwn(ROLES, url.searchParams.get("for")) ? url.searchParams.get("for") : null;
-    return html(addPage(albums, Number(url.searchParams.get("album")) - SITE_ID, role));
+    // Albums by their archive ids (posts.js SITE_ID), as everywhere else; `chosen` is the one to start with.
+    return html(addPage(pageData(env, { albums: albums.map((a) => ({ id: SITE_ID + a.id, name: a.name })),
+      chosen: Number(url.searchParams.get("album")), role, max: role ? 1 : MAX_BATCH })));
   }
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
 
-  if (url.pathname === "/_admin/photos") return add(env, await request.json().catch(() => ({})), url);
+  if (url.pathname === "/_admin/photos") {
+    try {
+      const { album, role } = await addToAlbum(env, url.origin, await request.json().catch(() => ({})));
+      return json({ href: role ? "/posts" : `/photos/album/${album}` });
+    } catch (error) {
+      if (error instanceof Refusal) return json({ error: error.message }, error.status);
+      throw error;
+    }
+  }
 
   const form = await request.formData().catch(() => new FormData());
   const back = new URL(safeNext(String(form.get("back") ?? "/photos"), url), url.origin);
   if (url.pathname === "/_admin/profile") {
-    const role = String(form.get("role"));
-    const hash = String(form.get("hash") ?? "");
-    if (Object.hasOwn(ROLES, role) && (await db.prepare("SELECT 1 FROM media WHERE hash = ?").bind(hash).first())) {
-      await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(`${role}_hash`, hash).run();
-    }
+    await choosePicture(env, { role: String(form.get("role")), hash: String(form.get("hash") ?? "") });
     return Response.redirect(back, 303);
   }
 
   const album = /^\/_admin\/albums\/(\d+)\/(edit|delete)$/.exec(url.pathname);
   if (album) {
-    const id = Number(album[1]) - SITE_ID;
-    if (id < 1 || !(await db.prepare("SELECT 1 FROM site_albums WHERE id = ?").bind(id).first())) return Response.redirect(back, 303);
+    const id = Number(album[1]);
     if (album[2] === "edit") {
-      const name = clean(form.get("name"), 200);
-      if (name) {
-        await db.batch([
-          db.prepare("UPDATE site_albums SET name = ?, description = ? WHERE id = ?").bind(name, clean(form.get("description"), 2000) || null, id),
-          ...mirror(db),
-        ]);
-      }
-      return Response.redirect(`${url.origin}/photos/album/${SITE_ID + id}`, 303);
+      const edited = await editAlbum(env, id, { name: form.get("name"), description: form.get("description") });
+      return Response.redirect(edited ? `${url.origin}/photos/album/${id}` : back, 303);
     }
-    // Deleting an album deletes its photos, apart from any also in a post, which move to "Posted on afterwrd".
-    const { results: photos } = await db.prepare("SELECT * FROM site_photos WHERE album_id = ?").bind(id).all();
-    const going = photos.filter((f) => f.post_id === null);
-    await db.batch([
-      db.prepare("DELETE FROM site_photos WHERE album_id = ? AND post_id IS NULL").bind(id),
-      db.prepare("UPDATE site_photos SET album_id = NULL WHERE album_id = ?").bind(id),
-      db.prepare("DELETE FROM site_albums WHERE id = ?").bind(id),
-      ...mirror(db),
-      ...comments(db, going),
-    ]);
-    await removeUnusedFiles(env, going.flatMap((f) => [f.hash, f.thumb_hash]));
-    return Response.redirect(`${url.origin}/photos`, 303);
+    return Response.redirect(await deleteAlbum(env, id) ? `${url.origin}/photos` : back, 303);
   }
 
   const photo = /^\/_admin\/photos\/(\d+)\/delete$/.exec(url.pathname);
   if (photo) {
-    const f = await db.prepare("SELECT * FROM site_photos WHERE id = ?").bind(Number(photo[1]) - SITE_ID).first();
-    if (!f) return Response.redirect(back, 303);
-    await db.batch([
-      db.prepare("DELETE FROM site_photos WHERE id = ?").bind(f.id),
-      // A post left with nothing to show goes too.
-      db.prepare(`DELETE FROM site_posts WHERE id = ? AND text IS NULL
-        AND NOT EXISTS (SELECT 1 FROM site_photos WHERE post_id = site_posts.id)`).bind(f.post_id),
-      ...mirror(db),
-      ...comments(db, [f]),
-    ]);
-    await removeUnusedFiles(env, [f.hash, f.thumb_hash]);
-    const to = f.album_id !== null ? `/photos/album/${SITE_ID + f.album_id}` : f.post_id !== null ? "/posts" : "/photos";
+    const gone = await deletePhoto(env, Number(photo[1]));
+    if (!gone) return Response.redirect(back, 303);
+    const to = gone.album !== null ? `/photos/album/${gone.album}` : gone.inPost ? "/posts" : "/photos";
     return Response.redirect(`${url.origin}${to}`, 303);
   }
   return new Response("Not found", { status: 404 });
+}
+
+// --- actions (see util.js Refusal). Albums and photos go by their archive ids (SITE_ID and up). ----------------------
+
+/** A profile picture or cover (`role`), from any photo here (`hash`). Does nothing if either isn't right. */
+export async function choosePicture(env, { role, hash }) {
+  const db = env.DB;
+  if (Object.hasOwn(ROLES, role) && (await db.prepare("SELECT 1 FROM media WHERE hash = ?").bind(hash).first())) {
+    await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(`${role}_hash`, hash).run();
+  }
+}
+
+/** Renames an album made here (an empty name changes nothing). False if it isn't one. */
+export async function editAlbum(env, albumId, { name, description }) {
+  const db = env.DB;
+  const id = albumId - SITE_ID;
+  if (id < 1 || !(await db.prepare("SELECT 1 FROM site_albums WHERE id = ?").bind(id).first())) return false;
+  name = clean(name, 200);
+  if (name) {
+    await db.batch([
+      db.prepare("UPDATE site_albums SET name = ?, description = ? WHERE id = ?").bind(name, clean(description, 2000) || null, id),
+      ...mirror(db),
+    ]);
+  }
+  return true;
+}
+
+/** Deletes an album made here and its photos, apart from any also in a post, which move to "Posted on afterwrd". False if it isn't one. */
+export async function deleteAlbum(env, albumId) {
+  const db = env.DB;
+  const id = albumId - SITE_ID;
+  if (id < 1 || !(await db.prepare("SELECT 1 FROM site_albums WHERE id = ?").bind(id).first())) return false;
+  const { results: photos } = await db.prepare("SELECT * FROM site_photos WHERE album_id = ?").bind(id).all();
+  const going = photos.filter((f) => f.post_id === null);
+  await db.batch([
+    db.prepare("DELETE FROM site_photos WHERE album_id = ? AND post_id IS NULL").bind(id),
+    db.prepare("UPDATE site_photos SET album_id = NULL WHERE album_id = ?").bind(id),
+    db.prepare("DELETE FROM site_albums WHERE id = ?").bind(id),
+    ...mirror(db),
+    ...comments(db, going),
+  ]);
+  await removeUnusedFiles(env, going.flatMap((f) => [f.hash, f.thumb_hash]));
+  return true;
+}
+
+/**
+ * Deletes a photo made here (and a post left with nothing to show). Returns where it was: { album } (its archive id,
+ * or null) and { inPost }; or null if it isn't one.
+ */
+export async function deletePhoto(env, photoId) {
+  const db = env.DB;
+  const f = await db.prepare("SELECT * FROM site_photos WHERE id = ?").bind(photoId - SITE_ID).first();
+  if (!f) return null;
+  await db.batch([
+    db.prepare("DELETE FROM site_photos WHERE id = ?").bind(f.id),
+    // A post left with nothing to show goes too.
+    db.prepare(`DELETE FROM site_posts WHERE id = ? AND text IS NULL
+      AND NOT EXISTS (SELECT 1 FROM site_photos WHERE post_id = site_posts.id)`).bind(f.post_id),
+    ...mirror(db),
+    ...comments(db, [f]),
+  ]);
+  await removeUnusedFiles(env, [f.hash, f.thumb_hash]);
+  return { album: f.album_id !== null ? SITE_ID + f.album_id : null, inPost: f.post_id !== null };
 }
 
 // Comments on photos are kept by picture (photo-<hash>), so they go only once no photo here shows that picture: an
@@ -108,12 +150,16 @@ export async function handlePhotos(request, env, url) {
 const comments = (db, photos) => photos.map((f) => db.prepare(`DELETE FROM site_comments WHERE target = ?
   AND NOT EXISTS (SELECT 1 FROM media WHERE hash = ?)`).bind(photoKey(f), f.hash));
 
-async function add(env, body, url) {
+/**
+ * Adds uploaded photos to an album here (a new one, one made before, or, for a profile picture or cover (`role`),
+ * the album kept for those), and optionally shares them as a post. Returns { album } (its archive id) and { role }.
+ */
+export async function addToAlbum(env, origin, body) {
   const db = env.DB;
   const photos = Array.isArray(body.photos) ? body.photos : [];
-  if (!photos.length) return json({ error: "Choose some photos first." }, 400);
+  if (!photos.length) throw new Refusal("Choose some photos first.");
   const problem = await checkPhotos(env, photos, MAX_BATCH);
-  if (problem) return json({ error: problem }, 400);
+  if (problem) throw new Refusal(problem);
   const role = Object.hasOwn(ROLES, body.role) ? body.role : null;
 
   // Which album: a new one, one made here before, or (for a profile picture or cover) the album kept for those.
@@ -124,10 +170,10 @@ async function add(env, body, url) {
     albumId = (await db.prepare("SELECT id FROM site_albums WHERE name = ? ORDER BY id LIMIT 1").bind(name).first())?.id ?? null;
   } else if (body.album === "new") {
     name = clean(body.name, 200);
-    if (!name) return json({ error: "Give the new album a name." }, 400);
+    if (!name) throw new Refusal("Give the new album a name.");
   } else {
     const found = await db.prepare("SELECT id, name FROM site_albums WHERE id = ?").bind(Number(body.album) - SITE_ID).first();
-    if (!found) return json({ error: "That album isn't there any more." }, 400);
+    if (!found) throw new Refusal("That album isn't there any more.");
     [albumId, name] = [found.id, found.name];
   }
   if (albumId === null) {
@@ -147,47 +193,6 @@ async function add(env, body, url) {
     ...(role ? [db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(`${role}_hash`, photos[0].hash)] : []),
     ...mirror(db),
   ]);
-  if (share) await notifyNewPost(env, url.origin);
-  return json({ href: role ? "/posts" : `/photos/album/${SITE_ID + albumId}` });
-}
-
-function addPage(albums, chosen, role) {
-  const title = role === "profile" ? "Choose a profile picture" : role === "cover" ? "Choose a cover photo" : "Add photos";
-  return `<!doctype html>
-<html lang="en-GB">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${title} · afterwrd</title>
-<link rel="stylesheet" href="${asset("/static/style.css")}">
-${FAVICON}
-</head>
-<body>
-${ownerHeader("photos")}
-<main class="add-photos">
-<p class="crumbs"><a href="${role ? "/posts" : "/photos"}">${role ? "Posts" : "Photos"}</a> /</p>
-<h1>${title}</h1>
-${role ? `<p class="meta">Upload one here, or open any of your photos and press <b>Make ${role === "profile" ? "profile picture" : "cover"}</b>.</p>` : ""}
-<form class="card composer" id="add" data-role="${role ?? ""}" data-max="${role ? 1 : MAX_BATCH}">
-  ${role ? "" : `<label>Album
-    <select name="album" data-search="Type an album's name" aria-label="Album">
-      <option value="new">New album…</option>
-      ${albums.map((a) => `<option value="${SITE_ID + a.id}" ${a.id === chosen ? "selected" : ""}>${escape(a.name)}</option>`).join("")}
-    </select></label>
-  <div class="new-album">
-    <input name="name" maxlength="200" placeholder="Album name, e.g. Summer 2026" aria-label="Album name">
-    <textarea name="description" rows="2" maxlength="2000" placeholder="What's it about? (optional)" aria-label="Album description"></textarea>
-  </div>`}
-  <ul class="picked" hidden></ul>
-  <label class="chip pick"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg>
-    <span>${role ? "Choose a photo" : "Choose photos"}</span><input type="file" accept="image/*" ${role ? "" : "multiple"} class="hidden"></label>
-  <label class="check"><input type="checkbox" name="share" ${role ? "" : "checked"}> <span>Also share it as a post, so friends see it on their Home</span></label>
-  <textarea name="text" rows="2" maxlength="5000" placeholder="Say something about it (optional)" aria-label="Say something"></textarea>
-  <p class="error" role="alert"></p>
-  <div class="actions"><span class="status meta" role="status"></span><button class="post">${role ? "Use this photo" : "Add photos"}</button></div>
-</form>
-</main>
-<script type="module" src="${asset("/static/add-photos.js")}"></script>
-</body>
-</html>`;
+  if (share) await notifyNewPost(env, origin);
+  return { album: SITE_ID + albumId, role };
 }
