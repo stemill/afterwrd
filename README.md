@@ -63,7 +63,7 @@ it's public (see [SECURITY.md](SECURITY.md)).
 **Easiest: use the install page, <https://afterwrd.app/>, on a phone or a computer.** Make your Cloudflare account
 (step 1 below) and stay signed in, then press *Install*: afterwrd's installer at <https://install.afterwrd.app/>
 connects to your Cloudflare account (you press *Allow* on Cloudflare's page; it lasts an hour and nothing is kept),
-asks for your address if the account hasn't one yet (`afterwrd.<your-name>.workers.dev`), puts afterwrd there, and
+asks your name (and makes your address from it, `afterwrd.<your-name>.workers.dev`, if the account hasn't one yet), puts afterwrd there, and
 sends you straight to your new site to make yourself its owner. It runs in the
 maintainer's Cloudflare account, so it's one more thing to trust: if you'd rather not, the install page also offers
 Cloudflare's own Deploy page, which puts the installer in your account instead. By hand, the steps in full:

@@ -154,6 +154,9 @@ this device, then you can import your Facebook download and invite friends.</p>
 <p id="error" role="alert"></p>`, `
   const code = new URLSearchParams(location.search).get("code");
   keepInvite();
+  // The name they gave the installer, brought after the # (so no server saw it on the way): ready to use or correct.
+  const given = (new URLSearchParams(location.hash.slice(1)).get("name") ?? "").trim().slice(0, 100);
+  if (given) document.getElementById("name").value = given;
   // Off the address bar and out of history, so an abandoned setup doesn't leave the code lying around.
   history.replaceState(null, "", "/_auth/setup");
   run(document.getElementById("go"), async () => {

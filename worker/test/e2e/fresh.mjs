@@ -23,8 +23,8 @@ await cdp.send("WebAuthn.enable");
 await cdp.send("WebAuthn.addVirtualAuthenticator", { options: { protocol: "ctap2", transport: "internal",
   hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } });
 const broughtLink = `http://localhost:8788/_connect/${"x".repeat(43)}`; // a friend's link, as the installer hands it on
-await page.goto(`${BASE}/_auth/setup?code=local-test-setup-code#${new URLSearchParams({ invite: broughtLink })}`);
-await page.type("#name", "New Owner");
+await page.goto(`${BASE}/_auth/setup?code=local-test-setup-code#${new URLSearchParams({ name: "New Owner", invite: broughtLink })}`);
+check("the name given to the installer is ready on the setup page", (await page.$eval("#name", (i) => i.value)) === "New Owner");
 await Promise.all([page.waitForNavigation(), page.click("#go")]);
 await Promise.all([page.waitForNavigation(), page.click("#go")]);
 const landed = new URL(page.url());

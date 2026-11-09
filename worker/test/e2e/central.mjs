@@ -48,7 +48,7 @@ async function cloudflare(token, method, path, body, contentType) {
     if (token === "tok-flakyname" && method === "GET") return fail(503, "Service unavailable");
     if (method === "PUT") {
       const wanted = JSON.parse(body).subdomain;
-      if (wanted === "taken") return fail(409, "That subdomain is not available.");
+      if (wanted === "taken" || wanted === "ann-example") return fail(409, "That subdomain is not available.");
       s.domains[m[1]] = wanted;
       return ok({ subdomain: wanted });
     }
@@ -104,7 +104,7 @@ await new Promise((r) => site.listen(8797, "127.0.0.1", r));
 
 // --- a person installing ------------------------------------------------------------------------------------------
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
-async function install(code, { domains = [], account = null, invite = null, rename = null, start = BASE } = {}) {
+async function install(code, { person = "Ann Example", domains = [], account = null, invite = null, rename = null, start = BASE } = {}) {
   const context = await browser.createBrowserContext();
   const page = await context.newPage();
   page.on("pageerror", (e) => errors.push(e.message));
@@ -135,20 +135,33 @@ async function install(code, { domains = [], account = null, invite = null, rena
     await Promise.all([page.waitForFunction(() => document.title === "Allow stand-in"), page.click("#install")]);
   }
   await Promise.all([page.waitForNavigation(), page.click("#allow")]);
-  for (const domain of domains) {
-    await page.waitForSelector("#naming:not([hidden])", { timeout: 15000 });
-    page.suggested ??= await page.$eval("#domain", (i) => i.value);
-    await page.$eval("#domain", (i) => { i.value = ""; });
-    await page.type("#domain", domain);
-    page.preview = await page.$eval(".address-preview", (b) => b.textContent);
-    await page.click("#use-domain");
-    await new Promise((r) => setTimeout(r, 500));
-  }
   if (account) {
     await page.waitForSelector("#choose:not([hidden])", { timeout: 15000 })
       .catch(async () => { throw new Error(`No account choice at ${page.url()}: ${await page.$eval("#error", (e) => e.textContent)} / ${await page.$eval("#log", (e) => e.textContent)}`); });
     await page.click(`input[name=account][value="${account}"]`);
     await page.click("#use-account");
+  }
+  // Their name (and, if the one it makes is taken, addresses typed in turn); unless it stopped before asking.
+  await page.waitForFunction(() => !document.getElementById("naming").hidden || document.getElementById("error").textContent, { timeout: 15000 });
+  if (await page.$eval("#naming", (s) => !s.hidden)) {
+    page.suggested = await page.$eval("#person", (i) => i.value);
+    page.suggestedAddress = await page.$eval("#domain", (i) => i.value);
+    page.oldAddress = await page.$eval("#old-address", (p) => (p.hidden ? null : p.textContent.replace(/\s+/g, " ").trim()));
+    page.lookingTicked = await page.$eval("#log li", (li) => li.classList.contains("done"));
+    if (person !== null) {
+      await page.$eval("#person", (i) => { i.value = ""; });
+      await page.type("#person", person);
+    }
+    page.previews = [await page.$eval(".address-preview", (b) => b.textContent)];
+    await page.click("#use-person");
+    for (const domain of domains) {
+      await page.waitForSelector("#address-box:not([hidden])", { timeout: 15000 });
+      page.refused = await page.$eval("#error", (e) => e.textContent);
+      await page.$eval("#domain", (i) => { i.value = ""; });
+      await page.type("#domain", domain);
+      page.previews.push(await page.$eval(".address-preview", (b) => b.textContent));
+      await page.click("#use-person");
+    }
   }
   if (rename) {
     await page.waitForSelector("#renaming:not([hidden])", { timeout: 15000 });
@@ -167,8 +180,9 @@ async function install(code, { domains = [], account = null, invite = null, rena
   throw new Error(`Install didn't finish: ${page.url()}`);
 }
 
-// A brand-new account: no workers.dev name yet (the first one tried is taken).
-const fresh = await install("fresh", { domains: ["taken", "ann-example"] });
+// A brand-new account: no workers.dev name yet. The address made from their name is taken, so they type another
+// (as a name would be typed: capitals, spaces, an accent).
+const fresh = await install("fresh", { person: "Ann Example", domains: ["Ann Exämple 2 "] });
 check("the page says what's needed, phone included, and asks no names before connecting", fresh.before.includes("works on a phone")
   && fresh.before.includes("Make a free Cloudflare account") && fresh.before.includes("confirm your address") && !fresh.before.includes("site's name"));
 check("Connect goes straight to Cloudflare, asking for what installing needs, coming back here", fresh.allow.pathname === "/oauth2/auth"
@@ -176,8 +190,12 @@ check("Connect goes straight to Cloudflare, asking for what installing needs, co
 const swap = exchanges.at(-1);
 check("the code is swapped with the PKCE secret matching the challenge, for the same return address", swap.code === "fresh.one-time-code"
   && swap.redirect_uri === `${BASE}/done` && b64url(createHash("sha256").update(swap.code_verifier ?? "").digest()) === fresh.allow.searchParams.get("code_challenge"));
-check("a new account is asked for its address, shown in full, and a taken one is turned down", state["tok-fresh"].domains[A] === "ann-example"
-  && fresh.page.preview === "afterwrd.ann-example.workers.dev" && calls.some((c) => c.startsWith("tok-fresh PUT /accounts/") && c.endsWith("/workers/subdomain")), fresh.page.preview);
+check("a new account is asked their name, and the address is made from it and shown in full", fresh.page.previews[0] === "afterwrd.ann-example.workers.dev"
+  && fresh.page.lookingTicked, fresh.page.previews.join(" | "));
+check("…a taken one is turned down, with the address box opened to change it", fresh.page.refused.includes("afterwrd.ann-example.workers.dev")
+  && fresh.page.refused.includes("try another"), fresh.page.refused);
+check("…and what's typed there is tidied (\"Ann Exämple 2 \" → ann-example-2) and used", state["tok-fresh"].domains[A] === "ann-example-2"
+  && fresh.page.previews[1] === "afterwrd.ann-example-2.workers.dev", fresh.page.previews.join(" | "));
 const made = state["tok-fresh"].deployed[0];
 const bindings = (made?.metadata.bindings ?? []).map((b) => `${b.type} ${b.name}`).sort().join(", ");
 check("the site is installed as a new Worker called afterwrd, with its database, stores, files and setup code", made?.script === "afterwrd"
@@ -185,22 +203,26 @@ check("the site is installed as a new Worker called afterwrd, with its database,
   && made.metadata.bindings.find((b) => b.name === "DB").id === "new-database" && made.metadata.assets.jwt === "completion-jwt", bindings);
 check("…and switched on at its workers.dev address", state["tok-fresh"].enabled === `${A}/afterwrd`);
 const setupCode = made?.metadata.bindings.find((b) => b.name === "SETUP_CODE")?.text;
-check("then it goes straight on to the new site's setup link", fresh.next === `${NEW_SITE}/_auth/setup?code=${setupCode}`
+check("then it goes straight on to the new site's setup link, their name after the # for it", fresh.next === `${NEW_SITE}/_auth/setup?code=${setupCode}#name=Ann+Example`
   && /^[0-9a-f]{48}$/.test(setupCode ?? ""), fresh.next);
 check("…and the token is dropped here", !(await fresh.page.cookies(BASE)).some((c) => c.name.includes("install_token")));
 check("every file came from the release, checked", calls.some((c) => c.includes("assets/upload")) && made.modules.join() === "index.js");
 
 // Invited by a friend: the invitation goes along, after the #, never to the installer's server.
 const friendLink = `http://localhost:8787/_connect/${"y".repeat(43)}`;
-const invited = await install("freshinvite", { domains: ["bob-smith"], invite: { invite: friendLink, name: "Bob Smith" } });
+const invited = await install("freshinvite", { person: null, invite: { invite: friendLink, name: "Bob Smith" } });
 check("an invited person is told they'll be friends in one step", invited.before.includes("A friend invited you"));
-check("…their Cloudflare name is suggested from the name they were invited by", invited.page.suggested === "bob-smith", invited.page.suggested);
-check("…and the new site's setup link carries the invitation after the #", invited.next.endsWith(`#${new URLSearchParams({ invite: friendLink })}`), invited.next);
+check("…their name and address are suggested from the name they were invited by", invited.page.suggested === "Bob Smith"
+  && invited.page.suggestedAddress === "bob-smith" && state["tok-freshinvite"].domains[A] === "bob-smith", `${invited.page.suggested} / ${invited.page.suggestedAddress}`);
+check("…and the new site's setup link carries their name and the invitation after the #",
+  invited.next.endsWith(`#${new URLSearchParams({ name: "Bob Smith", invite: friendLink })}`), invited.next);
 check("…which never reached the installer's server", !requestsSeen.some((u) => u.includes("_connect")), requestsSeen.filter((u) => u.includes("_connect")).join(" | ").slice(0, 400));
 
 // A leftover database called afterwrd with things in it: asked for another name, and installed under that.
 const uploadsBefore = calls.filter((c) => c.startsWith("tok-leftover") && c.includes("assets-upload-session")).length;
 const leftover = await install("leftover", { rename: "second" });
+check("an account that already has its workers.dev name is only asked their name, and shown the address it'll be",
+  leftover.page.oldAddress === "Your site will be at afterwrd.ann.workers.dev." && leftover.next?.endsWith("#name=Ann+Example"), leftover.page.oldAddress);
 check("a leftover database called afterwrd asks for another name before anything is uploaded", leftover.page.taken.includes('already a database called "afterwrd"')
   && uploadsBefore === 0 && !calls.some((c) => c.startsWith("tok-leftover") && c.includes("/scripts/afterwrd/assets-upload-session")), leftover.page.taken);
 check("…and installs under the new name", state["tok-leftover"].deployed[0]?.script === "second" && leftover.next?.startsWith(NEW_SITE), leftover.error);

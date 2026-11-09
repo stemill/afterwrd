@@ -178,7 +178,8 @@ const STEPS = {
     if (!NAME_RE.test(clean)) throw new Error("That name can use lowercase letters, numbers and hyphens (not at the start or end).");
     if (await workersDev(token, account)) throw new Error("This account already has a workers.dev name.");
     await api(token, `/accounts/${account}/workers/subdomain`, { method: "PUT", body: JSON.stringify({ subdomain: clean }) })
-      .catch((error) => { throw new Error(`Cloudflare wouldn't take that name (${error.message.replace(/^Cloudflare said: /, "")}). Try another.`); });
+      .catch((error) => { throw new Error(`Cloudflare wouldn't give you afterwrd.${clean}.workers.dev `
+        + `(${error.message.replace(/^Cloudflare said: /, "").replace(/\.$/, "")}). Someone may have it already: try another, perhaps with a number on the end.`); });
     return { domain: clean };
   },
 
@@ -277,6 +278,8 @@ function page(connected, go, error) {
   .button, button { display: block; width: 100%; min-height: 3rem; margin-top: 12px; padding: 12px 18px; border: 0; border-radius: 999px;
     background: var(--text); color: var(--on-accent); font: inherit; font-weight: 800; text-align: center; text-decoration: none; cursor: pointer; }
   .button.secondary, button.secondary { background: var(--raised); color: var(--text); }
+  button.linkish { display: inline; width: auto; min-height: 0; margin: 0; padding: 0; background: none; color: var(--accent-strong);
+    font-weight: 400; font-size: 0.9rem; text-decoration: underline; border-radius: 0; }
   button:disabled { opacity: 0.6; cursor: default; }
   .field { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: 8px 0; }
   input[type=text] { flex: 1 1 8em; min-width: 0; font: inherit; font-weight: 700; padding: 10px 16px; border: 1px solid var(--border);
@@ -322,12 +325,20 @@ function page(connected, go, error) {
 </section>
 
 <section id="naming" hidden>
-  <h2>Your address</h2>
-  <p class="meta">How friends will find your site. Your own name works well. Lowercase letters, numbers and hyphens;
-  choose carefully, as your friends' sites will know you by it.</p>
-  <p class="field"><input type="text" id="domain" placeholder="your-name" autocomplete="off" spellcheck="false" autocapitalize="none" aria-label="Your address"></p>
-  <p class="meta">Your site will be at <b class="address-preview">afterwrd.<span id="preview">your-name</span>.workers.dev</b></p>
-  <button id="use-domain">Use this address</button>
+  <h2>Your name</h2>
+  <p class="meta">As your friends will see it.</p>
+  <p class="field"><input type="text" id="person" placeholder="e.g. Sam Taylor" autocomplete="name" autocapitalize="words" maxlength="100" aria-label="Your name"></p>
+  <div id="new-address" hidden>
+    <p class="meta">Your site will be at <b class="address-preview">afterwrd.<span id="preview">your-name</span>.workers.dev</b>.
+    It's how friends' sites find you, so it can't be changed later.</p>
+    <div id="address-box" hidden>
+      <p class="meta">Choose the middle part: lowercase letters, numbers and hyphens.</p>
+      <p class="field"><input type="text" id="domain" placeholder="your-name" autocomplete="off" spellcheck="false" autocapitalize="none" aria-label="Your address"></p>
+    </div>
+    <button type="button" id="change-address" class="linkish">Use a different address</button>
+  </div>
+  <p class="meta" id="old-address" hidden>Your site will be at <b class="address-preview"></b>.</p>
+  <button id="use-person">Carry on</button>
 </section>
 
 <section id="renaming" hidden>
@@ -384,11 +395,30 @@ with Cloudflare's own Deploy page instead</a>. <a href="https://afterwrd.app/how
   } catch {}
   if (invite) $("invited").hidden = false;
   // An address to suggest, from the name the friend invited them by ("Bob Smith" → "bob-smith").
-  const suggested = invitedAs.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  // Names are tidied as they're typed, so "Pauline Millington" becomes pauline-millington rather than an error: accents
+  // dropped, anything else that isn't a letter or number turned into a hyphen. A hyphen can end the box while typing
+  // (the space before a surname), and finished() takes it off when the name is used.
+  const tidy = (text) => text.normalize("NFKD").replace(/[\\u0300-\\u036f]/g, "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+/, "").slice(0, 63);
+  const finished = (text) => tidy(text).replace(/-+$/, "");
   // The site is called afterwrd (its address afterwrd.<their name>.workers.dev), unless that's taken in the account.
   let name = "afterwrd";
-  const preview = () => { $("preview").textContent = $("domain").value.trim().toLowerCase() || "your-name"; };
-  $("domain").addEventListener("input", preview);
+  const preview = () => { $("preview").textContent = finished($("domain").value) || "your-name"; };
+  for (const id of ["domain", "name"]) {
+    $(id).addEventListener("input", () => {
+      const box = $(id);
+      const tidied = tidy(box.value);
+      if (tidied !== box.value) box.value = tidied;
+      if (id === "domain") { addressTouched = true; preview(); }
+    });
+  }
+  // Their name, asked once: it fills in the address (until they change the address themselves), and goes on to the
+  // new site's setup page, after the #, so that page has it ready. Starts as the name a friend invited them by.
+  let addressTouched = false;
+  const fromName = () => { if (!addressTouched) { $("domain").value = finished($("person").value).slice(0, 50).replace(/-+$/, ""); preview(); } };
+  $("person").addEventListener("input", fromName);
+  const showAddressBox = () => { $("address-box").hidden = false; $("change-address").hidden = true; };
+  $("change-address").addEventListener("click", () => { showAddressBox(); $("domain").focus(); });
 
   async function install() {
     $("error").textContent = "";
@@ -413,18 +443,37 @@ with Cloudflare's own Deploy page instead</a>. <a href="https://afterwrd.app/how
         $("choose").hidden = true;
         account = accounts.find((a) => a.id === document.querySelector("input[name=account]:checked").value);
       }
-      while (!account.domain) {
-        $("naming").hidden = false;
-        if (suggested && !$("domain").value) $("domain").value = suggested;
+      // Done looking: the tick stops the line reading as if it were still busy while they choose.
+      tick(logList.lastElementChild);
+      if (!$("person").value) $("person").value = invitedAs.trim().slice(0, 100);
+      $("new-address").hidden = Boolean(account.domain);
+      $("old-address").hidden = !account.domain;
+      if (account.domain) $("old-address").querySelector("b").textContent = "afterwrd." + account.domain + ".workers.dev";
+      fromName();
+      $("naming").hidden = false;
+      for (;;) {
+        await waitFor($("use-person"));
+        $("error").textContent = "";
+        if (!$("person").value.trim()) { $("error").textContent = "Give your name."; continue; }
+        if (account.domain) break;
+        $("domain").value = finished($("domain").value);
         preview();
-        await waitFor($("use-domain"));
+        if (!$("domain").value) {
+          showAddressBox();
+          $("error").textContent = "Choose an address for your site, using letters a to z, numbers and hyphens.";
+          continue;
+        }
         try {
           account.domain = (await step("name", { account: account.id, domain: $("domain").value })).domain;
-          $("naming").hidden = true;
+          break;
         } catch (err) {
+          // Usually someone else on Cloudflare has it already: open the address box, filled in, to change it.
+          showAddressBox();
           $("error").textContent = err.message;
         }
       }
+      $("naming").hidden = true;
+      const ownerName = $("person").value.trim().slice(0, 100);
       $("error").textContent = "";
       log("Checking your account and the release…");
       let checked = await step("check", { account: account.id, name });
@@ -433,7 +482,7 @@ with Cloudflare's own Deploy page instead</a>. <a href="https://afterwrd.app/how
         if (!$("name").value) $("name").value = name;
         $("renaming").hidden = false;
         await waitFor($("use-name"));
-        name = $("name").value.trim().toLowerCase();
+        name = $("name").value = finished($("name").value);
         try {
           checked = await step("check", { account: account.id, name });
           $("error").textContent = "";
@@ -455,7 +504,9 @@ with Cloudflare's own Deploy page instead</a>. <a href="https://afterwrd.app/how
       tick(logList.lastElementChild);
       await step("finish").catch(() => {});
       $("address").textContent = new URL(site).host;
-      $("continue").href = next + (invite ? "#" + new URLSearchParams({ invite }).toString() : "");
+      const handOn = new URLSearchParams({ name: ownerName });
+      if (invite) handOn.set("invite", invite);
+      $("continue").href = next + "#" + handOn.toString();
       try { localStorage.removeItem(KEPT); } catch {}
       $("ready").hidden = false;
       // Straight on to the new site (the button stays, in case the browser holds back the move).
