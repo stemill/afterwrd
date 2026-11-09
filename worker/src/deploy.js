@@ -41,15 +41,24 @@ export async function workerSettings(token, account, script) {
 /** The accounts a token can see; the installer warns before remembering a token that spans more than one. */
 export const accountIds = async (token) => (await api(token, "/accounts")).map((a) => a.id);
 
-/** The account (of those the token can see) that has a Worker called `script`, and that Worker's settings. */
-export async function findWorker(token, script) {
-  for (const account of await api(token, "/accounts")) {
-    const response = await fetch(`${apiBase}/accounts/${account.id}/workers/scripts/${script}/settings`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+/**
+ * The account (of those the token can see) whose Worker serves `hostname` (<script>.<name>.workers.dev), and that
+ * Worker's settings: the account whose workers.dev name is <name>, with a Worker called <script>. The name of the
+ * Worker alone isn't enough: every install's is called afterwrd, so someone who allows two accounts (a test one,
+ * say) can have one in each, and updating the wrong one would leave their own site as it was (0.34.1).
+ */
+export async function findWorker(token, hostname) {
+  const [script, name, ...rest] = String(hostname).split(".");
+  if (!script || !name || rest.join(".") !== "workers.dev") throw new Error("This works from your site's workers.dev address.");
+  const get = (path) => fetch(`${apiBase}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  for (const account of (await api(token, "/accounts")).slice(0, 20)) {
+    const own = await get(`/accounts/${account.id}/workers/subdomain`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    if (own?.result?.subdomain !== name) continue;
+    const response = await get(`/accounts/${account.id}/workers/scripts/${script}/settings`);
     if (response.ok) return { account: account.id, settings: (await response.json()).result };
   }
-  throw new Error(`Couldn't find a Worker called "${script}" with that token. Was the token made in the same Cloudflare account?`);
+  throw new Error(`Couldn't find this site's Worker (${script} at ${name}.workers.dev) in the Cloudflare account you allowed. `
+    + "When Cloudflare asks, allow the account this site is in.");
 }
 
 // GitHub sometimes answers a download with a 5xx (a 504 once stopped an update) or drops the connection, so

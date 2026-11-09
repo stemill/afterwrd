@@ -69,7 +69,7 @@ async function create(request, env, url, path, body) {
   if (path === "/check") {
     const name = typeof body.name === "string" ? body.name.trim() : "";
     if (!name) throw new Error("Give the group a name.");
-    const { account } = await findWorker(token, own);
+    const { account } = await findWorker(token, url.hostname);
     // Before anything's made: the token must be able to manage databases too (a pasted one might not).
     try {
       await api(token, `/accounts/${account}/d1/database?per_page=1`);

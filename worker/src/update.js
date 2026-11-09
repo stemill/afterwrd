@@ -58,14 +58,14 @@ export async function handleUpdate(request, env, url, owner) {
       if (!env.UPDATE_TOKEN) return json({ ok: true });
       let token;
       try { token = tokenFor(request, body); } catch { token = env.UPDATE_TOKEN; }
-      const { account } = await findWorker(token, script);
+      const { account } = await findWorker(token, url.hostname);
       await api(token, `/accounts/${account}/workers/scripts/${script}/secrets/UPDATE_TOKEN`, { method: "DELETE" });
       return json({ ok: true });
     }
     const token = tokenFor(request, body);
     if (path !== "/check" && !/^[0-9a-f]{32}$/.test(body.account ?? "")) throw new Error("Unknown Cloudflare account.");
     const release = () => loadRelease(`https://github.com/${REPO}/releases/download/${body.tag}`);
-    if (path === "/check") return json({ account: (await findWorker(token, script)).account });
+    if (path === "/check") return json({ account: (await findWorker(token, url.hostname)).account });
     if (path === "/assets") return json({ jwt: await uploadAssets(token, body.account, script, await release()) });
     if (path === "/deploy") {
       // A long-lived token an earlier version kept (UPDATE_TOKEN) goes now, while there's a fresh one to remove it
@@ -377,11 +377,16 @@ ${forget}
       const box = document.getElementById("token");
       if (box) box.value = "";
       log("Waiting for the new version to start…");
-      for (let i = 0; i < 30; i++) {
+      let started = false;
+      // Cloudflare can take a few minutes to send visits to a new version (9 Nov 2026: over a minute), so up to three.
+      for (let i = 0; i < 90 && !started; i++) {
         const res = await fetch("/_admin/update/version", { cache: "no-store" }).catch(() => null);
-        if (res && res.ok && (await res.json()).version === version) break;
-        await new Promise((r) => setTimeout(r, 2000));
+        started = Boolean(res && res.ok && (await res.json().catch(() => ({}))).version === version);
+        if (!started) await new Promise((r) => setTimeout(r, 2000));
       }
+      // Never "done" unless this site is the new version: an update that went somewhere else must say so.
+      if (!started) throw new Error("Cloudflare has the update, but hasn't started using it yet. Don't update again:"
+        + " reload this page in five minutes or so, and it should say " + version + ".");
       document.getElementById("done").hidden = false;
     } catch (err) {
       error.textContent = err.message;

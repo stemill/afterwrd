@@ -1,7 +1,7 @@
 // What a hostile friend's site might send, through the real parsing code.
 // The real friends.js and feed.js, bundled by run.sh (with a stand-in for Cloudflare's runtime) into $OUT/bundle.mjs.
 import { pathToFileURL } from "node:url";
-const { callSite, cleanFeed, icsFile, loadRelease, markMine, markMineInGroup, parseEvent, parseGroupPage, parseMedia, readEventForm, serveStatic, siteOrigin, findOrCreateDatabase } = await import(pathToFileURL(`${process.env.OUT}/bundle.mjs`).href);
+const { callSite, cleanFeed, icsFile, loadRelease, markMine, markMineInGroup, parseEvent, parseGroupPage, parseMedia, readEventForm, serveStatic, siteOrigin, findOrCreateDatabase, findWorker } = await import(pathToFileURL(`${process.env.OUT}/bundle.mjs`).href);
 const B = "https://bob.example";
 const A = "https://ann.example";
 const hash = "a".repeat(64);
@@ -162,5 +162,31 @@ github.close();
   check("an answer in an unexpected shape counts as having things in it", await findOrCreateDatabase("t", "a", "afterwrd", odd.call).then(() => false, () => true));
   check("one with things in it is refused, and nothing is made or deleted", /already a database called "afterwrd"/.test(refused ?? "")
     && used.calls.every((c) => c.startsWith("GET ") || c.endsWith("/query")));
+}
+
+// Updating finds the Worker that serves the site, not just one with the right name: two accounts allowed, each with
+// a Worker called afterwrd (every install's is), and only the second is this site's (its workers.dev name is ann).
+{
+  const realFetch = globalThis.fetch;
+  const asked = [];
+  const answer = (result, status = 200) => new Response(JSON.stringify({ success: status === 200, errors: [], result }), { status });
+  globalThis.fetch = async (url) => {
+    const path = new URL(String(url)).pathname.replace("/client/v4", "");
+    asked.push(path);
+    if (path === "/accounts") return answer([{ id: "test-account" }, { id: "own-account" }]);
+    if (path === "/accounts/test-account/workers/subdomain") return answer({ subdomain: "ann-test" });
+    if (path === "/accounts/own-account/workers/subdomain") return answer({ subdomain: "ann" });
+    if (/^\/accounts\/(test|own)-account\/workers\/scripts\/afterwrd\/settings$/.test(path)) return answer({ bindings: [] });
+    return answer(null, 404);
+  };
+  try {
+    const found = await findWorker("t", "afterwrd.ann.workers.dev");
+    check("updating picks the account whose workers.dev name is the site's, not the first with a Worker of that name",
+      found.account === "own-account" && !asked.includes("/accounts/test-account/workers/scripts/afterwrd/settings"));
+    check("…and refuses if none of the accounts allowed has the site", await findWorker("t", "afterwrd.bob.workers.dev")
+      .then(() => false, (e) => e.message.includes("allow the account this site is in")));
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 }
 process.exit(failed ? 1 : 0);
