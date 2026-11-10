@@ -62,6 +62,13 @@
     if (summary && !summary.querySelector(".dot")) summary.append(dot());
   }
 
+  // The number on the home-screen app's icon: chats with something unread (as on Messages in the menu).
+  const appBadge = (n) => {
+    if (!navigator.setAppBadge) return;
+    (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
+  };
+  appBadge(Number(header.querySelector('a[href="/messages"] .count')?.firstChild?.textContent) || 0);
+
   const plural = (n, word) => `${n} new ${word}${n === 1 ? "" : "s"}`;
 
   async function check() {
@@ -77,6 +84,8 @@
     } catch { return; }
     setCount(header.querySelector('a[href="/activity"]'), news.notifications);
     setCount(header.querySelector('a[href="/friend"]'), news.requests);
+    setCount(header.querySelector('a[href="/messages"]'), news.messages);
+    appBadge(news.messages);
     markUpdate(news.update);
     const parts = [];
     if (location.pathname === "/" && news.posts) parts.push(plural(news.posts, "post") + " from friends");

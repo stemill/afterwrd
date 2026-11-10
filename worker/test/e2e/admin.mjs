@@ -49,7 +49,7 @@ await register(phone, newOwner(ownerName));
 let second = "";
 try { cli(`Second ${Date.now()}`); } catch (e) { second = String(e.stderr); }
 check("the terminal won't make a second owner", second.includes("already has an owner"), second.trim());
-check("the menu has Your devices", (await navLabels(phone)) === "Home,Photos,Friends,Groups,Notifications,Your profile,Your devices,Import,Download everything,Update", await navLabels(phone));
+check("the menu has Your devices", (await navLabels(phone)) === "Home,Messages,Photos,Friends,Groups,Notifications,Your profile,Your devices,Add to home screen,Import,Download everything,Update", await navLabels(phone));
 await phone.goto(`${BASE}/_admin`);
 check("Your devices lists one passkey, which can't be removed", (await phone.$eval("h1", (h) => h.textContent)) === "Your devices"
   && JSON.stringify((await passkeys(phone)).map((k) => k.disabled)) === "[true]");

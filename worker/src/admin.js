@@ -2,6 +2,7 @@
 // another, signing out everywhere), and every other owner page is routed from here. Only the owner signs in, so
 // no one else needs a way in: friends see each other from their own sites (connect.js).
 // scripts/owner.mjs makes the first device link for a new site from the terminal.
+import { forgetDeviceById, listDevices, pushDevicesSeen } from "./push.js";
 import { handleCheckAdmin } from "./checks.js";
 import { handleConnections } from "./connect.js";
 import { handleExport } from "./export.js";
@@ -34,6 +35,16 @@ export async function handleAdmin(request, env, url, owner) {
   }
   if (request.method === "GET" && url.pathname === "/_admin") return html(devicesPage(pageData(env, await devicesData(env.DB, owner))));
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
+  // Notifications about messages (push.js): turning a device off from here, and "That was me" on Home's notice.
+  const forget = /^\/_admin\/notifications\/(\d+)\/forget$/.exec(url.pathname);
+  if (forget) {
+    await forgetDeviceById(env, forget[1]);
+    return Response.redirect(`${url.origin}/_admin`, 303);
+  }
+  if (url.pathname === "/_admin/notifications/seen") {
+    await pushDevicesSeen(env);
+    return Response.redirect(`${url.origin}/`, 303);
+  }
 
   const body = await request.json().catch(() => ({}));
   const action = /^\/_admin\/devices\/(link|cancel-links|sign-out|delete-passkey|seen)$/.exec(url.pathname)?.[1];
@@ -81,9 +92,12 @@ export async function cancelDeviceLinks(env, owner) {
   await env.DB.prepare("DELETE FROM device_links WHERE user_id = ? AND used_at IS NULL").bind(owner.id).run();
 }
 
-/** Signs out on every device, this one included. */
+/** Signs out on every device, this one included, and turns notifications off on all of them. */
 export async function signOutEverywhere(env, owner) {
-  await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(owner.id).run();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(owner.id),
+    env.DB.prepare("DELETE FROM push_devices"),
+  ]);
 }
 
 /** Removes one of the owner's passkeys (never the last), and signs out the device it's on. */
@@ -95,6 +109,8 @@ export async function deletePasskey(env, owner, credential) {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM credentials WHERE id = ? AND user_id = ?").bind(credential, owner.id),
     env.DB.prepare("DELETE FROM sessions WHERE user_id = ? AND (credential_id = ? OR credential_id IS NULL)").bind(owner.id, credential),
+    // And notifications on any device that turned them on while signed in with it (push.js).
+    env.DB.prepare("DELETE FROM push_devices WHERE credential_id = ? OR credential_id IS NULL").bind(credential),
   ]);
 }
 
@@ -139,5 +155,5 @@ async function devicesData(db, owner) {
     db.prepare("SELECT COUNT(*) AS n FROM device_links WHERE user_id = ? AND used_at IS NULL AND expires_at > ?").bind(owner.id, now()),
     db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE user_id = ? AND expires_at > ?").bind(owner.id, now()),
   ]);
-  return { owner: owner.name, passkeys, openLinks: links.results[0].n, sessions: sessions.results[0].n };
+  return { owner: owner.name, passkeys, openLinks: links.results[0].n, sessions: sessions.results[0].n, notifying: await listDevices(db) };
 }

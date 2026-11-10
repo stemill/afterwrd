@@ -1,0 +1,15 @@
+{
+  "name": "afterwrd",
+  "short_name": "afterwrd",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#16201b",
+  "theme_color": "#16201b",
+  "icons": [
+    { "src": "/static/app/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/static/app/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/static/app/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

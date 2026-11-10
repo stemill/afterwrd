@@ -93,6 +93,11 @@ three_sites() { # $1: the suite, run against three sites, each with its own data
   pkill -f "wrangler dev -c central" 2>/dev/null; sleep 2
 }
 run_feed() { three_sites feed.mjs; }
+run_messages() { # messages between friends (src/messages.js), and notifications' encryption (src/webpush.js)
+  echo "== webpush"
+  (cd "$WORKER" && node test/webpush.mjs) | grep -v '^PASS'; [ "${PIPESTATUS[0]}" = 0 ] || FAILED=1
+  three_sites messages.mjs
+}
 run_groups() { three_sites groups.mjs group; }
 run_central() { # the installer at install.afterwrd.app, on 8791, with stand-ins on 8797 and 8799 (central.mjs runs them)
   stop
@@ -129,10 +134,10 @@ run_upgrade() { # $1: an older release tag
   git -C "$WORKER" worktree remove --force "$OUT/old"
 }
 
-if [ $# -eq 0 ]; then set -- core fresh albums update feed groups checks central forged; fi
+if [ $# -eq 0 ]; then set -- core fresh albums messages update feed groups checks central forged; fi
 while [ $# -gt 0 ]; do
   case "$1" in
-    core|fresh|albums|update|feed|groups|checks|central|forged|screenshots) "run_$1" ;;
+    core|fresh|albums|update|feed|groups|checks|central|forged|screenshots|messages) "run_$1" ;;
     upgrade) shift; run_upgrade "${1:?give an older release tag, e.g. v0.12.0}" ;;
     *) echo "Unknown suite: $1" >&2; FAILED=1 ;;
   esac

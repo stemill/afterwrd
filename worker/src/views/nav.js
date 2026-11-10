@@ -14,6 +14,8 @@ const ICONS = {
   posts: '<path d="M6 3h9l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M9 12h6M9 16h4"/>',
   photos: '<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/>',
   comments: '<path d="M5 4h14a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5 4V5a1 1 0 0 1 1-1z"/>',
+  // messages: two speech bubbles, one answering the other
+  messages: '<path d="M3 5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-4 3V5z"/><path d="M18 9h2a1 1 0 0 1 1 1v10l-4-3h-6a1 1 0 0 1-1-1v-1"/>',
   likes: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
   friends: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 5a3 3 0 0 1 0 6M21 20c0-2.6-1.6-4.8-4-5.6"/>',
   // connected friends (their own afterwrd sites): two people
@@ -24,6 +26,7 @@ const ICONS = {
   profile: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>',
   memories: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>',
   devices: '<rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M11 18h2"/>', // a phone
+  app: '<rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M12 8v7M8.5 11.5h7"/>', // a phone with a plus
   import: '<path d="M12 15V4M7 9l5-5 5 5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
   update: '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/>',
   connections: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
@@ -39,7 +42,11 @@ export const icon = (name) =>
 // name reads whole. On its own, the bubble on an ember tile is the site's icon.
 const BUBBLE = "M12 4a8 8 0 1 1-4.7 14.5L3.8 20l1.2-3.6A8 8 0 0 1 12 4z";
 export const LOGO = `<span class="wordmark">afterw<svg class="o" viewBox="0 0 24 24" aria-hidden="true"><path d="${BUBBLE}" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>rd</span>`;
-export const FAVICON = `<link rel="icon" href="data:image/svg+xml,${encodeURIComponent(
+// The icon in the browser's tab, and the home-screen app's manifest and icon (public/static/app/), for every page.
+export const FAVICON = `<link rel="manifest" href="/static/app/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/app/icon-180.png">
+<meta name="apple-mobile-web-app-title" content="afterwrd">
+<link rel="icon" href="data:image/svg+xml,${encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="6" fill="#ff8a3d"/><path d="${BUBBLE}" transform="translate(2.4 2.2) scale(0.8)" fill="none" stroke="#16201b" stroke-width="3.6" stroke-linejoin="round"/></svg>`,
 )}">`;
 
@@ -85,9 +92,13 @@ export function siteHeader({ main, menu, current, face = {}, updateKnown = true 
 </script>`;
 }
 
-/** The owner's main menu. Notifications carries the count of new comments, Friends of requests to connect. */
-export const ownerMain = (newComments = 0, requests = 0) => [
+/**
+ * The owner's main menu. Notifications carries the count of new comments, Friends of requests to connect, and
+ * Messages of chats with something unread (and not muted).
+ */
+export const ownerMain = (newComments = 0, requests = 0, messages = 0) => [
   { key: "home", label: "Home", href: "/" },
+  { key: "messages", label: "Messages", href: "/messages", badge: messages },
   { key: "photos", label: "Photos", href: "/photos" },
   { key: "connected", label: "Friends", href: "/friend", badge: requests },
   { key: "groups", label: "Groups", href: "/groups" },
@@ -99,6 +110,7 @@ export const ownerMenu = ({ memories = true, updateWaiting = false } = {}) => [
   { key: "profile", label: "Your profile", href: "/posts" },
   ...(memories ? [{ key: "memories", label: "Memories", href: "/memories" }] : []),
   { key: "devices", label: "Your devices", href: "/_admin" },
+  { key: "app", label: "Add to home screen", href: "/app" }, // hidden in the app itself (ui.js)
   { key: "import", label: "Import", href: "/_admin/import" },
   { key: "export", label: "Download everything", href: "/_admin/export" },
   { key: "update", label: updateWaiting ? "Update available" : "Update", href: "/_admin/update", badge: updateWaiting },

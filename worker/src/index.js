@@ -23,6 +23,8 @@ import { serveStatic } from "./static.js";
 import { handleCheck } from "./checks.js";
 import { html } from "./util.js";
 import { handleLive } from "./live.js";
+import { handleMessages } from "./messages.js";
+import { handlePush } from "./push.js";
 
 export { MediaStore } from "./media.js";
 export { Outbox } from "./outbox.js";
@@ -60,7 +62,7 @@ async function route(request, env, work) {
   if (url.pathname.startsWith("/_auth/")) return handleAuth(request, env, url);
   // A friend's Connect link, and their site's calls once connected, which carry a key instead of a session.
   if (url.pathname.startsWith("/_connect/")) return handleConnectLink(request, env, url);
-  if (url.pathname.startsWith("/_peer/")) return handlePeer(request, env, url);
+  if (url.pathname.startsWith("/_peer/")) return handlePeer(request, env, url, work);
   // A group the owner's in, calling with the key this site gave it.
   if (url.pathname.startsWith("/_member/")) return handleMember(request, env, url);
   // A friend checking their site at this site's invitation (checks.js): they aren't signed in here.
@@ -69,6 +71,13 @@ async function route(request, env, work) {
   const [, top, rest] = url.pathname.split("/");
   // The fonts are public, so the sign-in pages can use them too; they're open-licensed and say nothing about the site.
   if (reading && /^\/static\/fonts\/[\w-]+\.woff2$/.test(url.pathname)) return serveStatic(request, env);
+  // The home-screen app's manifest, icons and service worker are public too: phones fetch them without
+  // the session, and they're the same for every site. The service worker may look after the whole site (scope "/").
+  if (reading && /^\/static\/app\/(manifest\.webmanifest|icon-(180|192|512)\.png|push-sw\.js)$/.test(url.pathname)) {
+    const file = await serveStatic(request, env);
+    if (url.pathname === "/static/app/push-sw.js") file.headers.set("Service-Worker-Allowed", "/");
+    return file;
+  }
   const signed = await signedFile(request, env, url);
   if (signed) return signed;
 
@@ -83,6 +92,10 @@ async function route(request, env, work) {
   if (url.pathname === "/_comments" || url.pathname.startsWith("/_comments/")) return handleComments(request, env, url, user);
   if (url.pathname === "/_live") return handleLive(request, env, url, user, work);
   if (url.pathname.startsWith("/_feed/")) return handleFeed(request, env, url);
+  // Messages with friends (messages.js).
+  if (url.pathname.startsWith("/_messages/")) return handleMessages(request, env, url);
+  // This device saying yes or no to notifications about messages (push.js).
+  if (url.pathname.startsWith("/_push/")) return handlePush(request, env, url, user);
   if (url.pathname.startsWith("/_groups/")) return handleGroupActions(request, env, url);
   if (!reading) return new Response("Method not allowed", { status: 405 });
 

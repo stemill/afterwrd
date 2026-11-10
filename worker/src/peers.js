@@ -8,6 +8,7 @@
 //   POST /_peer/comments                a Note inReplyTo a post or photo here: their owner comments on it
 //   POST /_peer/comments/<n>/delete     their owner deletes a comment they made
 //   POST /_peer/notify                  a note: something new on their site (notify.js)
+//   POST /_peer/message                 a message from their owner to the owner here (messages.js)
 //   POST /_peer/introduce               {origin, name, content?}: their owner introduces the owner here to someone
 //                                       (connect.js); either can then ask the other to be friends
 //   POST /_peer/checked                 {site, version}: their site checked this one and found it genuine (checks.js)
@@ -25,6 +26,7 @@ import { json, now, sha256 } from "./util.js";
 import { notifyComment, receiveNote } from "./notify.js";
 import { receiveIntroduction } from "./connect.js";
 import { receiveChecked, receiveCheckRequest } from "./checks.js";
+import { receiveMessage } from "./messages.js";
 
 const FEED_POSTS = 30;
 const TIMEOUT_MS = 8000;
@@ -107,8 +109,12 @@ async function peerFrom(request, env) {
   return env.DB.prepare("SELECT * FROM connections WHERE key_hash = ?").bind(await sha256(match[1])).first();
 }
 
-export async function handlePeer(request, env, url) {
+// The most a friend's site may send in one request: a message, a comment, a note. (Checked before reading it.)
+const MAX_REQUEST = 64 * 1024;
+
+export async function handlePeer(request, env, url, work) {
   const route = `${request.method} ${url.pathname}`;
+  if (Number(request.headers.get("Content-Length") ?? 0) > MAX_REQUEST) return json({ error: "That's too big." }, 413);
   const peer = await peerFrom(request, env);
   const db = env.DB;
 
@@ -177,6 +183,11 @@ export async function handlePeer(request, env, url) {
     if (!row) return json({ error: "That's a lot of comments for now. Try again later." }, 429);
     await notifyComment(env, url.origin, target, { name: peer.name, text, from: peer.origin });
     return json({ id: commentId(url.origin, target, row.id) });
+  }
+
+  if (route === "POST /_peer/message") {
+    const [body, status] = await receiveMessage(env, peer, await request.json().catch(() => ({})), { site: url.origin, work });
+    return json(body, status);
   }
 
   if (route === "POST /_peer/notify") {

@@ -627,3 +627,12 @@ dialog.ask p { margin: 0 0 1.1rem; font-size: 1rem; line-height: 1.5; }
 form.stack .together-friend input { width: 1.15rem; height: 1.15rem; padding: 0; flex: none; accent-color: var(--accent); }
 .together-friend[hidden] { display: none; }
 .together-log { padding-left: 1.2rem; color: var(--muted); }
+
+/* Narrow phones: six menu items (Messages, Notifications) fit inside their outlines with a little less type. */
+@media (max-width: 380px) {
+  header.site nav.main { gap: 0.15rem; }
+  header.site nav.main a { flex: 1 1 auto; font-size: 0.66rem; padding: 0.3rem 0.25rem; }
+}
+
+/* The home-screen app: offers that show only when they apply (ui.js). */
+[data-install][hidden], [data-install-how][hidden], .install-note[hidden], #app-installed[hidden] { display: none; }

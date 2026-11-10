@@ -22,7 +22,8 @@ export async function currentUser(request, env) {
   if (!token) return null;
   return env.DB.prepare(
     // session_credential: the passkey this device signed in with (null for sessions from before 0.15.0).
-    `SELECT u.*, s.credential_id AS session_credential FROM sessions s JOIN users u ON u.id = s.user_id
+    // session_hash: which session this is, so a device turned on for notifications here goes when it signs out (push.js).
+    `SELECT u.*, s.credential_id AS session_credential, s.token_hash AS session_hash FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.expires_at > ?`,
   ).bind(await sha256(token), now()).first();
 }
@@ -180,7 +181,14 @@ async function loginVerify(request, env, url, { response }) {
 
 async function logout(request, env) {
   const token = readCookie(request, SESSION_COOKIE);
-  if (token) await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256(token)).run();
+  if (token) {
+    // And a device that turned notifications on while signed in here stops getting them (push.js).
+    const hash = await sha256(token);
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(hash),
+      env.DB.prepare("DELETE FROM push_devices WHERE session_hash = ?").bind(hash),
+    ]);
+  }
   const response = html(messagePage("You've signed out.", { href: "/_auth/login", label: "Sign in again" }));
   response.headers.append("Set-Cookie", `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
   // Nor should an hour's Cloudflare connection (cloudflare.js), for browsers that don't clear cookies below.

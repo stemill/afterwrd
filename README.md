@@ -1,16 +1,24 @@
 # afterwrd
 
 A small, private social network of your own, with your Facebook years brought along. Post and share photos, comment,
-and connect with friends who have their own afterwrd site; your Facebook download (posts, photos, comments, likes,
+message, and connect with friends who have their own afterwrd site; your Facebook download (posts, photos, comments, likes,
 friends) comes too, under *Memories*. Only you sign in to your site; friends see it from their own. It runs in your own free Cloudflare account,
 so no one else holds your data, and setting it up needs no terminal, no GitHub account and no card.
 
 afterwrd isn't affiliated with or endorsed by Meta. It only reads the "Download your information" file Facebook
 gives you; it never signs in to Facebook or fetches anything from it.
 
-**Finding your way round.** *Home* is your posts and your friends' together, with a box to write in; *Photos*,
-*Friends*, *Groups* and *Notifications* sit beside it. Your picture (top right) opens your profile, *Memories* (everything from
-Facebook, with "On this day"), and your tools: *Your devices*, *Import*, *Download everything* and *Update*.
+**Finding your way round.** *Home* is your posts and your friends' together, with a box to write in; *Messages*,
+*Photos*, *Friends*, *Groups* and *Notifications* sit beside it. Your picture (top right) opens your profile, *Memories*
+(everything from Facebook, with "On this day"), and your tools: *Your devices*, *Add to home screen*, *Import*,
+*Download everything* and *Update*.
+
+**Messages and the app.** *Messages* are one-to-one chats with friends, kept on your site and theirs. They aren't
+end-to-end encrypted (yet): both sites hold the text, as they do your posts. Add afterwrd to your phone's home screen
+and it opens like an app, and can tell you when a friend sends you a message, even with the phone locked: that's the
+only thing afterwrd ever notifies you about, and you can mute any chat. The notification is encrypted for your phone
+by your own site, so the phone's push service (Apple's or Google's) passes it on without being able to read it; there's
+no afterwrd server in between.
 
 ## What it looks like
 

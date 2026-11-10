@@ -34,6 +34,7 @@ function currentKey(ctx) {
   if (top === "") return "home";
   if (top === "posts") return "profile";
   if (top === "friend" || top === "people") return "connected";
+  if (top === "app") return "app";
   if (["memories", ...MEMORIES.map(([s]) => s)].includes(top)) return "memories";
   return top;
 }
@@ -41,7 +42,7 @@ function currentKey(ctx) {
 function header(ctx) {
   const picture = ctx.profile?.profile;
   return siteHeader({
-    main: ownerMain(ctx.newComments, ctx.requests),
+    main: ownerMain(ctx.newComments, ctx.requests, ctx.messages),
     menu: ownerMenu({ memories: hasMemories(ctx), updateWaiting: ctx.updateWaiting }),
     current: currentKey(ctx),
     face: { initial: initial(ctx.user.name), picture: picture && `/files/${picture.thumb_hash ?? picture.hash}` },
@@ -77,7 +78,7 @@ function memoriesTabs(ctx) {
 </nav>`;
 }
 
-const page = (ctx, title, content, bodyClass = "") =>
+export const page = (ctx, title, content, bodyClass = "") =>
   layout(ctx, { title, bodyClass, main: html`<main>${memoriesTabs(ctx)}${content}</main>` });
 
 // --- pieces (_macros.html) ---------------------------------------------------
@@ -1007,6 +1008,7 @@ ${c.cover && html`<section class="profile"><div class="cover"><img src="${c.cove
 <div class="feed-head">
   <h1 class="friend-name">${c.avatar && html`<img class="avatar-small" src="${c.avatar.thumbSrc}" alt="">`}${c.name}</h1>
   ${c.facebook && has(ctx, "friends") && html`<a class="chip" href="/people/${c.facebook.id}">${raw(icon("friends"))}<span>Your Facebook history together</span></a>`}
+  ${html`<a class="chip" href="${friendBase(c)}/message">${raw(icon("messages"))}<span>Message</span></a>`}
 </div>
 <div class="meta">${host(c.origin)} · a friend you're connected with. Only you see this here. ${removeFriend(c, "link")}</div>
 <nav class="tabs">
@@ -1668,7 +1670,7 @@ const SIDE_FRIENDS = 12; // on Home; the rest are on Friends
 /** "a", "a and b", "a, b and c". */
 const listed = (items) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
 
-export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { devices: [], canConfirm: false }, securityFix = null, asking = [], introductions = [], unchecked = false, checkRequests = [] }) {
+export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { devices: [], canConfirm: false }, newNotifying = [], securityFix = null, asking = [], introductions = [], unchecked = false, checkRequests = [] }) {
   const stream = [
     ...own.map((p) => ({ at: p.timestamp, card: postCard(ctx, p) })),
     ...feed.posts.map((p) => ({ at: p.created_at, card: remoteCard(ctx, p.connection, p) })),
@@ -1687,6 +1689,12 @@ export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { de
       ${newDevices.canConfirm
         ? html`<button class="link">${newDevices.devices.length === 1 ? "That was me" : "They were all me"}</button>`
         : html`If it was you, say so from one of your older devices.`}</form>`}
+    ${newNotifying.length > 0 && html`<form class="notice alert" method="post" action="/_admin/notifications/seen">
+      Notifications about your messages were turned on for ${newNotifying.length === 1
+        ? html`a new device (${newNotifying[0].name}) on ${fmtDate(newNotifying[0].created_at)}`
+        : html`${newNotifying.length} new devices, on ${listed([...new Set(newNotifying.map((d) => fmtDate(d.created_at)))])}`}.
+      Not you? <a href="/_admin">Turn ${newNotifying.length === 1 ? "it" : "them"} off in Your devices</a>.
+      <button class="link">That was me</button></form>`}
     ${asking.map((r) => html`<form class="notice asking" method="post">
       <strong>${host(r.origin)}</strong>, who says they're ${r.name}, is asking to be friends. ${r.via_kind && askedBecause(r)}
       ${r.invited_as && r.invited_as.toLowerCase() !== r.name.toLowerCase() && html`<strong class="warn">That's not the name you invited (${r.invited_as}).</strong>`}
@@ -1694,6 +1702,13 @@ export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { de
         <button class="chip" formaction="/_admin/connections/${r.id}/decline?back=home" data-confirm="Decline? Their site will be told no." data-confirm-ok="Decline">Decline</button></span>
     </form>`)}
     ${introductions.map((i) => introductionCard(i, "/", "div"))}
+    <div class="notice install-note" id="install-note" hidden>
+      <span><strong>Put afterwrd on your home screen.</strong> It opens like an app, in one tap, and can tell you when a
+        friend sends you a message.</span>
+      <span class="row actions-row"><button class="chip primary" data-install hidden>Install</button>
+        <a class="chip primary" href="/app" data-install-how>Show me how</a>
+        <button class="chip" data-install-later>Not now</button></span>
+    </div>
     ${checkRequests.map((r) => html`<div class="notice check-request">
       <span><strong>${r.name}</strong> asks you to check their afterwrd site. Make a link, and send it to them by message.</span>
       <span class="row actions-row"><button class="chip primary" data-check-request="${r.id}">Make a check link</button>
@@ -1772,4 +1787,38 @@ ${available.length ? html`<ul class="memory-tiles">
   ${available.map(([s, label, about]) => html`<li><a href="/${s}">${raw(icon(s))}<strong>${label}</strong><span class="meta">${about}</span></a></li>`)}
 </ul>` : html`<p class="empty">Nothing from Facebook has been published here.</p>`}
 ${onThisDayCard(ctx, onThisDay)}`);
+}
+
+/** Add to home screen: the browser's own Install where it has one (ui.js), and how to do it on each kind of device. */
+export function appPage(ctx) {
+  return page(ctx, "Add to home screen", html`
+<h1>Add afterwrd to your home screen</h1>
+<p>Then it opens like an app: full screen, in one tap, and you don't need to remember your site's address. It can
+also tell you when a friend sends you a message: turn that on in <a href="/messages">Messages</a>.</p>
+<p><button class="chip primary" data-install hidden>Install afterwrd</button></p>
+<section class="card">
+  <h2>Android (Chrome)</h2>
+  <ol>
+    <li>Tap <strong>⋮</strong>, at the top right.</li>
+    <li>Tap <strong>Install app</strong> (on some phones, <strong>Add to Home screen</strong>).</li>
+    <li>Open afterwrd from its new icon.</li>
+  </ol>
+  <p class="meta">If notifications about messages only turn up when you unlock your phone, Android is saving battery:
+  set Chrome's battery use to <strong>Unrestricted</strong> (Settings → Apps → Chrome → Battery). afterwrd's
+  notifications come through Chrome.</p>
+</section>
+<section class="card">
+  <h2>iPhone or iPad (Safari)</h2>
+  <ol>
+    <li>Tap <strong>Share</strong> (the square with an arrow).</li>
+    <li>Tap <strong>Add to Home Screen</strong>. Scroll down the list if you can't see it.</li>
+    <li>Tap <strong>Add</strong>, then open afterwrd from its new icon. It may ask you to sign in once more: the app
+      keeps its own sign-in, separate from Safari's.</li>
+  </ol>
+  <p class="meta">On an iPhone or iPad, notifications about messages only work in the app on the home screen.</p>
+</section>
+<section class="card">
+  <h2>A computer (Chrome or Edge)</h2>
+  <p>Look for <strong>Install</strong> at the right-hand end of the address bar, or in the browser's menu.</p>
+</section>`);
 }

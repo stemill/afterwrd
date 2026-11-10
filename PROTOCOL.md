@@ -486,6 +486,33 @@ The caller's owner asks the owner here to check their site (5.12 describes what 
 - Asking again moves the request back to the top, at most once an hour. Requests go when a link is made, when the owner dismisses them, or after 14 days. At most 50 are kept; beyond that, nothing changes. The answer is always `200 {"ok": true}`.
 - Older sites answer `404`. The caller then offers its owner a message to send instead.
 
+### 5.14 `POST /_peer/message` (afterwrd 0.37.0)
+
+A message from the caller's owner to the owner here: one-to-one, between friends only.
+
+```json
+{"@context": ["https://www.w3.org/ns/activitystreams", {"afterwrd": "https://afterwrd.app/ns#"}],
+ "type": "Create", "actor": "https://ann.example/", "to": ["https://bob.example/"],
+ "object": {"type": "Note", "id": "https://ann.example/messages/<uid>", "attributedTo": "https://ann.example/",
+            "to": ["https://bob.example/"], "mediaType": "text/plain", "content": "Are you coming tonight?",
+            "published": "2026-11-10T19:02:00Z"}}
+```
+
+- `object.id` must be the caller's own origin, then `/messages/`, then 16 to 64 letters, digits, `-` or `_` (the
+  caller's own id for the message). Anything else: `400`. The address isn't served; it only names the message.
+- `content` is plain text, 1 to 4000 characters once line endings are made `\n`, other control characters dropped and
+  the ends trimmed. Otherwise `400`.
+- `published` is the caller's time. The receiver never keeps a time later than when the message arrived.
+- The first time: `201 {"ok": true}`. The same `object.id` again: `200 {"ok": true}`, and it's kept once. The caller
+  treats either as delivered; nothing ever says whether it was read.
+- Limits, from one friend: 120 in 10 minutes and 1000 a day; from everyone together, 3000 a day. Beyond them: `429`.
+- Older sites answer `404`. The caller shows its owner "not delivered: their site doesn't take messages yet", and
+  doesn't retry by itself. `401` and `403` (not friends any more) aren't retried either. Unreachable, `5xx` and `429`
+  are retried after 10 seconds, then as in 2.5.
+- The receiver keeps it in a chat with the caller (by origin), which stays if they stop being friends. It may notify
+  its owner's own devices; nothing about it goes anywhere else.
+- Not end-to-end encrypted: both sites hold the text, as they do posts and comments.
+
 ## 6. Objects
 
 All objects use ActivityStreams 2.0 vocabulary. afterwrd's own terms use the prefix `afterwrd:` and the IRI `https://afterwrd.app/ns#`:

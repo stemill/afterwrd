@@ -13,11 +13,14 @@ import { ownerName } from "../peers.js";
 import { SITE_ID } from "../posts.js";
 import { profilePictures } from "../photos.js";
 import { newDevices } from "../admin.js";
+import { newPushDevices } from "../push.js";
 import { checkRequests, lastChecked, recentChecks } from "../checks.js";
 import { securityFixWaiting, waitingRelease } from "../update.js";
 import { now, pageData, withoutKeys } from "../util.js";
 import { fmtDate, fmtMonth } from "../views/format.js";
 import * as views from "../views/archive.js";
+import { chatPage, friendMessage, messagesIndex, unreadChats } from "../messages.js";
+import * as messageViews from "../views/messages.js";
 
 const PAGE_SIZE = 50;
 const PHOTO_PAGE_SIZE = 150;
@@ -69,6 +72,11 @@ const ROUTES = [
   [/^\/friend\/(\d+)\/photos$/, null, friendPhotos, views.friendPhotosPage],
   [/^\/friend\/(\d+)\/photos\/album\/(\d+|other|videos)$/, null, friendAlbum, views.friendAlbumPage],
   [/^\/friend\/(\d+)\/photos\/([0-9a-f]{64})$/, null, friendPhoto, views.friendPhotoPage],
+  // Messages with friends (messages.js).
+  [/^\/friend\/(\d+)\/message$/, null, friendMessage, null],
+  [/^\/messages$/, null, messagesIndex, messageViews.messagesPage],
+  [/^\/messages\/(\d+)$/, null, chatPage, messageViews.chatPage],
+  [/^\/app$/, null, () => ({}), views.appPage], // Add to home screen
   [/^\/groups$/, null, groupsIndex, views.groupsIndexPage],
   [/^\/groups\/new$/, null, groupNew, views.groupNewPage],
   [/^\/groups\/join$/, null, groupJoin, views.groupJoinPage],
@@ -111,6 +119,7 @@ export async function renderArchive(request, env, url, user, work) {
     ownerName: await ownerName(db), // their name here, which can differ from the Facebook one (me.name)
     profile: await profilePictures(db),
     friendFaces: await friendFaces(db),
+    messages: await unreadChats(db), // chats with something unread (and not muted), for the menu
   };
   ctx.updateWaiting = Boolean(ctx.newRelease);
   // A profile picture or cover chosen here takes over from Facebook's.
@@ -148,9 +157,9 @@ export async function renderArchive(request, env, url, user, work) {
  * picture, what they've published, and the counts on the menu. No database or secrets: views only draw.
  */
 function frame(ctx) {
-  const { url, chosen, sections, newComments, zone, requests, updateWaiting, me, ownerName, profile, friendFaces } = ctx;
+  const { url, chosen, sections, newComments, zone, requests, updateWaiting, me, ownerName, profile, friendFaces, messages } = ctx;
   return { url, user: { id: ctx.user.id, name: ctx.user.name }, chosen, sections, newComments, zone, requests, updateWaiting,
-    me, ownerName, profile, friendFaces };
+    me, ownerName, profile, friendFaces, messages };
 }
 
 function page(body) {
@@ -500,7 +509,7 @@ async function home(ctx, params) {
   const friendsFeed = await loadFeed(db, ctx.url.origin);
   return {
     own, feed: friendsFeed, onThisDay: await onThisDay(ctx, 2), friends: friendsFeed.connections,
-    newDevices: await newDevices(db, ctx.user), securityFix: await securityFixWaiting(db),
+    newDevices: await newDevices(db, ctx.user), newNotifying: await newPushDevices(db), securityFix: await securityFixWaiting(db),
     // Until it's been checked (by a friend's site, or the owner themselves: checks.js), Home suggests a check.
     unchecked: !(await lastChecked(db)),
     // Friends asking for their site to be checked: one tap makes the link to send back (checks.js).

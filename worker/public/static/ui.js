@@ -1,8 +1,12 @@
-// Two things browsers do plainly, done in afterwrd's look, on every signed-in page (nav.js loads this):
+// Three things on every signed-in page (nav.js loads this): two that browsers do plainly, done in afterwrd's look,
+// and the home-screen app.
 //
 //   - Asking first. A form or button with data-confirm="Delete this post?" (and data-confirm-ok="Delete" for the
 //     button's word) asks in afterwrd's own box before it's sent, in place of the browser's confirm(). Scripts can ask
 //     the same way: `if (!(await askFirst("Leave this group?", { ok: "Leave" }))) return;`
+//   - The home-screen app. The service worker (public/static/app/push-sw.js) lets afterwrd be installed as an app, and
+//     notify about messages. "Add to home screen" (the menu, /app, and a note on Home until it's installed or "Not
+//     now") uses the browser's own Install where it has one (Chrome), and shows how where it hasn't (Safari).
 //   - Drop-downs you can type into. A <select data-search> becomes a box that narrows its list as you type; the
 //     select itself stays (hidden) in the form, so what's sent, and any onchange, are as before.
 (() => {
@@ -142,4 +146,42 @@
     });
   }
   document.querySelectorAll("select[data-search]").forEach(searchable);
+
+  // --- the home-screen app ---------------------------------------------------------------------------------------
+  const installed = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/static/app/push-sw.js", { scope: "/" }).catch(() => {});
+  const note = document.getElementById("install-note");
+  let offer = null; // the browser's own Install, where it has one
+  const showOffers = () => {
+    document.querySelectorAll("[data-install]").forEach((b) => { b.hidden = !offer; });
+    document.querySelectorAll("[data-install-how]").forEach((a) => { a.hidden = Boolean(offer); });
+  };
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault(); // offered here, quietly, instead of the browser's own banner
+    offer = e;
+    showOffers();
+  });
+  window.addEventListener("appinstalled", () => { offer = null; note?.remove(); showOffers(); });
+  document.addEventListener("click", async (e) => {
+    if (e.target.closest("[data-install]") && offer) {
+      const asked = offer;
+      offer = null;
+      await asked.prompt();
+      if ((await asked.userChoice).outcome === "accepted") note?.remove();
+      showOffers();
+    }
+    if (e.target.closest("[data-install-later]")) {
+      try { localStorage.setItem("afterwrd-install-later", "1"); } catch {}
+      note?.remove();
+    }
+  });
+  let later = false;
+  try { later = localStorage.getItem("afterwrd-install-later") === "1"; } catch {}
+  if (installed) {
+    document.querySelectorAll('.menu a[href="/app"]').forEach((a) => a.remove());
+    note?.remove();
+  } else if (note && !later) {
+    note.hidden = false;
+  }
+  showOffers();
 })();
