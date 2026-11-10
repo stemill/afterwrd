@@ -30,6 +30,11 @@
 //   POST /_group/events/<m>/cancel its writer, or an admin (as for deleting): those going are told
 // An event is a post (POST /_group/posts) with an afterwrd:event, and deleting it calls it off.
 //   POST /_group/leave            (not the owner, who deletes the group instead)
+// The group's chat (members' sites keep the copies people read; messages.js): kept here 30 days, then gone.
+//   POST /_group/chat             a Create of a Note from the member's site (<origin>/messages/<uid>): passed on to the
+//                                 other members' sites (POST /_member/message)
+//   POST /_group/chat/delete      {object: <a message's address>}: its writer, or an admin (as for posts): the members'
+//                                 sites are told
 // Admins (the owner, and members the owner makes admins):
 //   GET  /_group/admin/members    everyone, with requests to join
 //   POST /_group/admin/members/<id>/(approve|decline|remove)    (the owner also: admin, member)
@@ -44,7 +49,9 @@ import { MAX_COMMENT } from "./archive/comments.js";
 import { ANSWERS, eventChanged, eventObject, FINISHED_SQL, finishedAt, parseEvent } from "./calendar.js";
 import { signedLink } from "./friends.js";
 import { mediaStore } from "./media.js";
+import { cleanMessage } from "./messages.js";
 import { notifyEventChange, notifyGroupComment } from "./notify.js";
+import { outbox } from "./outbox.js";
 import { groupLinkPage, messagePage } from "./views/pages.js";
 import { callSite, KEY_RE, PROTOCOL, siteOrigin } from "./peers.js";
 import { removeUnusedFiles } from "./posts.js";
@@ -74,6 +81,13 @@ const GROUP_BYTES = 1_000_000_000; // all the group's photos: free Cloudflare ac
 // From one member's site.
 const POST_RATE = { count: 10, seconds: 600, daily: 50, photos: 40 };
 const COMMENT_RATE = { count: 30, seconds: 600, daily: 300 };
+// The chat: from one member, and from everyone together (under what members' sites take from a group, messages.js
+// GROUP_RATE, so a sender hears at once that it's too much, rather than members' sites quietly turning it away).
+// Deleted messages still count (they're blanked, and kept until they go), so deleting can't get round them.
+const CHAT_RATE = { count: 120, seconds: 600, daily: 1000, bytes: 1_000_000 };
+const CHAT_GROUP_RATE = { count: 250, daily: 2500, bytes: 1_500_000 };
+const CHAT_DELETE_RATE = { count: 60, seconds: 600 }; // deleting for everyone, by one member
+const CHAT_KEEP_SECONDS = 30 * 86400; // a chat isn't for keeping: posts are
 
 export const cleanText = (text) => (typeof text === "string" ? text.replace(/\r\n?/g, "\n").trim() : "");
 export const cleanName = (name, fallback = "Someone") => (typeof name === "string" && name.trim() ? name.trim().slice(0, 100) : fallback);
@@ -367,6 +381,85 @@ async function deleteComment(db, group, member, id) {
   return true;
 }
 
+// --- the chat --------------------------------------------------------------------------------------------------------
+
+/** Who's to be told about something in the chat: every member let in, apart from `origin`. */
+async function othersIn(db, group, origin) {
+  const { results } = await db.prepare("SELECT id FROM group_members WHERE group_id = ? AND approved_at IS NOT NULL AND origin != ? ORDER BY id")
+    .bind(group.id, origin).all();
+  return results.map((m) => m.id);
+}
+
+/**
+ * A member's message in the chat: kept here 30 days (to keep each once, limit how fast each member writes, and let
+ * it be deleted for everyone), and passed on to the other members' sites, saying who wrote it. Returns { status } or
+ * { error, status }.
+ */
+async function chatMessage(env, site, group, member, note) {
+  const db = env.DB;
+  const object = note?.type === "Create" && note.object?.type === "Note" ? note.object : null;
+  const prefix = `${member.origin}/messages/`;
+  const uid = typeof object?.id === "string" && object.id.startsWith(prefix) ? object.id.slice(prefix.length) : "";
+  if (!/^[\w-]{16,64}$/.test(uid)) return { error: "That isn't a message from your site.", status: 400 };
+  const text = cleanMessage(object.content);
+  if (!text) return { error: "Messages need 1 to 4000 characters.", status: 400 };
+  const at = now();
+  const bytes = new TextEncoder().encode(text).length;
+  // The limits, and keeping each message once, are checked in the same statement as the insert. (This Worker holds
+  // one group, so "everyone" is all of group_chat.)
+  const row = await db.prepare(`INSERT OR IGNORE INTO group_chat (group_id, origin, uid, author_name, text, bytes, created_at)
+    SELECT ?1, ?2, ?3, ?4, ?5, ?11, ?6
+    WHERE (SELECT COUNT(*) FROM group_chat WHERE origin = ?2 AND created_at > ?6 - ?7) < ?8
+      AND (SELECT COUNT(*) FROM group_chat WHERE origin = ?2 AND created_at > ?6 - 86400) < ?9
+      AND (SELECT COALESCE(SUM(bytes), 0) FROM group_chat WHERE origin = ?2 AND created_at > ?6 - 86400) + ?11 <= ?10
+      AND (SELECT COUNT(*) FROM group_chat WHERE created_at > ?6 - ?7) < ?12
+      AND (SELECT COUNT(*) FROM group_chat WHERE created_at > ?6 - 86400) < ?13
+      AND (SELECT COALESCE(SUM(bytes), 0) FROM group_chat WHERE created_at > ?6 - 86400) + ?11 <= ?14
+    RETURNING id`).bind(group.id, member.origin, uid, member.name, text, at, CHAT_RATE.seconds, CHAT_RATE.count, CHAT_RATE.daily,
+    CHAT_RATE.bytes, bytes, CHAT_GROUP_RATE.count, CHAT_GROUP_RATE.daily, CHAT_GROUP_RATE.bytes).first();
+  if (!row) {
+    const known = await db.prepare("SELECT 1 FROM group_chat WHERE group_id = ? AND origin = ? AND uid = ?").bind(group.id, member.origin, uid).first();
+    return known ? { status: 200 } : tooMany("messages");
+  }
+  await db.prepare("DELETE FROM group_chat WHERE created_at < ?").bind(at - CHAT_KEEP_SECONDS).run();
+  const others = await othersIn(db, group, member.origin);
+  const address = groupId(site, group.id);
+  if (others.length) {
+    try {
+      await outbox(env).sendChatToMembers(others, { "@context": CONTEXT, type: "Create", actor: address, object: { type: "Note",
+        id: `${prefix}${uid}`, attributedTo: { type: "Person", id: actorId(member.origin), name: member.name }, context: address,
+        mediaType: "text/plain", content: text, published: iso(at) } });
+    } catch (error) {
+      // Not passed on: forget it, so the member's site, trying again, isn't told it's already here.
+      await db.prepare("DELETE FROM group_chat WHERE id = ?").bind(row.id).run();
+      console.error("Couldn't queue a chat message:", error);
+      return { error: "Couldn't pass it on just now. Try again.", status: 503 };
+    }
+  }
+  return { status: 201 };
+}
+
+/** Deletes a message in the chat for everyone: its writer, or an admin (as for posts). The members' sites are told. */
+async function deleteChatMessage(env, site, group, member, address) {
+  const db = env.DB;
+  const m = /^(.+)\/messages\/([\w-]{16,64})$/.exec(typeof address === "string" ? address : "");
+  const origin = m && siteOrigin(m[1], env) === m[1] ? m[1] : null;
+  if (!origin) return { error: "That isn't a message in this chat.", status: 400 };
+  const message = await db.prepare("SELECT * FROM group_chat WHERE group_id = ? AND origin = ? AND uid = ? AND deleted_at IS NULL")
+    .bind(group.id, origin, m[2]).first();
+  if (!message) return { error: "That message isn't here any more (they go after 30 days).", status: 404 };
+  if (!(await mayDelete(db, member, message.origin))) return { error: "Only its writer, or the group's admins, can delete it for everyone.", status: 403 };
+  // Blanked, not removed, so it still counts against its writer's limits; with a limit of its own on deleting.
+  const at = now();
+  const done = await db.prepare(`UPDATE group_chat SET text = '', deleted_at = ?1, deleted_by = ?2 WHERE id = ?3 AND deleted_at IS NULL
+    AND (SELECT COUNT(*) FROM group_chat WHERE deleted_by = ?2 AND deleted_at > ?1 - ?4) < ?5 RETURNING id`)
+    .bind(at, member.origin, message.id, CHAT_DELETE_RATE.seconds, CHAT_DELETE_RATE.count).first();
+  if (!done) return tooMany("deleting");
+  const others = await othersIn(db, group, member.origin);
+  if (others.length) await outbox(env).sendChatToMembers(others, { "@context": CONTEXT, type: "Delete", actor: groupId(site, group.id), object: address });
+  return { status: 200 };
+}
+
 // --- events -------------------------------------------------------------------------------------------------------------
 
 /** An event's post and the event, if it's in this group. */
@@ -475,7 +568,7 @@ async function close(env, group, owner) {
   const { results: members } = await db.prepare("SELECT * FROM group_members WHERE id != ?").bind(owner.id).all();
   const { results: photos } = await db.prepare("SELECT hash, thumb_hash FROM group_photos").all();
   await db.batch([
-    ...["group_comments", "group_photos", "group_answers", "group_events", "group_posts", "group_links", "group_members", "groups"]
+    ...["group_chat", "group_comments", "group_photos", "group_answers", "group_events", "group_posts", "group_links", "group_members", "groups"]
       .map((table) => db.prepare(`DELETE FROM ${table}`)),
     // So it can't be claimed again, should its Worker outlast this (its owner's site deletes it next).
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('group_closed', '1')"),
@@ -621,6 +714,12 @@ export async function handleGroupApi(request, env, url) {
     return made.error ? json({ error: made.error }, made.status) : json({ id: groupPostId(site, group.id, made.id) });
   }
   if (route === "GET /_group/events") return json(await groupEvents(env, site, group, member, url.searchParams.get("when") === "past"));
+  if (route === "POST /_group/chat" || route === "POST /_group/chat/delete") {
+    const body = await request.json().catch(() => ({}));
+    const done = route === "POST /_group/chat" ? await chatMessage(env, site, group, member, body)
+      : await deleteChatMessage(env, site, group, member, body?.object);
+    return done.error ? json({ error: done.error }, done.status) : json({ ok: true }, done.status);
+  }
   const ev = /^POST \/_group\/events\/(\d{1,15})\/(answer|edit|cancel)$/.exec(route);
   if (ev) {
     const body = await request.json().catch(() => ({}));

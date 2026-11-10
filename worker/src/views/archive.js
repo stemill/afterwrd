@@ -1330,6 +1330,7 @@ ${(info?.about ?? g.about) && html`<p>${info?.about ?? g.about}</p>`}
 <nav class="tabs">
   <a href="${groupBase(g)}" ${tab === "posts" && raw('aria-current="page"')}>Posts</a>
   <a href="${groupBase(g)}/calendar" ${tab === "calendar" && raw('aria-current="page"')}>Calendar</a>
+  ${g.joined_at && html`<a href="${groupBase(g)}/chat">Chat</a>`}
   <a href="${groupBase(g)}/members" ${tab === "members" && raw('aria-current="page"')}>${g.role === "owner" ? "Members & settings" : "Members"}${waiting > 0 && html` <span class="count">${waiting}<span class="hidden"> asking to join</span></span>`}</a>
 </nav>`;
 }

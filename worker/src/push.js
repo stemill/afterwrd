@@ -106,20 +106,22 @@ export async function deviceState(env, endpoint) {
 }
 
 /**
- * A message from a friend has just been saved in `chat` (messages.js receiveMessage): tell the owner's devices,
- * unless the chat's muted or open on screen. One notification per chat (each replaces the last), with the number of
+ * A message from a friend (or, `from`, a member of a group) has just been saved in `chat` (messages.js): tell the
+ * owner's devices, unless the chat's muted, its notifications are off, or it's open on screen. One notification per chat (each replaces the last), with the number of
  * chats waiting on the app's icon. Devices whose address no longer works (they said no, or the app was removed) are
  * forgotten. `site` is this site's address, which push services are given as who to contact about its notifications.
  */
-export async function notifyMessage(env, site, chat, text) {
+export async function notifyMessage(env, site, chat, text, from = null) {
   const db = env.DB;
-  if (chat.muted || (chat.viewing_at && now() - chat.viewing_at < OPEN_SECONDS)) return;
+  // A muted chat, one whose notifications are off (a group chat, to begin with), or one that's open on screen: nothing.
+  if (chat.muted || chat.notify === 0 || (chat.viewing_at && now() - chat.viewing_at < OPEN_SECONDS)) return;
   const { results: devices } = await db.prepare("SELECT * FROM push_devices ORDER BY id").all();
   if (!devices.length) return;
   const vapid = await vapidKeys(env);
   const badge = await unreadChats(db);
   const subject = site.startsWith("https://") ? site : "https://afterwrd.app";
-  const words = text.replace(/\s+/g, " ").trim();
+  // In a group chat, who said it: the notification's title is the group.
+  const words = `${from ? `${from}: ` : ""}${text.replace(/\s+/g, " ").trim()}`;
   // A busy chat makes a sound at most once a minute; in between, its notification is brought up to date quietly.
   const at = now();
   const quiet = Boolean(chat.notified_at && at - chat.notified_at < QUIET_SECONDS);

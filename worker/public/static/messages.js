@@ -9,8 +9,15 @@ const PROBLEMS = { // as in src/views/messages.js
   "not-friends": "you're not friends on their site any more",
   refused: "their site wouldn't take it",
 };
+const GROUP_PROBLEMS = { // the same, in a group chat
+  unreachable: "the group's site couldn't be reached",
+  "no-messages": "the group's site doesn't have a chat yet (its owner can update it)",
+  "not-friends": "you're not in the group any more",
+  refused: "the group wouldn't take it",
+};
 const STATES = { sending: "Sending…", delivered: "Delivered" };
-const stateWords = (m) => (m.state === "failed" ? `Not delivered: ${PROBLEMS[m.problem] ?? "it didn't go"}` : STATES[m.state] ?? "");
+const stateWords = (m, kind) => (m.state === "failed"
+  ? `Not delivered: ${(kind === "group" ? GROUP_PROBLEMS : PROBLEMS)[m.problem] ?? "it didn't go"}` : STATES[m.state] ?? "");
 
 function showTime(el) {
   const when = new Date(el.dateTime);
@@ -26,6 +33,7 @@ if (list) openChat(list);
 
 function openChat(list) {
   const chat = list.dataset.chat;
+  const kind = list.dataset.kind;
   const paged = list.hasAttribute("data-paged");
   const form = document.getElementById("say");
   const error = document.getElementById("say-error");
@@ -34,11 +42,12 @@ function openChat(list) {
   const nearBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 160;
   const toBottom = () => window.scrollTo({ top: document.documentElement.scrollHeight });
 
-  function action(m, what, label, confirm) {
+  function action(m, what, label, confirm, everywhere = false) {
     const f = document.createElement("form");
     f.method = "post";
     f.action = `/_messages/${chat}/${m.id}/${what}`;
     if (confirm) Object.assign(f.dataset, { confirm, confirmOk: "Delete" });
+    if (everywhere) f.append(Object.assign(document.createElement("input"), { type: "hidden", name: "everywhere", value: "1" }));
     f.append(Object.assign(document.createElement("button"), { className: "link", textContent: label }));
     return f;
   }
@@ -49,14 +58,20 @@ function openChat(list) {
     li.className = `msg ${m.mine ? "mine" : "theirs"}`;
     Object.assign(li.dataset, { id: m.id, state: m.state ?? "" });
     const said = Object.assign(document.createElement("p"), { className: "said", textContent: m.text });
+    if (m.author) {
+      const who = Object.assign(document.createElement("p"), { className: "who", textContent: m.author });
+      if (m.authorSite) who.append(" ", Object.assign(document.createElement("span"), { className: "site", textContent: m.authorSite }));
+      li.append(who);
+    }
     const under = Object.assign(document.createElement("div"), { className: "under" });
     const time = document.createElement("time");
     time.dateTime = new Date(m.sent_at * 1000).toISOString();
     showTime(time);
     under.append(time);
-    if (m.mine) under.append(Object.assign(document.createElement("span"), { className: "state", textContent: stateWords(m) }));
+    if (m.mine) under.append(Object.assign(document.createElement("span"), { className: "state", textContent: stateWords(m, kind) }));
     if (m.state === "failed") under.append(action(m, "retry", "Try again"));
     under.append(action(m, "delete", "Delete", "Delete this message? It's only deleted here."));
+    if (m.everywhere) under.append(action(m, "delete", "Delete for everyone", "Delete this message for everyone in the group?", true));
     li.append(said, under);
     return li;
   }
@@ -106,16 +121,28 @@ function openChat(list) {
     });
   }
 
-  // Mute and Unmute in place: the button is at the top, so a reload (which goes to the newest message) would hide the change.
+  // Mute, and a group chat's Notify me, in place: the buttons are at the top, so a reload (which goes to the newest
+  // message) would hide the change.
   const mute = document.querySelector('form[action$="/mute"]');
   mute?.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const muting = mute.elements.muted.value === "1";
     try {
-      const result = await post(mute.action, { muted: muting });
+      const result = await post(mute.action, { muted: mute.elements.muted.value === "1" });
       mute.elements.muted.value = result.muted ? "0" : "1";
       mute.querySelector("button").textContent = result.muted ? "Unmute" : "Mute";
       document.getElementById("muted-note").hidden = !result.muted;
+    } catch (err) {
+      if (error) error.textContent = err.message;
+    }
+  });
+  const notify = document.querySelector('form[action$="/notify"]');
+  notify?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      const result = await post(notify.action, { notify: notify.elements.notify.value === "1" });
+      notify.elements.notify.value = result.notify ? "0" : "1";
+      notify.querySelector("button").textContent = result.notify ? "Stop notifications" : "Notify me";
+      document.getElementById("notify-words").textContent = result.notify ? "This chat notifies you." : "This chat doesn't notify you.";
     } catch (err) {
       if (error) error.textContent = err.message;
     }
@@ -128,7 +155,7 @@ function openChat(list) {
     if (!what) return;
     e.preventDefault();
     try {
-      const result = await post(f.action);
+      const result = await post(f.action, Object.fromEntries(new FormData(f)));
       if (what[2] === "delete") find(what[1])?.remove();
       else show(result.message);
     } catch (err) {

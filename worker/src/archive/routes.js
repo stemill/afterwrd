@@ -19,7 +19,7 @@ import { securityFixWaiting, waitingRelease } from "../update.js";
 import { now, pageData, withoutKeys } from "../util.js";
 import { fmtDate, fmtMonth } from "../views/format.js";
 import * as views from "../views/archive.js";
-import { chatPage, friendMessage, messagesIndex, unreadChats } from "../messages.js";
+import { chatPage, friendMessage, groupChat, messagesIndex, unreadChats } from "../messages.js";
 import * as messageViews from "../views/messages.js";
 
 const PAGE_SIZE = 50;
@@ -76,6 +76,7 @@ const ROUTES = [
   [/^\/friend\/(\d+)\/message$/, null, friendMessage, null],
   [/^\/messages$/, null, messagesIndex, messageViews.messagesPage],
   [/^\/messages\/(\d+)$/, null, chatPage, messageViews.chatPage],
+  [/^\/groups\/(\d{1,15})\/chat$/, null, groupChat, null], // the group's chat, made if it's new
   [/^\/app$/, null, () => ({}), views.appPage], // Add to home screen
   [/^\/groups$/, null, groupsIndex, views.groupsIndexPage],
   [/^\/groups\/new$/, null, groupNew, views.groupNewPage],

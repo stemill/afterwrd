@@ -17,11 +17,17 @@ export const outbox = (env) => env.OUTBOX.get(env.OUTBOX.idFromName("outbox"));
 
 // Who each kind of note goes to: its table here, how to find their site and key in D1, and where to send it.
 const FRIENDS = "SELECT id, origin, their_key FROM connections WHERE approved_at IS NOT NULL AND id IN";
+const MEMBERS = "SELECT id, origin, their_key FROM group_members WHERE approved_at IS NOT NULL AND id IN";
+// `track`: a message of the owner's (messages.js), marked delivered here, or not delivered and why, when that's known.
 const KINDS = {
-  messages: { column: "connection_id", more: "message_id INTEGER NOT NULL,", path: "/_peer/message", sql: FRIENDS },
+  messages: { column: "connection_id", more: "message_id INTEGER NOT NULL,", path: "/_peer/message", sql: FRIENDS, track: true },
+  // A message in a group's chat, to the group's site; and, in a group's Worker, passed on to its members' sites.
+  group_messages: { column: "group_id", more: "message_id INTEGER NOT NULL,", path: "/_group/chat", track: true,
+    sql: "SELECT id, origin, their_key FROM groups WHERE joined_at IS NOT NULL AND origin IS NOT NULL AND id IN" },
   notes: { column: "connection_id", path: "/_peer/notify", sql: FRIENDS },
-  member_notes: { column: "member_id", path: "/_member/notify",
-    sql: "SELECT id, origin, their_key FROM group_members WHERE approved_at IS NOT NULL AND id IN" },
+  member_notes: { column: "member_id", path: "/_member/notify", sql: MEMBERS },
+  // Last, so a busy chat can't hold up a group's comments and event changes, which are few.
+  member_messages: { column: "member_id", path: "/_member/message", sql: MEMBERS },
 };
 
 export class Outbox extends DurableObject {
@@ -46,11 +52,20 @@ export class Outbox extends DurableObject {
     return this.queue("member_notes", memberIds, body);
   }
 
-  /** Queues a message (messages.js) that couldn't be delivered straight away, to try again in `delay` seconds. */
-  async sendMessage(connectionId, messageId, body, delay) {
+  /**
+   * Queues a message (messages.js) that couldn't be delivered straight away, to try again in `delay` seconds: to a
+   * friend (`table` messages, `to` their connection) or a group (group_messages, the group).
+   */
+  async sendMessage(table, to, messageId, body, delay) {
+    if (!KINDS[table]?.track) throw new Error(`Not a kind of message: ${table}`);
     const due = Date.now() + delay * 1000;
-    this.sql.exec("INSERT INTO messages (connection_id, message_id, body, due) VALUES (?, ?, ?, ?)", connectionId, messageId, JSON.stringify(body), due);
+    this.sql.exec(`INSERT INTO ${table} (${KINDS[table].column}, message_id, body, due) VALUES (?, ?, ?, ?)`, to, messageId, JSON.stringify(body), due);
     await this.wake(due);
+  }
+
+  /** In a group's Worker: passes a message in its chat, or its deletion, on to members' sites (`memberIds`, group_members ids). */
+  sendChatToMembers(memberIds, body) {
+    return this.queue("member_messages", memberIds, body);
   }
 
   async queue(table, ids, body) {
@@ -83,7 +98,7 @@ export class Outbox extends DurableObject {
     const { results } = ids.length ? await this.env.DB.prepare(`${sql} (${ids.map(() => "?").join(",")})`).bind(...ids).all() : { results: [] };
     const recipients = new Map(results.map((c) => [c.id, c]));
     // A message the owner has deleted here since (or that's been delivered after all) isn't sent.
-    const waiting = table !== "messages" ? null : due.length ? new Set((await this.env.DB.prepare(
+    const waiting = !KINDS[table].track ? null : due.length ? new Set((await this.env.DB.prepare(
       `SELECT id FROM messages WHERE delivered_at IS NULL AND id IN (${due.map(() => "?").join(",")})`)
       .bind(...due.map((n) => n.message_id)).all()).results.map((m) => m.id)) : new Set();
 

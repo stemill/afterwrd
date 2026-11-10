@@ -14,6 +14,7 @@
 //   POST /_member/notify      a comment on a post the owner here wrote or commented on, or a change to an event
 //                             they're going to (notify.js)
 //   POST /_member/removed     the group removed this site, turned down its request, or closed
+//   POST /_member/message     a member's message in the group's chat, or one deleted for everyone (messages.js)
 // The owner's own actions, from their pages (views.js); forms land back where they came from:
 //   POST /_groups/join                    {link}
 //   POST /_groups/create/…                starting a group (groupsites.js)
@@ -32,6 +33,7 @@ import { ANSWERS, eventObject, parseEvent, readEventForm } from "./calendar.js";
 import { parseMedia } from "./friends.js";
 import { cleanName, cleanText, MAX_GROUP_ABOUT, MAX_GROUP_NAME, MAX_GROUP_PHOTOS, MAX_GROUP_TEXT } from "./groups.js";
 import { handleGroupSites } from "./groupsites.js";
+import { receiveGroupMessage } from "./messages.js";
 import { receiveGroupNote } from "./notify.js";
 import { messagePage } from "./views/pages.js";
 import { callSite, KEY_RE, ownerName, PROTOCOL, siteOrigin } from "./peers.js";
@@ -611,7 +613,7 @@ const problem = (message, back, status = 400) =>
 
 // --- calls from groups' sites ------------------------------------------------------------------------------------------
 
-export async function handleMember(request, env, url) {
+export async function handleMember(request, env, url, work) {
   const route = `${request.method} ${url.pathname}`;
   const db = env.DB;
   const match = /^Bearer (\S+)$/.exec(request.headers.get("Authorization") ?? "");
@@ -630,6 +632,10 @@ export async function handleMember(request, env, url) {
   if (!group?.joined_at) return json({ error: "Not a member." }, 401);
   if (route === "POST /_member/notify") {
     const [body, status] = await receiveGroupNote(db, group, await request.json().catch(() => ({})));
+    return json(body, status);
+  }
+  if (route === "POST /_member/message") {
+    const [body, status] = await receiveGroupMessage(env, group, await request.json().catch(() => ({})), { site: url.origin, work });
     return json(body, status);
   }
   if (route === "POST /_member/removed") {

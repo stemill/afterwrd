@@ -1255,6 +1255,52 @@ A compatible member site should do the same. A group must not be able to put wor
 
 Source: `src/membership.js:1-5`, `src/membership.js:133-163`, `src/membership.js:355-466`, `test/e2e/forged.mjs:33-67`, `test/e2e/groups.mjs:209-218`, `test/e2e/groups.mjs:343-346`.
 
+### 9.9 The group's chat (afterwrd 0.38.0)
+
+A group has one chat. A member's site sends its owner's message to the group's site, which passes it on to the other
+members' sites; each keeps its own copy. Messages go after 30 days, on the group's site and the members' (posts are for
+keeping). Like messages between friends (5.14), they're plain text and not end-to-end encrypted.
+
+**`POST /_group/chat`** (a member's site, issued key, approved): the same Create as in 5.14, with `to` the group's
+address (`https://g.example/groups/1`). `object.id` must be the member's own origin, then `/messages/`, then 16 to 64
+letters, digits, `-` or `_`; otherwise `400`. `content` as in 5.14. The first time: `201 {"ok": true}`; the same id
+again: `200`, kept once. Limits, from one member: 120 in 10 minutes, 1000 and 1 MB a day; from everyone together: 250 in
+10 minutes, 2500 and 1.5 MB a day (below what members' sites take from a group, so a sender hears at once). Deleted
+messages still count. Beyond them, `429`. If the group can't queue it to pass on, it answers `503` and forgets it, so
+the member's site tries again. Older group sites answer `404`; the member's site then says the group's site doesn't
+have a chat yet.
+
+The group's site keeps each message 30 days (to keep it once, apply the limits, and delete it for everyone), and
+passes it on, as in 2.5, to every approved member's site but the writer's, at **`POST /_member/message`**:
+
+```json
+{"@context": [ … ], "type": "Create", "actor": "https://g.example/groups/1",
+ "object": {"type": "Note", "id": "https://bob.example/messages/<uid>", "context": "https://g.example/groups/1",
+            "attributedTo": {"type": "Person", "id": "https://bob.example/", "name": "Bob Example"},
+            "mediaType": "text/plain", "content": "Shall we meet on Thursday?", "published": "2026-11-10T19:02:00Z"}}
+```
+
+The receiving site:
+
+- refuses (`400`) a note whose `context` isn't this group, whose writer (`attributedTo.id`) isn't a valid site or is
+  the receiving site itself (a group can't put words in its own member's mouth, as in 9.8), or whose `object.id`
+  isn't under the writer's origin;
+- keeps it in its chat with the group, by `object.id` (so each is kept once: `200` the second time), with the writer's
+  name as the group gives it (the group vouches for its members, as it does for posts);
+- applies its own limits, for the whole group: 300 in 10 minutes, 3000 and 2 MB a day; and for every group together,
+  6000 and 6 MB a day, apart from what friends send it (5.14), so groups can't crowd friends out; beyond them, `429`;
+- doesn't notify its owner about a group chat unless they've turned that on for it.
+
+**`POST /_group/chat/delete`** `{"type": "Delete", "object": "<a message's id>"}` (issued key, approved): its writer,
+or an admin (not the owner's, unless they're the owner), as for posts (9.4). `200`, `403`, or `404` if it isn't there
+(or has gone after 30 days); `429` beyond 60 deletions in 10 minutes from one member. The group passes
+`{"type": "Delete", "actor": <group>, "object": <the id>}` to every approved member's site but the asker's, at
+`POST /_member/message`, and each deletes its copy from its chat with that group: its own owner's message too, if that
+was the one. Both blank a deleted message rather than removing it, and keep the blank until it would have gone after
+30 days, so it still counts towards the limits: deleting and sending again can't get round them.
+
+A member removed, or a group closed (`POST /_member/removed`), keeps its chat, read-only; nothing more is sent to it.
+
 ## 10. Security considerations
 
 A **caller** must:
@@ -1363,10 +1409,12 @@ Notes on the "Auth" column:
 | POST | `/_peer/comments` | A friend's site | issued key (approved) | Comment on a post or photo → `{id}` |
 | POST | `/_peer/comments/<n>/delete` | A friend's site | issued key (approved) | Delete its own comment |
 | POST | `/_peer/notify` | A friend's site | issued key (approved) | A note (section 8) |
+| POST | `/_peer/message` | A friend's site | issued key (approved) | A message (5.14) |
 | POST | `/_peer/disconnect` | A friend's site | issued key (pending or approved) | Ends the connection |
 | GET | `/_member/hello?from=&group=` | A group's site | issued key (joining only) | Proves the key → `{name, protocol}` |
 | POST | `/_member/notify` | A group's site | issued key | A group note (9.6) |
 | POST | `/_member/removed` | A group's site | issued key | Removed, declined, or the group closed |
+| POST | `/_member/message` | A group's site | issued key | A message in its chat, or one deleted (9.9) |
 | GET, HEAD | `/files/<sha256>?exp=&sig=` | A browser or a group's site | signed link | One file, until `exp` |
 
 ### On a group's site
@@ -1390,6 +1438,8 @@ Notes on the "Auth" column:
 | POST | `/_group/events/<m>/edit` | A member's site | issued key (approved, writer) | Change an event → the event's post |
 | POST | `/_group/events/<m>/cancel` | A member's site | issued key (approved, writer, admin or owner) | Call an event off → the event's post |
 | POST | `/_group/leave` | A member's site | issued key (any, not the owner) | Leave, or withdraw a request |
+| POST | `/_group/chat` | A member's site | issued key (approved) | A message in the chat (9.9) |
+| POST | `/_group/chat/delete` | A member's site | issued key (approved, writer, admin or owner) | Delete one for everyone |
 | GET | `/_group/admin/members` | An admin's site | issued key (admin) | Members and requests |
 | POST | `/_group/admin/members/<id>/(approve\|decline\|remove)` | An admin's site | issued key (admin) | Decide on someone |
 | POST | `/_group/admin/members/<id>/(admin\|member)` | The owner's site | issued key (owner) | Change someone's role |

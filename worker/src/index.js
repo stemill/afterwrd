@@ -64,7 +64,7 @@ async function route(request, env, work) {
   if (url.pathname.startsWith("/_connect/")) return handleConnectLink(request, env, url);
   if (url.pathname.startsWith("/_peer/")) return handlePeer(request, env, url, work);
   // A group the owner's in, calling with the key this site gave it.
-  if (url.pathname.startsWith("/_member/")) return handleMember(request, env, url);
+  if (url.pathname.startsWith("/_member/")) return handleMember(request, env, url, work);
   // A friend checking their site at this site's invitation (checks.js): they aren't signed in here.
   if (url.pathname.startsWith("/_check/")) return handleCheck(request, env, url);
   const reading = request.method === "GET" || request.method === "HEAD";

@@ -14,9 +14,15 @@
 //
 // A chat belongs to the friend's site address, so if they're removed as a friend it stays (read-only, with its own
 // Delete) and carries on if they're added again. Deleting a message or a chat only deletes it here.
-import { actorId, CONTEXT, iso } from "../public/static/activity.js";
+//
+// Group chats: a chat with a group (kept by its address, <group's site>/groups/<n>). A message goes to the group's site
+// (POST /_group/chat, groups.js), which passes it on to the other members' sites (POST /_member/message, here:
+// receiveGroupMessage), each keeping its own copy with who wrote it. Their messages go after 30 days: for keeping,
+// there are posts. A group chat doesn't notify unless the owner turns that on for it. In a group chat, the writer of a
+// message, or the group's admins, can delete it for everyone (the group tells the members' sites).
+import { actorId, CONTEXT, groupId, iso } from "../public/static/activity.js";
 import { messageProblem, outbox } from "./outbox.js";
-import { callSite, host } from "./peers.js";
+import { callSite, host, siteOrigin } from "./peers.js";
 import { notifyMessage, pushKey } from "./push.js";
 import { html, now, randomToken, Refusal } from "./util.js";
 import { messagePage } from "./views/pages.js";
@@ -28,7 +34,13 @@ const FIRST_RETRY_SECONDS = 10;
 const VIEWING_EVERY = 10; // seconds: how often an open chat notes that it's still open (push.js OPEN_SECONDS)
 const SHOWN = 200; // messages on a chat's page, newest last; older ones a page at a time
 // From one friend: a busy conversation is fine, a flood isn't. And a ceiling for everyone together.
-const RATE = { count: 120, seconds: 600, daily: 1000, everyone: 3000, bytes: 1_000_000 };
+const RATE = { count: 120, seconds: 600, daily: 1000, bytes: 1_000_000, everyone: 3000, everyoneBytes: 5_000_000 };
+// From a group: all its members together (a little over what a group's site lets through, groups.js CHAT_GROUP_RATE).
+// And every group together, apart from friends, so groups can't crowd out friends' messages.
+const GROUP_RATE = { count: 300, seconds: 600, daily: 3000, bytes: 2_000_000, everyone: 6000, everyoneBytes: 6_000_000 };
+const LIVE = "deleted_at IS NULL"; // a group chat's deleted messages are blanked and kept a while, but never shown
+export const GROUP_KEEP_SECONDS = 30 * 86400; // a group chat's messages go after this: for keeping, there are posts
+const GROUP_RE = /^(https?:\/\/[^/]+)\/groups\/(\d{1,15})$/;
 const BACKDATE_SECONDS = 7 * 86400; // a friend's clock may say a message was written up to a week before it arrived
 
 const FRIEND_SQL = "SELECT * FROM connections WHERE origin = ? AND connected_at IS NOT NULL AND approved_at IS NOT NULL ORDER BY id DESC LIMIT 1";
@@ -44,11 +56,45 @@ export function cleanMessage(value) {
   return text.length <= MAX_MESSAGE ? text : "";
 }
 
-/** The chat with the friend at `origin`, made if it's new. A name that's changed is brought up to date when a message is saved. */
-async function chatFor(db, origin, name) {
+/**
+ * The chat with the friend at `origin` (or, `kind` group, the group at that address), made if it's new; a group's
+ * doesn't notify to begin with. A name that's changed is brought up to date when a message is saved.
+ */
+async function chatFor(db, origin, name, kind = "friend") {
   return (await db.prepare("SELECT * FROM chats WHERE origin = ?").bind(origin).first())
-    ?? db.prepare(`INSERT INTO chats (origin, name, created_at) VALUES (?, ?, ?)
-      ON CONFLICT (origin) DO UPDATE SET origin = excluded.origin RETURNING *`).bind(origin, name, now()).first();
+    ?? db.prepare(`INSERT INTO chats (origin, name, kind, notify, created_at) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT (origin) DO UPDATE SET origin = excluded.origin RETURNING *`).bind(origin, name, kind, kind === "group" ? 0 : 1, now()).first();
+}
+
+/**
+ * Where a chat's messages go: the friend's site (their connection) or the group's (its row here), with the key for
+ * it and the outbox's queue for it; null if they're not a friend, or this site's not in the group, any more.
+ */
+async function recipientOf(db, chat) {
+  if (chat.kind === "group") {
+    const [, origin, n] = GROUP_RE.exec(chat.origin) ?? [];
+    const group = origin && await db.prepare("SELECT * FROM groups WHERE origin = ? AND remote_id = ? AND joined_at IS NOT NULL")
+      .bind(origin, Number(n)).first();
+    return group ? { id: group.id, origin: group.origin, key: group.their_key, path: "/_group/chat", table: "group_messages",
+      to: chat.origin, name: group.name, group } : null;
+  }
+  const friend = await db.prepare(FRIEND_SQL).bind(chat.origin).first();
+  return friend ? { id: friend.id, origin: friend.origin, key: friend.their_key, path: "/_peer/message", table: "messages",
+    to: actorId(friend.origin), name: friend.name } : null;
+}
+
+const notThere = (chat) => new Refusal(chat.kind === "group"
+  ? `You're not in ${chat.name} any more, so you can't send messages to it.`
+  : `You're not friends with ${chat.name} any more, so you can't send them messages.`, 403);
+
+/** In a group chat, whether the owner here runs the group (and so may delete anyone's message for everyone). */
+const runsGroup = (to) => to?.group?.role === "owner" || to?.group?.role === "admin";
+
+/** A group chat's messages from more than 30 days ago go: in one chat, or (no `chatId`) all of them. */
+function pruneGroupChats(db, chatId = null) {
+  return db.prepare(`DELETE FROM messages WHERE received_at < ?
+    AND chat_id IN (SELECT id FROM chats WHERE kind = 'group' ${chatId ? "AND id = ?" : ""})`)
+    .bind(...[now() - GROUP_KEEP_SECONDS, chatId].filter((v) => v !== null)).run();
 }
 
 async function findChat(db, id) {
@@ -57,17 +103,22 @@ async function findChat(db, id) {
   return chat;
 }
 
-/** The note that carries a message of the owner's to the friend at `to`. */
+/** The note that carries a message of the owner's to `to`: a friend (their site's actor) or a group (its address). */
 function messageNote(site, to, message) {
-  const object = { type: "Note", id: `${site}/messages/${message.uid}`, attributedTo: actorId(site), to: [actorId(to)],
+  const object = { type: "Note", id: `${site}/messages/${message.uid}`, attributedTo: actorId(site), to: [to],
     mediaType: "text/plain", content: message.text, published: iso(message.sent_at) };
-  return { "@context": CONTEXT, type: "Create", actor: actorId(site), to: [actorId(to)], object };
+  return { "@context": CONTEXT, type: "Create", actor: actorId(site), to: [to], object };
 }
 
-/** A message as pages and the API show it, and its state if it's the owner's: sending, delivered or failed. */
-function shown(m) {
+/**
+ * A message as pages and the API show it: its state if it's the owner's (sending, delivered or failed); in a group
+ * chat, who wrote it, and whether the owner may delete it for everyone (`admin`: they run the group).
+ */
+function shown(m, chat = null, admin = false) {
   const state = !m.mine ? null : m.delivered_at ? "delivered" : m.failed_at ? "failed" : "sending";
-  return { id: m.id, mine: Boolean(m.mine), text: m.text, sent_at: m.sent_at, state, problem: m.failed_at ? m.problem : null };
+  return { id: m.id, mine: Boolean(m.mine), text: m.text, sent_at: m.sent_at, state, problem: m.failed_at ? m.problem : null,
+    author: m.mine ? null : m.author_name ?? null, authorSite: !m.mine && m.author_origin ? host(m.author_origin) : null,
+    everywhere: chat?.kind === "group" && Boolean(m.mine || admin) };
 }
 
 // --- actions (the owner's) ---------------------------------------------------------------------------------------
@@ -86,13 +137,13 @@ export async function sendMessage(env, site, chatId, text) {
   const chat = await findChat(db, chatId);
   const words = cleanMessage(text);
   if (!words) throw new Refusal(`Messages need 1 to ${MAX_MESSAGE} characters.`);
-  const friend = await db.prepare(FRIEND_SQL).bind(chat.origin).first();
-  if (!friend) throw new Refusal(`You're not friends with ${chat.name} any more, so you can't send them messages.`, 403);
+  const to = await recipientOf(db, chat);
+  if (!to) throw notThere(chat);
   const at = now();
   const message = await db.prepare(`INSERT INTO messages (chat_id, mine, uid, text, sent_at, received_at)
     VALUES (?, 1, ?, ?, ?, ?) RETURNING *`).bind(chat.id, randomToken(), words, at, at).first();
-  await db.prepare("UPDATE chats SET last_at = ?, name = ?, read_up_to = ? WHERE id = ?").bind(at, friend.name, message.id, chat.id).run();
-  return { message: shown(await deliver(env, site, friend, message)) };
+  await db.prepare("UPDATE chats SET last_at = ?, name = ?, read_up_to = ? WHERE id = ?").bind(at, to.name, message.id, chat.id).run();
+  return { message: shown(await deliver(env, site, to, message), chat) };
 }
 
 /** Tries a message that wasn't delivered again, now. */
@@ -101,33 +152,55 @@ export async function retryMessage(env, site, chatId, messageId) {
   const chat = await findChat(db, chatId);
   const message = await db.prepare("SELECT * FROM messages WHERE id = ? AND chat_id = ? AND mine = 1").bind(Number(messageId), chat.id).first();
   if (!message) throw new Refusal("That message isn't here any more.", 404);
-  if (!message.failed_at) return { message: shown(message) };
-  const friend = await db.prepare(FRIEND_SQL).bind(chat.origin).first();
-  if (!friend) throw new Refusal(`You're not friends with ${chat.name} any more, so you can't send them messages.`, 403);
+  if (!message.failed_at) return { message: shown(message, chat) };
+  const to = await recipientOf(db, chat);
+  if (!to) throw notThere(chat);
   const fresh = await db.prepare("UPDATE messages SET failed_at = NULL, problem = NULL WHERE id = ? RETURNING *").bind(message.id).first();
-  return { message: shown(await deliver(env, site, friend, fresh)) };
+  return { message: shown(await deliver(env, site, to, fresh), chat) };
 }
 
-/** Sends a saved message to the friend's site; returns it as it now stands (delivered, sending, or failed). */
-async function deliver(env, site, friend, message) {
+/** Sends a saved message to the friend's or group's site (`to`); returns it as it now stands (delivered, sending, or failed). */
+async function deliver(env, site, to, message) {
   const db = env.DB;
+  const note = messageNote(site, to.to, message);
   try {
-    await callSite(friend.origin, "/_peer/message", { key: friend.their_key, body: messageNote(site, friend.origin, message), timeout: DIRECT_TIMEOUT_MS });
+    await callSite(to.origin, to.path, { key: to.key, body: note, timeout: DIRECT_TIMEOUT_MS });
     return db.prepare("UPDATE messages SET delivered_at = ? WHERE id = ? RETURNING *").bind(now(), message.id).first();
   } catch (error) {
     const problem = messageProblem(error.status ?? 0);
     if (problem === "unreachable") {
-      await outbox(env).sendMessage(friend.id, message.id, messageNote(site, friend.origin, message), FIRST_RETRY_SECONDS);
+      await outbox(env).sendMessage(to.table, to.id, message.id, note, FIRST_RETRY_SECONDS);
       return message;
     }
     return db.prepare("UPDATE messages SET failed_at = ?, problem = ? WHERE id = ? RETURNING *").bind(now(), problem, message.id).first();
   }
 }
 
-/** Deletes one message, here only. */
-export async function deleteMessage(env, chatId, messageId) {
-  const chat = await findChat(env.DB, chatId);
-  await env.DB.prepare("DELETE FROM messages WHERE id = ? AND chat_id = ?").bind(Number(messageId), chat.id).run();
+/**
+ * Deletes one message: here only, or (`everywhere`, in a group chat: the owner's own, or anyone's if they run the
+ * group) for everyone, which the group's site passes on to the members' sites.
+ */
+export async function deleteMessage(env, site, chatId, messageId, everywhere = false) {
+  const db = env.DB;
+  const chat = await findChat(db, chatId);
+  const message = await db.prepare(`SELECT * FROM messages WHERE id = ? AND chat_id = ? AND ${LIVE}`).bind(Number(messageId), chat.id).first();
+  if (!message) return { deleted: true };
+  // An own message the group never got only needs deleting here.
+  if (everywhere && !(message.mine && !message.delivered_at)) {
+    if (chat.kind !== "group") throw new Refusal("Only a message in a group chat can be deleted for everyone.");
+    const to = await recipientOf(db, chat);
+    if (!to) throw notThere(chat);
+    const address = message.mine ? `${site}/messages/${message.uid}` : message.uid;
+    try {
+      await callSite(to.origin, "/_group/chat/delete", { key: to.key, body: { "@context": CONTEXT, type: "Delete", object: address } });
+    } catch (error) {
+      throw new Refusal(`Couldn't delete it for everyone: ${error.message}`);
+    }
+  }
+  // In a group chat it's blanked and kept until it goes (so the group's limits still count it); elsewhere, gone.
+  await (chat.kind === "group"
+    ? db.prepare("UPDATE messages SET text = '', deleted_at = ? WHERE id = ?").bind(now(), message.id)
+    : db.prepare("DELETE FROM messages WHERE id = ?").bind(message.id)).run();
   return { deleted: true };
 }
 
@@ -151,6 +224,13 @@ export async function muteChat(env, chatId, muted) {
   return { muted: Boolean(muted) };
 }
 
+/** Whether a chat's messages notify (a group chat's don't, to begin with; muting stops them either way). */
+export async function notifyChat(env, chatId, notify) {
+  const chat = await findChat(env.DB, chatId);
+  await env.DB.prepare("UPDATE chats SET notify = ? WHERE id = ?").bind(notify ? 1 : 0, chat.id).run();
+  return { notify: Boolean(notify) };
+}
+
 /**
  * What's new in a chat that's open: messages after `after`, and how the owner's own messages listed in `pending` now
  * stand. The page is being looked at, so everything in it counts as seen.
@@ -159,18 +239,19 @@ export async function chatSince(env, chatId, after, pending) {
   const db = env.DB;
   const chat = await findChat(db, chatId);
   const ids = pending.map(Number).filter(Number.isSafeInteger).slice(0, 100);
-  const [fresh, states, friend] = await db.batch([
-    db.prepare("SELECT * FROM messages WHERE chat_id = ? AND id > ? ORDER BY id LIMIT ?").bind(chat.id, Number(after) || 0, SHOWN),
+  const [fresh, states] = await db.batch([
+    db.prepare(`SELECT * FROM messages WHERE chat_id = ? AND id > ? AND ${LIVE} ORDER BY id LIMIT ?`).bind(chat.id, Number(after) || 0, SHOWN),
     db.prepare(`SELECT * FROM messages WHERE chat_id = ? AND mine = 1 AND id IN (${ids.map(() => "?").join(",") || "NULL"})`).bind(chat.id, ...ids),
-    db.prepare(FRIEND_SQL).bind(chat.origin),
   ]);
+  const to = await recipientOf(db, chat);
+  const show = (m) => shown(m, chat, runsGroup(to));
   // Read, and open on screen right now (so a new message here doesn't notify: push.js). Noted every few seconds at most.
   const newest = fresh.results.at(-1)?.id ?? 0;
   const at = now();
   if (newest > chat.read_up_to || at - (chat.viewing_at ?? 0) >= VIEWING_EVERY) {
     await db.prepare("UPDATE chats SET read_up_to = MAX(read_up_to, ?), viewing_at = ? WHERE id = ?").bind(newest, at, chat.id).run();
   }
-  return { messages: fresh.results.map(shown), states: states.results.map(shown), canSend: Boolean(friend.results[0]) };
+  return { messages: fresh.results.map(show), states: states.results.map(show), canSend: Boolean(to) };
 }
 
 // --- from a friend's site --------------------------------------------------------------------------------------
@@ -198,10 +279,13 @@ export async function receiveMessage(env, peer, note, { site, work }) {
     SELECT ?1, 0, ?2, ?3, ?4, ?5
     WHERE (SELECT COUNT(*) FROM messages WHERE chat_id = ?1 AND mine = 0 AND received_at > ?5 - ?6) < ?7
       AND (SELECT COUNT(*) FROM messages WHERE chat_id = ?1 AND mine = 0 AND received_at > ?5 - 86400) < ?8
-      AND (SELECT COUNT(*) FROM messages WHERE mine = 0 AND received_at > ?5 - 86400) < ?9
       AND (SELECT COALESCE(SUM(LENGTH(CAST(text AS BLOB))), 0) FROM messages
         WHERE chat_id = ?1 AND mine = 0 AND received_at > ?5 - 86400) + LENGTH(CAST(?3 AS BLOB)) <= ?10
-    RETURNING id`).bind(chat.id, uid, text, sentAt, at, RATE.seconds, RATE.count, RATE.daily, RATE.everyone, RATE.bytes).first();
+      AND (SELECT COUNT(*) FROM messages m JOIN chats c ON c.id = m.chat_id
+        WHERE c.kind = 'friend' AND m.mine = 0 AND m.received_at > ?5 - 86400) < ?9
+      AND (SELECT COALESCE(SUM(LENGTH(CAST(m.text AS BLOB))), 0) FROM messages m JOIN chats c ON c.id = m.chat_id
+        WHERE c.kind = 'friend' AND m.mine = 0 AND m.received_at > ?5 - 86400) + LENGTH(CAST(?3 AS BLOB)) <= ?11
+    RETURNING id`).bind(chat.id, uid, text, sentAt, at, RATE.seconds, RATE.count, RATE.daily, RATE.everyone, RATE.bytes, RATE.everyoneBytes).first();
   if (!row) {
     const known = await db.prepare("SELECT 1 FROM messages WHERE chat_id = ? AND mine = 0 AND uid = ?").bind(chat.id, uid).first();
     return known ? [{ ok: true }, 200] : [{ error: "That's a lot of messages for now. Try again later." }, 429];
@@ -211,34 +295,101 @@ export async function receiveMessage(env, peer, note, { site, work }) {
   return [{ ok: true }, 201];
 }
 
+// --- from a group's site ---------------------------------------------------------------------------------------
+
+/**
+ * From a group this site is in (membership.js, POST /_member/message, with the key this site gave the group): a
+ * member's message in its chat, passed on, or the news that one was deleted for everyone. Returns [body, status].
+ *   {type: "Create", object: {type: "Note", id: "<member's site>/messages/<uid>", context: "<group's address>",
+ *     attributedTo: {id: "<member's site>/", name}, content, published}}
+ *   {type: "Delete", object: "<member's site>/messages/<uid>"}
+ * The group vouches for who wrote it, as it does for posts; but never for the owner here, who speaks for themselves.
+ */
+export async function receiveGroupMessage(env, group, note, { site, work }) {
+  const db = env.DB;
+  const address = groupId(group.origin, group.remote_id);
+  if (note?.type === "Delete") {
+    const id = typeof note.object === "string" ? note.object : "";
+    const chat = id && await db.prepare("SELECT id FROM chats WHERE origin = ?").bind(address).first();
+    const own = `${site}/messages/`;
+    if (chat) {
+      // Blanked, not removed, so the chat's limits still count it (deleting and sending again can't get round them).
+      await db.prepare(`UPDATE messages SET text = '', deleted_at = ? WHERE chat_id = ? AND mine = ? AND uid = ? AND ${LIVE}`)
+        .bind(now(), chat.id, id.startsWith(own) ? 1 : 0, id.startsWith(own) ? id.slice(own.length) : id).run();
+    }
+    return [{ ok: true }, 200];
+  }
+  const object = note?.type === "Create" && note.object?.type === "Note" ? note.object : null;
+  if (!object || object.context !== address) return [{ error: "That isn't a message in this group." }, 400];
+  const author = siteOrigin(typeof object.attributedTo?.id === "string" ? object.attributedTo.id : "", env);
+  if (!author || author === site) return [{ error: "That isn't a member's message." }, 400];
+  const prefix = `${author}/messages/`;
+  if (typeof object.id !== "string" || !object.id.startsWith(prefix) || !UID_RE.test(object.id.slice(prefix.length))) {
+    return [{ error: "That isn't a message from that member's site." }, 400];
+  }
+  const text = cleanMessage(object.content);
+  if (!text) return [{ error: `Messages need 1 to ${MAX_MESSAGE} characters.` }, 400];
+  const name = cleanMessage(object.attributedTo?.name).replace(/\s+/g, " ").slice(0, 100) || "Someone";
+  const at = now();
+  const published = Date.parse(typeof object.published === "string" ? object.published : "");
+  const sentAt = Number.isFinite(published) ? Math.max(at - BACKDATE_SECONDS, Math.min(at, Math.floor(published / 1000))) : at;
+  const chat = await chatFor(db, address, group.name, "group");
+  // A message is kept by its whole address (uid), so two members' can't clash.
+  const bytes = new TextEncoder().encode(text).length;
+  const row = await db.prepare(`INSERT OR IGNORE INTO messages (chat_id, mine, uid, text, sent_at, received_at, author_origin, author_name, bytes)
+    SELECT ?1, 0, ?2, ?3, ?4, ?5, ?11, ?12, ?13
+    WHERE (SELECT COUNT(*) FROM messages WHERE chat_id = ?1 AND mine = 0 AND received_at > ?5 - ?6) < ?7
+      AND (SELECT COUNT(*) FROM messages WHERE chat_id = ?1 AND mine = 0 AND received_at > ?5 - 86400) < ?8
+      AND (SELECT COALESCE(SUM(bytes), 0) FROM messages WHERE chat_id = ?1 AND mine = 0 AND received_at > ?5 - 86400) + ?13 <= ?10
+      AND (SELECT COUNT(*) FROM messages m JOIN chats c ON c.id = m.chat_id
+        WHERE c.kind = 'group' AND m.mine = 0 AND m.received_at > ?5 - 86400) < ?9
+      AND (SELECT COALESCE(SUM(m.bytes), 0) FROM messages m JOIN chats c ON c.id = m.chat_id
+        WHERE c.kind = 'group' AND m.mine = 0 AND m.received_at > ?5 - 86400) + ?13 <= ?14
+    RETURNING id`).bind(chat.id, object.id, text, sentAt, at, GROUP_RATE.seconds, GROUP_RATE.count, GROUP_RATE.daily,
+    GROUP_RATE.everyone, GROUP_RATE.bytes, author, name, bytes, GROUP_RATE.everyoneBytes).first();
+  if (!row) {
+    const known = await db.prepare("SELECT 1 FROM messages WHERE chat_id = ? AND mine = 0 AND uid = ?").bind(chat.id, object.id).first();
+    return known ? [{ ok: true }, 200] : [{ error: "That's a lot of messages for now. Try again later." }, 429];
+  }
+  await db.prepare("UPDATE chats SET last_at = ?, name = ? WHERE id = ?").bind(at, group.name, chat.id).run();
+  await pruneGroupChats(db, chat.id);
+  work.waitUntil(notifyMessage(env, site, { ...chat, name: group.name }, text, name)
+    .catch((error) => console.error("Notifying about a message failed:", error)));
+  return [{ ok: true }, 201];
+}
+
 // --- pages (loaders, archive/routes.js) ------------------------------------------------------------------------
 
 /** How many chats (not muted) have messages the owner hasn't seen, for the menu. */
 export async function unreadChats(db) {
   // From the chats: one look in each (messages_by_chat), however many messages there are.
   const row = await db.prepare(`SELECT COUNT(*) AS n FROM chats c WHERE c.muted = 0
-    AND EXISTS (SELECT 1 FROM messages m WHERE m.chat_id = c.id AND m.id > c.read_up_to AND m.mine = 0)`).first();
+    AND EXISTS (SELECT 1 FROM messages m WHERE m.chat_id = c.id AND m.id > c.read_up_to AND m.mine = 0 AND m.${LIVE})`).first();
   return row?.n ?? 0;
 }
 
 /** Messages: every chat, newest first, and the friends there's no chat with yet. */
 export async function messagesIndex(ctx) {
   const { db } = ctx;
+  await pruneGroupChats(db);
   const [chats, friends] = await db.batch([
-    db.prepare(`SELECT c.id, c.origin, c.name, c.muted, c.last_at,
-      (SELECT text FROM messages WHERE chat_id = c.id ORDER BY id DESC LIMIT 1) AS last_text,
-      (SELECT mine FROM messages WHERE chat_id = c.id ORDER BY id DESC LIMIT 1) AS last_mine,
-      EXISTS (SELECT 1 FROM messages WHERE chat_id = c.id AND mine = 0 AND id > c.read_up_to) AS unread,
-      EXISTS (SELECT 1 FROM connections WHERE origin = c.origin AND connected_at IS NOT NULL AND approved_at IS NOT NULL) AS friend
-      FROM chats c WHERE EXISTS (SELECT 1 FROM messages WHERE chat_id = c.id)
+    db.prepare(`SELECT c.id, c.origin, c.name, c.kind, c.muted, c.last_at,
+      (SELECT text FROM messages WHERE chat_id = c.id AND ${LIVE} ORDER BY id DESC LIMIT 1) AS last_text,
+      (SELECT mine FROM messages WHERE chat_id = c.id AND ${LIVE} ORDER BY id DESC LIMIT 1) AS last_mine,
+      EXISTS (SELECT 1 FROM messages WHERE chat_id = c.id AND mine = 0 AND id > c.read_up_to AND ${LIVE}) AS unread,
+      CASE WHEN c.kind = 'group'
+        THEN EXISTS (SELECT 1 FROM groups g WHERE g.joined_at IS NOT NULL AND g.origin || '/groups/' || g.remote_id = c.origin)
+        ELSE EXISTS (SELECT 1 FROM connections WHERE origin = c.origin AND connected_at IS NOT NULL AND approved_at IS NOT NULL)
+      END AS friend
+      FROM chats c WHERE EXISTS (SELECT 1 FROM messages WHERE chat_id = c.id AND ${LIVE})
       ORDER BY COALESCE(c.last_at, c.created_at) DESC, c.id DESC`),
     // Friends with nothing said yet (a chat opened and left empty doesn't count).
     db.prepare(`SELECT id, name, origin FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NOT NULL
-      AND origin NOT IN (SELECT origin FROM chats c WHERE EXISTS (SELECT 1 FROM messages WHERE chat_id = c.id))
+      AND origin NOT IN (SELECT origin FROM chats c WHERE EXISTS (SELECT 1 FROM messages WHERE chat_id = c.id AND ${LIVE}))
       ORDER BY name COLLATE NOCASE`),
   ]);
   return {
-    chats: chats.results.map((c) => ({ id: c.id, name: c.name, host: host(c.origin), muted: Boolean(c.muted), last_at: c.last_at,
+    chats: chats.results.map((c) => ({ id: c.id, name: c.name, kind: c.kind, host: host(c.origin), muted: Boolean(c.muted), last_at: c.last_at,
       last: c.last_text === null ? null : { mine: Boolean(c.last_mine), text: c.last_text.slice(0, 120) },
       unread: Boolean(c.unread), friend: Boolean(c.friend) })),
     friends: friends.results.map((f) => ({ id: f.id, name: f.name, host: host(f.origin) })),
@@ -251,12 +402,11 @@ export async function chatPage(ctx, params, id) {
   const { db } = ctx;
   const chat = await db.prepare("SELECT * FROM chats WHERE id = ?").bind(Number(id)).first();
   if (!chat) return null;
+  if (chat.kind === "group") await pruneGroupChats(db, chat.id);
   const before = Number.parseInt(params.get("before"), 10) || null;
-  const [rows, friend] = await db.batch([
-    db.prepare(`SELECT * FROM messages WHERE chat_id = ? ${before ? "AND id < ?" : ""} ORDER BY id DESC LIMIT ?`)
-      .bind(...[chat.id, before, SHOWN + 1].filter((v) => v !== null)),
-    db.prepare(FRIEND_SQL).bind(chat.origin),
-  ]);
+  const rows = await db.prepare(`SELECT * FROM messages WHERE chat_id = ? AND ${LIVE} ${before ? "AND id < ?" : ""} ORDER BY id DESC LIMIT ?`)
+    .bind(...[chat.id, before, SHOWN + 1].filter((v) => v !== null)).all();
+  const to = await recipientOf(db, chat);
   const list = rows.results.slice(0, SHOWN).reverse();
   const newest = list.at(-1)?.id ?? 0;
   // Read now. (Whether it's open on screen is up to its script, which asks for news while it's in view: chatSince.)
@@ -265,9 +415,13 @@ export async function chatPage(ctx, params, id) {
     ctx.messages = await unreadChats(db); // the menu's count, now this one's been read
   }
   return {
-    chat: { id: chat.id, name: chat.name, host: host(chat.origin), muted: Boolean(chat.muted) },
-    friend: friend.results[0] ? { id: friend.results[0].id } : null,
-    messages: list.map(shown),
+    chat: { id: chat.id, name: chat.name, kind: chat.kind, host: host(chat.origin), muted: Boolean(chat.muted), notify: Boolean(chat.notify) },
+    // Who it's with now: their connection here (a friend), or the group here; null if not any more.
+    friend: to && chat.kind !== "group" ? { id: to.id } : null,
+    group: to && chat.kind === "group" ? { id: to.id } : null,
+    canSend: Boolean(to),
+    keepDays: chat.kind === "group" ? GROUP_KEEP_SECONDS / 86400 : null,
+    messages: list.map((m) => shown(m, chat, runsGroup(to))),
     earlier: rows.results.length > SHOWN ? list[0].id : null,
     paged: Boolean(before),
     max: MAX_MESSAGE,
@@ -285,13 +439,22 @@ export async function friendMessage(ctx, params, connectionId) {
   }
 }
 
+/** /groups/<n>/chat: the chat with a group this site is in, made if it's new. */
+export async function groupChat(ctx, params, id) {
+  const group = await ctx.db.prepare("SELECT * FROM groups WHERE id = ? AND joined_at IS NOT NULL AND origin IS NOT NULL").bind(Number(id)).first();
+  if (!group) return null;
+  const chat = await chatFor(ctx.db, groupId(group.origin, group.remote_id), group.name, "group");
+  return Response.redirect(`${ctx.url.origin}/messages/${chat.id}`, 303);
+}
+
 // --- the web side (/_messages/…): the chat page's script, and its forms without one -------------------------------
 
 const ROUTES = [
   [/^\/_messages\/(\d+)\/send$/, (a) => sendMessage(a.env, a.url.origin, a.m[1], a.body.text)],
   [/^\/_messages\/(\d+)\/(\d+)\/retry$/, (a) => retryMessage(a.env, a.url.origin, a.m[1], a.m[2])],
-  [/^\/_messages\/(\d+)\/(\d+)\/delete$/, (a) => deleteMessage(a.env, a.m[1], a.m[2])],
+  [/^\/_messages\/(\d+)\/(\d+)\/delete$/, (a) => deleteMessage(a.env, a.url.origin, a.m[1], a.m[2], a.body.everywhere === true || a.body.everywhere === "1")],
   [/^\/_messages\/(\d+)\/mute$/, (a) => muteChat(a.env, a.m[1], a.body.muted === true || a.body.muted === "1")],
+  [/^\/_messages\/(\d+)\/notify$/, (a) => notifyChat(a.env, a.m[1], a.body.notify === true || a.body.notify === "1")],
   [/^\/_messages\/(\d+)\/delete$/, (a) => deleteChat(a.env, a.m[1]), "/messages"],
 ];
 

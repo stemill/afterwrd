@@ -13,7 +13,8 @@ gives you; it never signs in to Facebook or fetches anything from it.
 (everything from Facebook, with "On this day"), and your tools: *Your devices*, *Add to home screen*, *Import*,
 *Download everything* and *Update*.
 
-**Messages and the app.** *Messages* are one-to-one chats with friends, kept on your site and theirs. They aren't
+**Messages and the app.** *Messages* are one-to-one chats with friends, kept on your site and theirs, and each
+group has a chat too (its messages go after 30 days: for keeping, there are posts). They aren't
 end-to-end encrypted (yet): both sites hold the text, as they do your posts. Add afterwrd to your phone's home screen
 and it opens like an app, and can tell you when a friend sends you a message, even with the phone locked: that's the
 only thing afterwrd ever notifies you about, and you can mute any chat. The notification is encrypted for your phone
