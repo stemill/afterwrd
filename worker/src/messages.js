@@ -112,13 +112,21 @@ function messageNote(site, to, message) {
 
 /**
  * A message as pages and the API show it: its state if it's the owner's (sending, delivered or failed); in a group
- * chat, who wrote it, and whether the owner may delete it for everyone (`admin`: they run the group).
+ * chat, who wrote it (and their site, if they're not one of the owner's `friends`, so a look-alike name stands out),
+ * and whether the owner may delete it for everyone (`admin`: they run the group).
  */
-function shown(m, chat = null, admin = false) {
+function shown(m, chat = null, admin = false, friends = new Set()) {
   const state = !m.mine ? null : m.delivered_at ? "delivered" : m.failed_at ? "failed" : "sending";
   return { id: m.id, mine: Boolean(m.mine), text: m.text, sent_at: m.sent_at, state, problem: m.failed_at ? m.problem : null,
-    author: m.mine ? null : m.author_name ?? null, authorSite: !m.mine && m.author_origin ? host(m.author_origin) : null,
+    author: m.mine ? null : m.author_name ?? null, authorSite: !m.mine && m.author_origin && !friends.has(m.author_origin) ? host(m.author_origin) : null,
     everywhere: chat?.kind === "group" && Boolean(m.mine || admin) };
+}
+
+/** The sites of the owner's friends, in a group chat (where not everyone is one); in a chat with one friend, none needed. */
+async function friendSites(db, chat) {
+  if (chat.kind !== "group") return new Set();
+  const rows = await db.prepare("SELECT origin FROM connections WHERE approved_at IS NOT NULL").all();
+  return new Set(rows.results.map((r) => r.origin));
 }
 
 // --- actions (the owner's) ---------------------------------------------------------------------------------------
@@ -244,7 +252,8 @@ export async function chatSince(env, chatId, after, pending) {
     db.prepare(`SELECT * FROM messages WHERE chat_id = ? AND mine = 1 AND id IN (${ids.map(() => "?").join(",") || "NULL"})`).bind(chat.id, ...ids),
   ]);
   const to = await recipientOf(db, chat);
-  const show = (m) => shown(m, chat, runsGroup(to));
+  const friends = await friendSites(db, chat);
+  const show = (m) => shown(m, chat, runsGroup(to), friends);
   // Read, and open on screen right now (so a new message here doesn't notify: push.js). Noted every few seconds at most.
   const newest = fresh.results.at(-1)?.id ?? 0;
   const at = now();
@@ -407,6 +416,7 @@ export async function chatPage(ctx, params, id) {
   const rows = await db.prepare(`SELECT * FROM messages WHERE chat_id = ? AND ${LIVE} ${before ? "AND id < ?" : ""} ORDER BY id DESC LIMIT ?`)
     .bind(...[chat.id, before, SHOWN + 1].filter((v) => v !== null)).all();
   const to = await recipientOf(db, chat);
+  const friends = await friendSites(db, chat);
   const list = rows.results.slice(0, SHOWN).reverse();
   const newest = list.at(-1)?.id ?? 0;
   // Read now. (Whether it's open on screen is up to its script, which asks for news while it's in view: chatSince.)
@@ -421,7 +431,7 @@ export async function chatPage(ctx, params, id) {
     group: to && chat.kind === "group" ? { id: to.id } : null,
     canSend: Boolean(to),
     keepDays: chat.kind === "group" ? GROUP_KEEP_SECONDS / 86400 : null,
-    messages: list.map((m) => shown(m, chat, runsGroup(to))),
+    messages: list.map((m) => shown(m, chat, runsGroup(to), friends)),
     earlier: rows.results.length > SHOWN ? list[0].id : null,
     paged: Boolean(before),
     max: MAX_MESSAGE,

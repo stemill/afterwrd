@@ -160,7 +160,7 @@ check("it's stored on Bob's site, from Ann's", sql(stateB, "SELECT author_name, 
 check("Ann keeps a copy", sql(stateA, "SELECT text FROM comments_elsewhere").map((c) => c.text).join() === "Looks great, Bob!");
 await bob.goto(`${B}/posts`);
 const onBob = await bob.$$eval("main article.card:first-of-type .comment", (l) => l.map((c) => ({ name: c.querySelector("strong").textContent, from: c.querySelector(".from")?.textContent })));
-check("Bob sees it under his post, marked with Ann's site", onBob.length === 1 && onBob[0].name === "Ann Example" && onBob[0].from === "localhost:8787", JSON.stringify(onBob));
+check("Bob sees it under his post, without Ann's site address (she's his friend: it's on her page)", onBob.length === 1 && onBob[0].name === "Ann Example" && onBob[0].from === undefined, JSON.stringify(onBob));
 check("Bob's Activity counts it as new", (await bob.$eval('header.site a[href="/activity"] .count', (c) => c.firstChild.textContent)) === "1");
 
 // Bob replies on his own site; Ann sees the reply in her Feed but can't delete it.

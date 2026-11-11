@@ -139,6 +139,13 @@ check("Cat's message appears in Ann's and Bob's open chats by themselves", await
   (await bubbles(ann)).some((m) => m.text === tricky && m.who === "Cat Example") && (await bubbles(bob)).some((m) => m.text === tricky)));
 check("…as text, not HTML", (await bubbles(bob)).filter((m) => m.text === tricky).every((m) => !/<img|<b>/.test(m.html)));
 check("…with the writer's site beside their name, so a look-alike name stands out", (await bubbles(bob)).find((m) => m.text === tricky)?.site === "localhost:8789");
+// …but not beside a friend's: their address is on their page. (Made friends here only for a moment.)
+sql(stateB, `INSERT INTO connections (origin, name, their_key, key_hash, created_at, connected_at, approved_at, reached_at)
+  VALUES ('${C}', 'Cat Example', 'unused', 'unused', 1, 1, 1, 1)`);
+await bob.reload();
+check("…and not beside a friend's name", (await bubbles(bob)).find((m) => m.text === tricky)?.site === "", JSON.stringify((await bubbles(bob)).find((m) => m.text === tricky)));
+sql(stateB, `DELETE FROM connections WHERE origin = '${C}'`);
+await bob.reload();
 
 // The group can't put words in a member's mouth, or into another group.
 const toBob = (note) => call(B, "/_member/message", groupCallsBob, note);

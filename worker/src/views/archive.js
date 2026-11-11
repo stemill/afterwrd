@@ -136,7 +136,7 @@ function thread(ctx, key, comments) {
     ${c.author_is_owner ? ownerFace(ctx)
       : c.origin && c.origin !== "site" && ctx.friendFaces?.[c.origin] ? html`<img class="who" src="${ctx.friendFaces[c.origin]}" alt="" aria-hidden="true">`
         : html`<span class="who who-${(c.author_id ?? 0) % 6}" aria-hidden="true">${initial(c.name)}</span>`}
-    <div class="bubble"><strong>${c.name}</strong>${c.origin && c.origin !== "site" && html`<span class="from">${host(c.origin)}</span>`}<span class="said">${linkify(c.text)}</span></div>
+    <div class="bubble"><strong>${c.name}</strong>${c.origin !== "site" && notFriend(ctx, c.origin)}<span class="said">${linkify(c.text)}</span></div>
     <div class="under">
       <time title="${fmtDatetime(c.created_at)}">${fmtAgo(c.created_at)}</time>
       ${html`<form method="post" action="/_comments/${c.id}/delete" data-confirm="Delete this comment?" data-confirm-ok="Delete">
@@ -781,7 +781,7 @@ function remoteThread(ctx, c, target, comments) {
   return html`<section class="thread" id="t-${target}" aria-label="Comments">
   ${comments.map((r) => html`<div class="comment" id="r${c.id}-${r.id}">
     ${r.mine ? ownerFace(ctx) : r.from ? faceFor(ctx, r.from, r.name, r.id) : friendFace(ctx, c)}
-    <div class="bubble"><strong>${r.mine ? ctx.user.name : r.name}</strong>${!r.mine && r.from && html`<span class="from">${host(r.from)}</span>`}<span class="said">${linkify(r.text)}</span></div>
+    <div class="bubble"><strong>${r.mine ? ctx.user.name : r.name}</strong>${!r.mine && notFriend(ctx, r.from)}<span class="said">${linkify(r.text)}</span></div>
     <div class="under">
       <time title="${fmtDatetime(r.created_at)}">${fmtAgo(r.created_at)}</time>
       ${r.mine && html`<form method="post" action="/_feed/comments/${c.id}/${r.id}/delete" data-confirm="Delete this comment?" data-confirm-ok="Delete">
@@ -803,6 +803,14 @@ function remoteThread(ctx, c, target, comments) {
 /** A friend's profile picture, or the first letter of their name. */
 const friendFace = (ctx, c) => faceFor(ctx, c.origin, c.name, c.id, c.avatar?.thumbSrc);
 
+/**
+ * The site of someone who isn't a friend, beside their name on a post or comment, so a look-alike of a friend's name
+ * stands out. Friends' addresses are left off (they're on their page) to keep things uncluttered.
+ */
+function notFriend(ctx, origin, cls = "from") {
+  return origin && !Object.hasOwn(ctx.friendFaces ?? {}, origin) ? html`<span class="${cls}">${host(origin)}</span>` : "";
+}
+
 /** Someone from another site: the picture their site gave (just now, or remembered), or their initial. */
 function faceFor(ctx, origin, name, n, fresh = null) {
   const picture = fresh ?? ctx.friendFaces?.[origin];
@@ -817,7 +825,7 @@ function remoteCard(ctx, c, p, { thread = true } = {}) {
   <header>
     ${friendFace(ctx, c)}
     <span class="what"><a href="${friendBase(c)}/posts"><strong>${c.name}</strong></a>
-      <span class="meta">${what || host(c.origin)}</span></span>
+      ${what && html`<span class="meta">${what}</span>`}</span>
     <time title="${fmtDatetime(p.created_at)}">${fmtAgo(p.created_at)}</time>
   </header>
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
@@ -900,7 +908,7 @@ ${friends.length ? html`<ul class="friend-list">
   ${friends.map((c) => html`<li class="card">
     <a class="friend-link" href="${friendBase(c)}/posts">
       ${friendFace(ctx, c)}
-      <span><strong>${c.name}</strong><span class="meta">${host(c.origin)} · friends since ${fmtDate(c.connected_at)}</span></span>
+      <span><strong>${c.name}</strong><span class="meta">Friends since ${fmtDate(c.connected_at)}</span></span>
     </a>
     <nav class="friend-tabs"><a href="${friendBase(c)}/posts">Posts</a><a href="${friendBase(c)}/photos">Photos</a>${friends.length > 1
       && html`<a href="/_admin/connections/${c.id}/introduce">Introduce</a>`}</nav>
@@ -1129,7 +1137,7 @@ export function friendPhotoPage(ctx, { friend: c, photo: m }) {
   <aside class="info">
     <a class="album-link" href="${back}">${m.album?.name ?? `${c.name}'s photos`}</a>
     <time class="when">${fmtDatetime(m.timestamp)}</time>
-    <p class="meta"><a href="${friendBase(c)}/posts">${c.name}</a> · ${host(c.origin)}</p>
+    <p class="meta"><a href="${friendBase(c)}/posts">${c.name}</a></p>
     ${m.description && !(m.post && m.post.text === m.description) && html`<div class="caption">${linkify(m.description)}</div>`}
     <h2>Comments</h2>
     ${remoteThread(ctx, c, `photo-${m.hash}`, m.comments)}
@@ -1408,7 +1416,7 @@ function groupThread(ctx, g, p) {
   ${more > 0 && !ctx.url.pathname.includes("/posts/") && html`<p class="meta"><a href="${groupBase(g)}/posts/${p.id}">See all ${p.commentCount} comments</a></p>`}
   ${p.comments.map((c) => html`<div class="comment" id="g${p.id}-${c.id}">
     ${groupFace(ctx, c)}
-    <div class="bubble"><strong>${c.mine ? ctx.user.name : c.name}</strong>${!c.mine && c.from && html`<span class="from">${host(c.from)}</span>`}<span class="said">${linkify(c.text)}</span></div>
+    <div class="bubble"><strong>${c.mine ? ctx.user.name : c.name}</strong>${!c.mine && notFriend(ctx, c.from)}<span class="said">${linkify(c.text)}</span></div>
     <div class="under">
       <time title="${fmtDatetime(c.created_at)}">${fmtAgo(c.created_at)}</time>
       ${mayDelete(g, c) && html`<form method="post" action="/_groups/${g.id}/comments/${c.id}/delete"
@@ -1430,7 +1438,7 @@ function groupCard(ctx, g, p) {
   return html`<article class="card social in-group" id="gp${p.id}">
   <header>
     ${groupFace(ctx, p)}
-    <span class="what"><strong>${p.mine ? "You" : p.name}</strong>${!p.mine && p.from && html`<span class="meta">${host(p.from)}</span>`}</span>
+    <span class="what"><strong>${p.mine ? "You" : p.name}</strong>${!p.mine && notFriend(ctx, p.from, "meta")}</span>
     <a class="when" href="${groupBase(g)}/posts/${p.id}" title="${fmtDatetime(p.created_at)}"><time>${fmtAgo(p.created_at)}</time></a>
     ${mayDelete(g, p) && html`<form method="post" action="/_groups/${g.id}/posts/${p.id}/delete"
       data-confirm="Delete this post, its photos and its comments? This can’t be undone." data-confirm-ok="Delete">

@@ -60,7 +60,7 @@ export function messagesPage(ctx, { chats, friends, pushKey }) {
 <div class="feed-head"><h1>Messages</h1></div>
 <p class="meta">Each chat is between your site and your friend's. Not end-to-end encrypted yet: messages are kept on both sites.</p>
 ${chats.length > 0 ? html`<ul class="chats">${chats.map((c) => html`<li><a class="card chat-row${c.unread ? " unread" : ""}" href="/messages/${c.id}">
-  <span><strong>${c.name}</strong> <span class="meta">${c.host}</span>${c.unread && raw('<span class="dot" aria-label="unread"></span>')}${c.muted && html`<span class="meta"> · muted</span>`}${c.kind === "group" && html`<span class="meta"> · group</span>`}${!c.friend && html`<span class="meta"> · ${c.kind === "group" ? "no longer a member" : "no longer friends"}</span>`}</span>
+  <span><strong>${c.name}</strong>${c.unread && raw('<span class="dot" aria-label="unread"></span>')}${c.muted && html`<span class="meta"> · muted</span>`}${c.kind === "group" && html`<span class="meta"> · group</span>`}${!c.friend && html`<span class="meta"> · ${c.kind === "group" ? "no longer a member" : "no longer friends"}</span>`}</span>
   <span class="last meta">${c.last ? html`${c.last.mine ? "You: " : ""}${c.last.text}` : "No messages yet"}</span>
   ${c.last_at && html`<time class="meta" datetime="${iso(c.last_at)}">${fmtDatetime(c.last_at)}</time>`}
 </a></li>`)}</ul>` : html`<p>No messages yet.</p>`}

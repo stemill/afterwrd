@@ -747,8 +747,11 @@ async function groupMembers(ctx, params, id) {
   }));
 }
 
-/** Friends' profile pictures by site, where the link their site gave is still good. */
+/**
+ * Every friend's site, with their profile picture where the link their site gave is still good (else null). Pages use
+ * it for faces, and to show a site address only beside someone who isn't a friend.
+ */
 async function friendFaces(db) {
-  const rows = await all(db, "SELECT origin, avatar_url FROM connections WHERE approved_at IS NOT NULL AND avatar_exp > ?", [now()]);
+  const rows = await all(db, "SELECT origin, CASE WHEN avatar_exp > ? THEN avatar_url END AS avatar_url FROM connections WHERE approved_at IS NOT NULL", [now()]);
   return Object.fromEntries(rows.map((r) => [r.origin, r.avatar_url]));
 }

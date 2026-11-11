@@ -102,8 +102,8 @@ check("…and it's on Sam's site", sql(stateB, "SELECT text, mine FROM messages"
 await sam.goto(`${B}/`);
 check("Sam's menu counts one chat with something unread", (await menuCount(sam)) === "1", await menuCount(sam));
 await sam.goto(`${B}/messages`);
-check("Messages lists the chat with Ann, unread, with her site's address", await sam.$eval(".chat-row", (a) => a.classList.contains("unread") && a.textContent.includes("Ann Example")
-  && a.textContent.includes("localhost:8787")
+check("Messages lists the chat with Ann, unread, without her site's address", await sam.$eval(".chat-row", (a) => a.classList.contains("unread") && a.textContent.includes("Ann Example")
+  && !a.textContent.includes("localhost:8787")
   && a.textContent.includes("Are you coming tonight?")));
 await Promise.all([sam.waitForNavigation(), sam.click(".chat-row")]);
 const samChat = sam.url();
