@@ -1,1 +1,11 @@
-[]
+{
+  "seq": 1,
+  "releases": [
+    {
+      "version": "0.39.0",
+      "manifest_sha256": "7b959cb058510dc64f10233b635bc277db09db1feb6f1e8985a0eb97879b5f48",
+      "signed_at": "2026-11-11T00:40:20Z"
+    }
+  ],
+  "signature": "8cdTEhkUwhaIxkxDCP+o9iLbtT4kwlm8Moj0CFfRz4+DXZ1zRD9RBj33Yg7/JFoXD9WwXkHjiGHUOuuKHgK5AA=="
+}
