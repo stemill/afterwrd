@@ -19,7 +19,7 @@
 import pkg from "../package.json";
 import { connectedToken, tokenFor } from "./cloudflare.js";
 import { api, deployVersion, existingDatabase, findWorker, loadRelease, stageVersion, uploadAssets } from "./deploy.js";
-import { autoState, backgroundToken, healthCheck, laterAuto, runAuto, switchCarefully, turnOff } from "./auto.js";
+import { autoState, backgroundToken, healthCheck, laterAuto, runAuto, runningSince, switchCarefully, turnOff } from "./auto.js";
 import { releaseKey } from "./signing.js";
 import { GROUP_RELEASE, isGroupWorker } from "./groupsites.js";
 import { html, json, now, pageData } from "./util.js";
@@ -53,8 +53,8 @@ export async function handleUpdate(request, env, url, owner) {
   }
   if (path === "/auto-now") { // "Look for an update now": the daily run, straight away (the owner waits for it)
     if (request.headers.get("Origin") !== url.origin) return json({ error: "Request from another site" }, 403);
-    await runAuto(env);
-    return Response.redirect(`${url.origin}/_admin/update#auto`, 303);
+    const ran = await runAuto(env);
+    return Response.redirect(`${url.origin}/_admin/update${ran ? "" : "?auto=busy"}#auto`, 303);
   }
   if (path === "/auto-off") {
     if (request.headers.get("Origin") !== url.origin) return json({ error: "Request from another site" }, 403);
@@ -143,7 +143,7 @@ async function updateData(request, env, url, owner) {
     securityFix: latest.securityFix && newer(latest.securityFix, VERSION) ? latest.securityFix : null,
     site: url.host, connected: Boolean(connectedToken(request)), oldToken: Boolean(env.UPDATE_TOKEN), groups: await groupsBehind(env.DB),
     go: url.searchParams.get("go"), checked: await lastChecked(env.DB), checkWait: tooSoonToCheck(env),
-    auto: { ...(await autoState(env.DB)), signed: Boolean(releaseKey(env, url.origin)) },
+    auto: { ...(await autoState(env.DB)), signed: Boolean(releaseKey(env, url.origin)), running: await runningSince(env.DB), busy: url.searchParams.get("auto") === "busy" },
     friends: (await env.DB.prepare(`SELECT id, name FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NOT NULL
       AND their_key IS NOT NULL ORDER BY name COLLATE NOCASE LIMIT 200`).all()).results,
   };

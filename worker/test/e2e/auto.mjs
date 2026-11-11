@@ -261,8 +261,18 @@ cf.versions.length = 0;
 await owner.goto(`${BASE}/_admin/update`);
 await Promise.all([owner.waitForNavigation({ timeout: 60000 }), owner.click("#auto-now")]);
 check("\"Look for an update now\" installs a waiting release at once", state().last?.version === "99.0.10" && cf.versions.length === 1, JSON.stringify(state().last));
+check("…and the page says what it did", /Last looked just now: Installed afterwrd 99\.0\.10/.test(await text("#auto")), await text("#auto"));
 drop("99.0.10");
 cf.versions.length = 0; cf.deployments.length = 0;
+// A run still going (its lock fresh): the page says so, and pressing doesn't start another.
+sql(`INSERT OR REPLACE INTO settings (key, value) VALUES ('auto_lock', '${Math.floor(Date.now() / 1000)}')`);
+await owner.goto(`${BASE}/_admin/update`);
+check("while a look is under way the page says so, and the button waits", (await text("#auto")).includes("It's looking for an update now")
+  && await owner.$eval("#auto-now", (b) => b.disabled));
+sql("DELETE FROM settings WHERE key = 'auto_lock'");
+await owner.goto(`${BASE}/_admin/update`);
+await Promise.all([owner.waitForNavigation({ timeout: 60000 }), owner.click("#auto-now")]);
+check("with nothing to install, it says so", /Last looked just now: Nothing new to install/.test(await text("#auto")), await text("#auto"));
 
 // --- revoked in Cloudflare, then turned off ----------------------------------------------------------------------
 release("99.0.8", { signedAgo: 5 * 86400 });

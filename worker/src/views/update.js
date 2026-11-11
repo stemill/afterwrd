@@ -37,16 +37,34 @@ function autoPart(auto) {
     : auto.waiting?.version && auto.waiting.after ? `<p>afterwrd ${escape(auto.waiting.version)} will install itself after
     ${escape(day(auto.waiting.after))}.</p>` : "";
   const problem = auto.problem ? `<p class="notice alert">The last automatic update couldn't run: ${escape(auto.problem)}</p>` : "";
+  const ago = (seconds) => { const m = Math.max(0, Math.round((Date.now() / 1000 - seconds) / 60)); return m < 1 ? "just now" : m === 1 ? "a minute ago" : `${m} minutes ago`; };
+  const running = auto.running ? `<p class="notice" id="auto-running">It's looking for an update now (started ${escape(ago(auto.running))}).
+    This page doesn't need to stay open.</p>` : auto.busy ? `<p class="notice" id="auto-running">It was already looking.</p>` : "";
+  const lastCheck = auto.lastCheck && !auto.running ? `<p id="auto-last"><b>Last looked ${escape(ago(auto.lastCheck.at))}:</b> ${escape(auto.lastCheck.words)}</p>` : "";
+  const groupLines = Object.values(auto.groups ?? {}).filter((g) => g.result !== "done");
+  const groupsDone = groupLines.length ? `<ul class="meta">${groupLines.map((g) => `<li>${escape(g.name)}: ${escape(
+    g.result === "needs-hand" ? "has to be updated by hand (below)" : g.result.startsWith("error") ? `couldn't be updated: ${g.result.slice(7)}` : `didn't take ${g.version}, so it was put back`)}
+    (${escape(day(g.at))})</li>`).join("")}</ul>` : "";
   if (auto.on) {
     return `
 <section class="card" id="auto">
   <h2>Automatic updates are on</h2>
-  ${waiting}${last}${problem}
+  ${running}${lastCheck}${waiting}${last}${problem}${groupsDone}
   <p class="meta">Once a day this site looks for a new afterwrd release. It installs one only when it's signed by
   afterwrd's own key and has been out for three days (one, for a security fix), and puts itself back as it was if the
   new version doesn't work. Your groups follow.${auto.signed ? "" : " (No release is signed yet, so it's waiting for the first.)"}</p>
-  <form method="post" action="/_admin/update/auto-now"><button class="link" id="auto-now">Look for an update now</button>
-    <span class="meta">(it can take a few minutes if there's one to install)</span></form>
+  <form method="post" action="/_admin/update/auto-now" id="auto-now-form"><button class="link" id="auto-now"${auto.running ? " disabled" : ""}>Look for an update now</button>
+    <span class="meta" id="auto-now-note">(it can take a few minutes if there's one to install)</span></form>
+  <script>
+    // Once pressed, it says so and can't be pressed again: pressing again would cut the first look short.
+    document.getElementById("auto-now-form").addEventListener("submit", (e) => {
+      const button = document.getElementById("auto-now");
+      if (button.dataset.sent) { e.preventDefault(); return; }
+      button.dataset.sent = "1";
+      button.textContent = "Looking…";
+      document.getElementById("auto-now-note").textContent = "This can take a few minutes if there's something to install. It'll say what happened.";
+    });
+  </script>
   <form method="post" action="/_admin/update/auto-off"><button class="link">Turn automatic updates off</button>
     <span class="meta">Then, to be sure, remove afterwrd in Cloudflare too: My Profile → Access Management → Connected Applications.</span></form>
 </section>`;

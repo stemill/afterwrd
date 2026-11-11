@@ -38,7 +38,7 @@ const WAIT_SECONDS = 3 * 86400; // a release has been out this long before sites
 const SECURITY_WAIT_SECONDS = 86400; // …or this long, if it fixes a security problem
 const HEALTH_MS = 180_000; // how long a switch waits for the new version to answer healthily
 const HEALTH_EVERY_MS = 6000;
-const LOCK_SECONDS = 900; // one run at a time
+const LOCK_SECONDS = 360; // one run at a time (a run takes at most about four minutes; one cut off frees itself after this)
 const KEEP_FRESH_SECONDS = 6 * 86400; // the grant is used at least this often, even with nothing to install
 const TRIES = 2; // a release that fails this many times isn't tried again by itself
 const GROUPS_PER_RUN = 3;
@@ -147,24 +147,32 @@ export const laterAuto = (env) => saveState(env.DB, { later: now() });
 
 // --- the daily run ------------------------------------------------------------------------------------------------
 
-/** The Worker's cron trigger. */
+/** When a run that's still going started (seconds), or null: for "already running" on the Update page. */
+export async function runningSince(db) {
+  const row = await db.prepare("SELECT value FROM settings WHERE key = 'auto_lock'").first().catch(() => null);
+  const since = Number(row?.value);
+  return Number.isFinite(since) && since > now() - LOCK_SECONDS ? since : null;
+}
+
+/** The Worker's cron trigger, and "Look for an update now". False if another run is still going. */
 export async function runAuto(env) {
   await ensureSchema(env);
   const state = await autoState(env.DB);
-  if (!state.on || !state.origin) return;
+  if (!state.on || !state.origin) return true;
   // One run at a time: the lock is taken only if there isn't a fresh one.
   const taken = await env.DB.prepare(`INSERT INTO settings (key, value) VALUES ('auto_lock', ?1)
     ON CONFLICT(key) DO UPDATE SET value = ?1 WHERE CAST(settings.value AS INTEGER) < ?2`).bind(String(now()), now() - LOCK_SECONDS).run();
-  if (!taken.meta?.changes) return;
+  if (!taken.meta?.changes) return false;
   try {
     await runOnce(env, state);
   } catch (error) {
-    if (error.off) return;
+    if (error.off) return true;
     console.error("Automatic update:", error.message);
-    await saveState(env.DB, { lastRun: Date.now(), problem: plain(error) });
+    await saveState(env.DB, { lastRun: Date.now(), problem: plain(error), lastCheck: { at: now(), words: `It couldn't run: ${plain(error)}` } });
   } finally {
     await env.DB.prepare("DELETE FROM settings WHERE key = 'auto_lock'").run();
   }
+  return true;
 }
 
 async function runOnce(env, state) {
@@ -182,7 +190,8 @@ async function runOnce(env, state) {
   };
   // Already found to need installing by hand: not uploaded again every day.
   if (choice.ready && state.waiting?.needsHand && state.waiting.version === choice.ready.version) {
-    await saveState(env.DB, { lastRun: Date.now(), problem: null });
+    await saveState(env.DB, { lastRun: Date.now(), problem: null,
+      lastCheck: { at: now(), words: `afterwrd ${choice.ready.version} is waiting for you to install it by hand.` } });
     return;
   }
   if (choice.ready) {
@@ -194,7 +203,8 @@ async function runOnce(env, state) {
     await stillOn();
     const staged = await step(env, origin, { step: "stage", ...common, jwt });
     if (staged.needsHand) {
-      await saveState(env.DB, { lastRun: Date.now(), waiting: { version: choice.ready.version, needsHand: true }, problem: null });
+      await saveState(env.DB, { lastRun: Date.now(), waiting: { version: choice.ready.version, needsHand: true }, problem: null,
+        lastCheck: { at: now(), words: `afterwrd ${choice.ready.version} has to be installed by hand.` } });
       return;
     }
     await stillOn();
@@ -203,32 +213,48 @@ async function runOnce(env, state) {
     // Tried again once (a passing hiccup shouldn't turn down a security fix for good), then not by itself.
     const tries = { ...(state.tries ?? {}), [choice.ready.version]: (state.tries?.[choice.ready.version] ?? 0) + (switched.result === "done" ? 0 : 1) };
     const failed = tries[choice.ready.version] >= TRIES ? [...new Set([...(state.failed ?? []), choice.ready.version])].slice(-20) : state.failed;
-    await saveState(env.DB, { lastRun: Date.now(), last, failed, tries, waiting: null, problem: null });
+    const words = switched.result === "done" ? `Installed afterwrd ${choice.ready.version}. Your groups follow on the next look.`
+      : `afterwrd ${choice.ready.version} didn't ${switched.result === "unhealthy" ? "work" : "start"}, so the site was put back as it was.`;
+    await saveState(env.DB, { lastRun: Date.now(), last, failed, tries, waiting: null, problem: null, lastCheck: { at: now(), words } });
     return;
   }
   // Nothing for the site itself: bring its groups up to its version, a few at a time.
   // Only to a version Ste signed (the site's own may have been installed by hand), and exactly as signed.
   const pinned = list?.releases.get(VERSION)?.manifestSha256 ?? null;
   const groups = pinned ? await groupsBehind(env.DB) : [];
+  const told = []; // what happened to each group, for the Update page
   if (groups.length) {
     const token = await accessToken(env, origin);
     if (!token) throw new Error("Cloudflare no longer allows background access. Turn automatic updates on again from the Update page.");
+    const results = { ...(state.groups ?? {}) };
     for (const group of groups.slice(0, GROUPS_PER_RUN)) {
       await stillOn();
       const common = { token, group: group.id, manifestSha256: pinned };
+      let result;
       try {
         const { jwt } = await step(env, origin, { step: "group-assets", ...common });
         const staged = await step(env, origin, { step: "group-stage", ...common, jwt });
-        if (!staged.needsHand) await step(env, origin, { step: "group-switch", ...common, versionId: staged.versionId });
+        result = staged.needsHand ? "needs-hand"
+          : (await step(env, origin, { step: "group-switch", ...common, versionId: staged.versionId })).result;
       } catch (error) {
         console.error(`Automatic update of group ${group.id}:`, error.message);
+        result = `error: ${plain(error).slice(0, 200)}`;
       }
+      results[group.id] = { name: String(group.name).slice(0, 100), version: VERSION, result, at: now() };
+      told.push(result === "done" ? `brought ${group.name} up to ${VERSION}`
+        : result === "needs-hand" ? `${group.name} has to be updated by hand`
+        : result.startsWith("error") ? `couldn't update ${group.name} (${result.slice(7)})`
+        : `${group.name} didn't take ${VERSION}, so it was put back`);
     }
+    await saveState(env.DB, { groups: results });
   } else if (now() - (state.refreshedAt ?? 0) > KEEP_FRESH_SECONDS && !(await accessToken(env, origin))) {
     // With nothing to do for a while, the grant is still used now and then, so Cloudflare doesn't let it lapse.
     throw new Error("Cloudflare no longer allows background access. Turn automatic updates on again from the Update page.");
   }
-  await saveState(env.DB, { lastRun: Date.now(), waiting: choice.waiting ?? null, problem: null });
+  const words = told.length ? `${told.join("; ")}.`.replace(/^./, (c) => c.toUpperCase())
+    : choice.waiting?.version ? `Nothing to install yet: afterwrd ${choice.waiting.version} is waiting until ${new Date(choice.waiting.after * 1000).toUTCString().slice(5, 22)} UTC.`
+    : "Nothing new to install, and your groups are up to date.";
+  await saveState(env.DB, { lastRun: Date.now(), waiting: choice.waiting ?? null, problem: null, lastCheck: { at: now(), words } });
 }
 
 /**
