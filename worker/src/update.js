@@ -20,6 +20,7 @@ import pkg from "../package.json";
 import { connectedToken, tokenFor } from "./cloudflare.js";
 import { api, deployVersion, existingDatabase, findWorker, loadRelease, stageVersion, uploadAssets } from "./deploy.js";
 import { autoState, backgroundToken, healthCheck, laterAuto, runAuto, runningSince, switchCarefully, turnOff } from "./auto.js";
+import { checkNewer, PROBLEM_KEY } from "./migrate.js";
 import { releaseKey } from "./signing.js";
 import { GROUP_RELEASE, isGroupWorker } from "./groupsites.js";
 import { html, json, now, pageData } from "./util.js";
@@ -106,7 +107,12 @@ export async function handleUpdate(request, env, url, owner) {
         await deployVersion(token, body.account, script, loaded, { jwt: body.jwt, databaseId, settings });
         return json({ ok: true });
       }
-      const switched = await switchCarefully(env, url.origin, token, body.account, script, versionId, healthCheck(env, url.origin), env.VERSION?.id);
+      const switched = await switchCarefully(env, url.origin, token, body.account, script, versionId, healthCheck(env, url.origin), env.VERSION?.id,
+        { migrated: () => checkNewer(env) });
+      if (switched.result === "kept") {
+        throw new Error(`afterwrd ${body.tag.slice(1)} had already updated this site's database when it failed its checks, so it was kept:`
+          + " the older version can't run on it. Please tell whoever looks after afterwrd.");
+      }
       if (switched.result !== "done") {
         throw new Error(`afterwrd ${body.tag.slice(1)} didn't ${switched.result === "unhealthy" ? "work" : "start"} on this site, so it was put back as it was.`
           + " Nothing in it has changed. Please tell whoever looks after afterwrd.");
@@ -146,7 +152,17 @@ async function updateData(request, env, url, owner) {
     auto: { ...(await autoState(env.DB)), signed: Boolean(releaseKey(env, url.origin)), running: await runningSince(env.DB), busy: url.searchParams.get("auto") === "busy" },
     friends: (await env.DB.prepare(`SELECT id, name FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NOT NULL
       AND their_key IS NOT NULL ORDER BY name COLLATE NOCASE LIMIT 200`).all()).results,
+    // The versions this site has run (migrate.js), newest first, and a newer one's database update that failed.
+    history: (await env.DB.prepare("SELECT version, from_version, at FROM updates ORDER BY id DESC LIMIT 5").all()).results,
+    problem: await updateProblem(env.DB),
   };
+}
+
+/** A newer version's failed database update, kept by migrate.js: {version, migration, error, at}, or null. */
+async function updateProblem(db) {
+  const row = await db.prepare("SELECT value FROM settings WHERE key = ?").bind(PROBLEM_KEY).first();
+  const problem = row ? JSON.parse(row.value) : null;
+  return problem && TAG_RE.test(`v${problem.version}`) && newer(problem.version, VERSION) ? problem : null;
 }
 
 /** The groups this site made, with the version each is running (null if it couldn't be reached). */

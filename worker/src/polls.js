@@ -53,7 +53,7 @@ export function pollFromQuestion(o) {
     multiple: Array.isArray(o.anyOf) ? 1 : 0, closes_at: o.endTime === undefined ? null : seconds(o.endTime) ?? -1 };
 }
 
-/** Whether a kept poll (a site_polls or group_polls row) is still taking answers. */
+/** Whether a kept poll (a polls or group_polls row) is still taking answers. */
 export const isOpen = (row, at = now()) => !row.closed_at && (!row.closes_at || row.closes_at > at);
 
 /** SQL: the poll on post ?1 is still open at ?2 (for the table `table`), so an answer can't slip in after it closes. */
@@ -145,13 +145,13 @@ export function parsePoll(o, env, { names = false } = {}) {
 
 // --- the owner's own polls (in their posts here) -------------------------------------------------------------------------
 
-/** The polls in some of the owner's posts (site_posts ids), as `viewer` ('site', the owner; or a friend's site) sees them. */
+/** The polls in some of the owner's posts (posts ids), as `viewer` ('site', the owner; or a friend's site) sees them. */
 export async function sitePolls(db, ids, viewer) {
   if (!ids.length) return new Map();
   const marks = ids.map(() => "?").join(",");
   const [polls, votes] = await db.batch([
-    db.prepare(`SELECT * FROM site_polls WHERE post_id IN (${marks})`).bind(...ids),
-    db.prepare(`SELECT post_id, voter, name, choices FROM site_poll_votes WHERE post_id IN (${marks}) ORDER BY voted_at`).bind(...ids),
+    db.prepare(`SELECT * FROM polls WHERE post_id IN (${marks})`).bind(...ids),
+    db.prepare(`SELECT post_id, voter, name, choices FROM poll_votes WHERE post_id IN (${marks}) ORDER BY voted_at`).bind(...ids),
   ]);
   return new Map(polls.results.map((row) => [row.post_id,
     tally(row, votes.results.filter((v) => v.post_id === row.post_id), { viewer, names: viewer === "site" })]));
@@ -159,28 +159,26 @@ export async function sitePolls(db, ids, viewer) {
 
 /**
  * Someone answers a poll in the owner's posts: the owner here (`voter` 'site') or a friend's site. `list`: the options
- * they chose (none takes their answer back). `postedAt`, the post's time from its address: checked in the same
- * statement, so an answer meant for a post deleted just now can't land on a new one given its number. Returns null if
- * that went, or the reason it didn't.
+ * they chose (none takes their answer back). Post ids are never used twice, so an answer meant for a post deleted
+ * just now can't land on another. Returns null if that went, or the reason it didn't.
  */
-export async function answerHere(db, postId, voter, name, list, postedAt = null) {
-  const row = await db.prepare("SELECT * FROM site_polls WHERE post_id = ?").bind(postId).first();
+export async function answerHere(db, postId, voter, name, list) {
+  const row = await db.prepare("SELECT * FROM polls WHERE post_id = ?").bind(postId).first();
   if (!row) return "That post doesn't have a poll.";
   if (!isOpen(row)) return "That poll has closed.";
   const mask = choicesMask(list, row);
   if (mask === null) return row.multiple ? "Those aren't options in this poll." : "Pick one of the options.";
   const at = now();
-  const same = "(?6 IS NULL OR EXISTS (SELECT 1 FROM site_posts WHERE id = ?1 AND created_at = ?6))";
-  const binds = [postId, at, voter, name, mask, postedAt];
+  const binds = [postId, at, voter, name, mask];
   if (!mask) {
     // Taking an answer back, too, only while it's open: an answer still there afterwards means it had closed.
-    await db.prepare(`DELETE FROM site_poll_votes WHERE post_id = ?1 AND voter = ?3 AND ${OPEN_SQL("site_polls")} AND ${same}`)
-      .bind(...binds).run();
-    const left = await db.prepare("SELECT 1 FROM site_poll_votes WHERE post_id = ? AND voter = ?").bind(postId, voter).first();
+    await db.prepare(`DELETE FROM poll_votes WHERE post_id = ?1 AND voter = ?3 AND ${OPEN_SQL("polls")}`)
+      .bind(postId, at, voter).run();
+    const left = await db.prepare("SELECT 1 FROM poll_votes WHERE post_id = ? AND voter = ?").bind(postId, voter).first();
     return left ? "That poll has closed." : null;
   }
-  const done = await db.prepare(`INSERT INTO site_poll_votes (post_id, voter, name, choices, voted_at)
-    SELECT ?1, ?3, ?4, ?5, ?2 WHERE ${OPEN_SQL("site_polls")} AND ${same}
+  const done = await db.prepare(`INSERT INTO poll_votes (post_id, voter, name, choices, voted_at)
+    SELECT ?1, ?3, ?4, ?5, ?2 WHERE ${OPEN_SQL("polls")}
     ON CONFLICT (post_id, voter) DO UPDATE SET name = excluded.name, choices = excluded.choices, voted_at = excluded.voted_at
     RETURNING post_id`).bind(...binds).first();
   return done ? null : "That poll has closed.";

@@ -15,7 +15,7 @@ import { handleFeed } from "./feed.js";
 import { handleGroupApi, handleJoinLink } from "./groups.js";
 import { HASH_RE, mediaStore } from "./media.js";
 import { handleGroupActions, handleMember } from "./membership.js";
-import { ensureSchema } from "./migrate.js";
+import { checkNewer, databaseIsNewer, ensureSchema } from "./migrate.js";
 import { handlePeer } from "./peers.js";
 import { messagePage } from "./views/pages.js";
 import { signedFor } from "./share.js";
@@ -44,7 +44,14 @@ const HEADERS = {
 
 export default {
   async fetch(request, env, work) {
-    const response = await route(request, env, work);
+    let response;
+    try {
+      response = await route(request, env, work);
+    } catch (error) {
+      // A newer version may have changed the database under this one (migrate.js): say so, rather than fail.
+      if (!(await checkNewer(env))) throw error;
+      response = beingUpdated(request);
+    }
     const headers = new Headers(response.headers);
     for (const [name, value] of Object.entries(HEADERS)) headers.set(name, value);
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
@@ -55,9 +62,26 @@ export default {
   },
 };
 
+/**
+ * What an older version answers on a database a newer one has changed (migrate.js), while everyone's sent on to the
+ * newer one: a page or a JSON error, and nothing written.
+ */
+function beingUpdated(request) {
+  const message = "This site is being updated. Try again in a few minutes.";
+  const headers = { "Retry-After": "120", "Cache-Control": "no-store" };
+  if ((request.headers.get("Accept") ?? "").includes("text/html")) {
+    return new Response(messagePage(message, { href: "/", label: "Try again" }), {
+      status: 503, headers: { ...headers, "Content-Type": "text/html; charset=utf-8" } });
+  }
+  return new Response(JSON.stringify({ error: message }), { status: 503, headers: { ...headers, "Content-Type": "application/json" } });
+}
+
 async function route(request, env, work) {
   await ensureSchema(env);
   const url = new URL(request.url);
+  // On a newer version's database, only which version this is, an update's own steps (they only use settings), and the
+  // stylesheet and fonts for the page saying so.
+  if (url.pathname !== "/_version" && !/^\/(_auto|static)\//.test(url.pathname) && await databaseIsNewer(env)) return beingUpdated(request);
   if (env.GROUP_KEY) return routeGroup(request, env, url);
   // Which uploaded version of the Worker is answering at this address: public, as it says nothing but an ID Cloudflare
   // made up. A friend's check (checks.js) compares it with what Cloudflare says, to be sure it read the right Worker.

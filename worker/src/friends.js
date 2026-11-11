@@ -28,12 +28,16 @@ export function parseMedia(m, site) {
   const thumbSrc = HASH_RE.test(thumb ?? "") ? signedLink(site, m.preview["afterwrd:fetch"], thumb) : null;
   return {
     hash, kind: m.type === "Video" ? "video" : "photo", src, thumbSrc: thumbSrc ?? src,
-    width: count(m.width), height: count(m.height), description: text(m.name, 5000), timestamp: seconds(m.published),
+    width: count(m.width), height: count(m.height), description: text(m.name, 5000), created_at: seconds(m.published),
   };
 }
 
-/** Comments on something with address `base` (a post's or a photo's), as their site lists them. */
+/**
+ * Comments on something with address `base` (a post's or a photo's), as their site lists them; null if it doesn't
+ * take comments (their site sent no `replies`: something from their Facebook download).
+ */
 function parseThread(collection, base, site, friendName) {
+  if (!collection || typeof collection !== "object") return null;
   const items = Array.isArray(collection?.items) ? collection.items.slice(0, 500) : [];
   return items.flatMap((c) => {
     const n = /^#c(\d{1,15})$/.exec((typeof c?.id === "string" && c.id.startsWith(base) && c.id.slice(base.length)) || "");

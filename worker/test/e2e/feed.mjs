@@ -156,7 +156,7 @@ await Promise.all([ann.waitForNavigation(), ann.click("article.from-friend .say 
 annFeed = await feedCards(ann);
 check("Ann's comment shows in her Feed, deletable", annFeed[0].comments.length === 1 && annFeed[0].comments[0].name === "Ann Example"
   && annFeed[0].comments[0].canDelete, JSON.stringify(annFeed[0].comments));
-check("it's stored on Bob's site, from Ann's", sql(stateB, "SELECT author_name, origin FROM site_comments").some((c) => c.author_name === "Ann Example" && c.origin === A));
+check("it's stored on Bob's site, from Ann's", sql(stateB, "SELECT author_name, origin FROM comments").some((c) => c.author_name === "Ann Example" && c.origin === A));
 check("Ann keeps a copy", sql(stateA, "SELECT text FROM comments_elsewhere").map((c) => c.text).join() === "Looks great, Bob!");
 await bob.goto(`${B}/posts`);
 const onBob = await bob.$$eval("main article.card:first-of-type .comment", (l) => l.map((c) => ({ name: c.querySelector("strong").textContent, from: c.querySelector(".from")?.textContent })));
@@ -182,14 +182,14 @@ check("…saying who replied, where, and what", note.what === "Bob Example repli
   && /^\/friend\/\d+\/posts#f\d+-post-/.test(note.href ?? ""), JSON.stringify(note));
 
 // Comments from Bob's visitors (and other friends) stay on Bob's site.
-sql(stateB, `INSERT INTO site_comments (target, author_id, author_name, text, created_at, origin)
-  SELECT target, NULL, 'Bob''s visitor', 'For Bob''s eyes', strftime('%s','now'), 'site' FROM site_comments LIMIT 1`);
+sql(stateB, `INSERT INTO comments (target, author_id, author_name, text, created_at, origin)
+  SELECT target, NULL, 'Bob''s visitor', 'For Bob''s eyes', strftime('%s','now'), 'site' FROM comments LIMIT 1`);
 await ann.goto(`${A}/`);
 check("friends see the whole thread, visitors' comments included (as when visiting)", (await feedCards(ann))[0].comments.some((c) => c.text === "For Bob's eyes"));
 
 // Ann deletes her comment from her Feed.
 await Promise.all([ann.waitForNavigation(), ann.click("article.from-friend .comment .under button")]);
-check("Ann's comment deleted on Bob's site", sql(stateB, "SELECT COUNT(*) AS n FROM site_comments WHERE origin != 'site'")[0].n === 0
+check("Ann's comment deleted on Bob's site", sql(stateB, "SELECT COUNT(*) AS n FROM comments WHERE origin != 'site'")[0].n === 0
   && sql(stateA, "SELECT COUNT(*) AS n FROM comments_elsewhere")[0].n === 0);
 
 // What a connection can and can't reach.
@@ -205,19 +205,22 @@ const notesBefore = notesOnBob();
 await peer("/_peer/notify", keyForB, { type: "Create", object: { type: "Note", inReplyTo: `${A}/posts/post-1-deadbeef`, content: "spam" } });
 check("a note about a comment Bob had no part in isn't kept", notesOnBob() === notesBefore);
 check("wrong key, no feed", (await peer("/_peer/feed", "x".repeat(43))).status === 401);
-const bobsImportedPost = sql(stateB, "SELECT timestamp FROM posts WHERE id < 1000000000 LIMIT 1")[0];
-check("can't comment on an imported post", (await peer("/_peer/comments", keyForB, { type: "Note", inReplyTo: `${B}/posts/post-${bobsImportedPost.timestamp}-00000000`, content: "x" })).status === 404);
+const bobsImportedPost = sql(stateB, "SELECT key, created_at FROM posts WHERE source = 'facebook' LIMIT 1")[0];
+check("can't comment on a post that isn't there", (await peer("/_peer/comments", keyForB, { type: "Note", inReplyTo: `${B}/posts/post-${bobsImportedPost.created_at}-00000000`, content: "x" })).status === 404);
+check("…or on one from his Facebook download (no comments on those, for now)", (await peer("/_peer/comments", keyForB,
+  { type: "Note", inReplyTo: `${B}/posts/${bobsImportedPost.key}`, content: "x" })).status === 403);
 // With his Facebook photos not shared, a photo from them can't be seen or commented on, even by fingerprint.
 const sharedBefore = sql(stateB, "SELECT value FROM settings WHERE key = 'sections'")[0]?.value ?? "[]";
 sql(stateB, `INSERT OR REPLACE INTO settings (key, value) VALUES ('sections', '[]')`);
-const unshared = sql(stateB, "SELECT hash FROM media WHERE hash IS NOT NULL AND (album_id IS NULL OR album_id < 1000000000) AND (post_id IS NULL OR post_id < 1000000000) LIMIT 1")[0]?.hash;
+const unshared = sql(stateB, `SELECT hash FROM media WHERE hash IS NOT NULL AND source = 'facebook'
+  AND hash NOT IN (SELECT hash FROM media WHERE source = 'afterwrd' AND hash IS NOT NULL) LIMIT 1`)[0]?.hash;
 check("a photo Bob hasn't shared can't be fetched by its fingerprint", Boolean(unshared) && (await peer(`/_peer/photos/${unshared}`, keyForB)).status === 404, unshared);
 check("…or commented on", (await peer("/_peer/comments", keyForB, { type: "Note", inReplyTo: `${B}/photos/sha256/${unshared}`, content: "x" })).status === 404);
 sql(stateB, `INSERT OR REPLACE INTO settings (key, value) VALUES ('sections', '${sharedBefore.replace(/'/g, "''")}')`);
 check("…but can once his photos are shared", (await peer(`/_peer/photos/${unshared}`, keyForB)).status === 200);
-const bobsComment = sql(stateB, "SELECT id FROM site_comments WHERE origin = 'site' LIMIT 1")[0].id;
+const bobsComment = sql(stateB, "SELECT id FROM comments WHERE origin = 'site' LIMIT 1")[0].id;
 await peer(`/_peer/comments/${bobsComment}/delete`, keyForB, {});
-check("can't delete Bob's own comments", sql(stateB, `SELECT COUNT(*) AS n FROM site_comments WHERE id = ${bobsComment}`)[0].n === 1);
+check("can't delete Bob's own comments", sql(stateB, `SELECT COUNT(*) AS n FROM comments WHERE id = ${bobsComment}`)[0].n === 1);
 check("a used Connect link is refused", (await (await browser.createBrowserContext()).newPage().then(async (p) => (await p.goto(link)).status())) === 404);
 check("Feed actions need the owner's session", (await fetch(`${A}/_feed/comments`, { method: "POST", redirect: "manual", headers: { Origin: A } })).status === 401);
 check("another site can't post Ann's comments", (await fetch(`${A}/_feed/comments`, { method: "POST", redirect: "manual",
@@ -295,18 +298,23 @@ await ann.goto(A + photoTile);
 await ann.waitForFunction(() => document.querySelector(".stage img")?.complete, { timeout: 15_000 });
 const full = await ann.$eval(".stage img", (i) => ({ w: i.naturalWidth, src: i.getAttribute("src") }));
 check("a photo opens on Ann's site, full size, from Bob's", full.w === 1200 && full.src.startsWith(`${B}/files/`), full.src.slice(0, 60));
+check("…with no comment box: it's from his Facebook download", Boolean(await ann.$(".info")) && !(await ann.$(".info .say")));
+const fullSrc = full.src;
+await ann.goto(A + bobAlbums.find((a) => a.name === "Posted on afterwrd").href);
+const ownTile = await ann.$eval(".justified a.tile", (a) => a.getAttribute("href"));
+await ann.goto(A + ownTile);
 await ann.type(".info .say textarea", "What a view");
 await Promise.all([ann.waitForNavigation(), ann.click(".info .say button")]);
-check("Ann comments on Bob's photo from her site", new URL(ann.url()).pathname === photoTile
+check("Ann comments on a photo Bob posted, from her site", new URL(ann.url()).pathname === ownTile
   && (await ann.$$eval(".info .comment", (l) => l.map((c) => ({ t: c.querySelector(".said").textContent, d: Boolean(c.querySelector(".under button")) })))).some((c) => c.t === "What a view" && c.d));
-check("…stored on Bob's site against that photo", sql(stateB, "SELECT target, origin FROM site_comments WHERE text = 'What a view'")
-  .some((c) => c.target === `photo-${photoTile.split("/").pop()}` && c.origin === A));
+check("…stored on Bob's site against that photo", sql(stateB, "SELECT target, origin FROM comments WHERE text = 'What a view'")
+  .some((c) => c.target === `photo-${ownTile.split("/").pop()}` && c.origin === A));
 await ann.screenshot({ path: `${OUT}/friend-photo.png` });
 await ann.goto(`${A}/friend/${bobId}/posts`);
 await ann.screenshot({ path: `${OUT}/friend-posts.png`, fullPage: true });
 await ann.goto(`${A}/friend/${bobId}/photos`);
 await ann.screenshot({ path: `${OUT}/friend-photos.png` });
-const signed = full.src;
+const signed = fullSrc;
 check("the signed link works without signing in", (await fetch(signed)).status === 200);
 check("a tampered link doesn't", (await fetch(signed.replace(/sig=(.)/, (_, c) => `sig=${c === "A" ? "B" : "A"}`))).status === 403);
 check("nor an expired one", (await fetch(signed.replace(/exp=\d+/, "exp=1000"))).status === 403);

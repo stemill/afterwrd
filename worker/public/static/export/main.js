@@ -3,17 +3,16 @@
 // the browser allows it (Chrome, Edge) and in memory otherwise.
 /* global zip */
 import {
-  actorId, commentAuthor, commentId, commentNote, CONTEXT, groupId, groupPostId, iso, mediaObject, postId, postKey, targetId, tidy,
+  actorId, commentAuthor, commentId, commentNote, CONTEXT, groupId, groupPostId, iso, mediaObject, postId, targetId, tidy,
 } from "../activity.js";
 
-const SITE_POSTS_FROM = 1_000_000_000; // posts written on afterwrd (src/posts.js)
 const EXTENSIONS = {
   "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp", "image/heic": ".heic",
   "video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm",
 };
-const TABLES = ["settings", "people", "albums", "posts", "post_tags", "comments", "reactions", "media", "tagged_photos",
-  "site_comments", "comments_elsewhere", "site_polls", "site_poll_votes", "connections", "friend_links", "users",
-  "groups", "group_mine", "chats", "messages"];
+const TABLES = ["settings", "facebook_people", "albums", "posts", "facebook_post_tags", "facebook_comments",
+  "facebook_reactions", "media", "facebook_tagged_photos", "comments", "comments_elsewhere", "polls", "poll_votes",
+  "connections", "friend_links", "users", "groups", "group_mine", "chats", "messages"];
 
 const form = document.getElementById("export");
 const status = document.getElementById("status");
@@ -52,8 +51,8 @@ if (!window.showSaveFilePicker) document.getElementById("memory").hidden = false
 /** Every document in the download, keyed by its name in the zip. */
 function documents(t) {
   const owner = t.users[0] ?? { name: "Owner" };
-  const me = t.people.find((p) => p.is_me);
-  const people = new Map(t.people.map((p) => [p.id, p]));
+  const me = t.facebook_people.find((p) => p.is_me);
+  const people = new Map(t.facebook_people.map((p) => [p.id, p]));
   const users = new Map(t.users.map((u) => [u.id, u]));
   const byHash = new Map(t.media.filter((m) => m.hash).map((m) => [m.hash, m]));
   const media = (m) => mediaObject(site, m, { "afterwrd:file": fileFor(m) });
@@ -67,7 +66,7 @@ function documents(t) {
 
   // Comments written on this site, by what they're on.
   const threads = new Map();
-  for (const c of t.site_comments) {
+  for (const c of t.comments) {
     const user = users.get(c.author_id);
     const row = { ...c, name: user?.name ?? c.author_name, author_is_owner: Boolean(c.author_id) };
     if (!threads.has(c.target)) threads.set(c.target, []);
@@ -78,13 +77,13 @@ function documents(t) {
     return items?.length ? { type: "Collection", totalItems: items.length, items } : undefined;
   };
   const collection = (items, extra = {}) => ({ "@context": CONTEXT, type: "OrderedCollection", totalItems: items.length, ...extra, orderedItems: items });
-  const newest = (a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0);
+  const newest = (a, b) => (b.created_at ?? 0) - (a.created_at ?? 0);
 
   // A poll in a post written here (src/polls.js), as a Question: each option with how many chose it, and who.
   const poll = (p) => {
-    const q = p.id >= SITE_POSTS_FROM && t.site_polls.find((x) => x.post_id === p.id - SITE_POSTS_FROM);
+    const q = t.polls.find((x) => x.post_id === p.id);
     if (!q) return undefined;
-    const votes = t.site_poll_votes.filter((v) => v.post_id === q.post_id);
+    const votes = t.poll_votes.filter((v) => v.post_id === q.post_id);
     const who = (v) => (v.voter === "site" ? { type: "Person", id: actorId(site), name: owner.name } : { type: "Person", id: actorId(v.voter), name: v.name });
     return {
       type: "Question",
@@ -98,26 +97,26 @@ function documents(t) {
   };
   const postIds = new Map();
   const posts = [...t.posts].sort(newest).map((p) => {
-    const key = postKey(p);
+    const { key } = p;
     postIds.set(p.id, postId(site, key));
     return {
       type: "Note",
       id: postId(site, key),
       attributedTo: actorId(site),
-      published: iso(p.timestamp),
+      published: iso(p.created_at),
       summary: p.title || undefined,
       mediaType: "text/plain",
       content: p.text ?? "",
       attachment: [...t.media.filter((m) => m.post_id === p.id && m.hash).map(media), link(p.link_url)].filter(Boolean),
-      tag: t.post_tags.some((x) => x.post_id === p.id)
-        ? t.post_tags.filter((x) => x.post_id === p.id).map((x) => ({ type: "Mention", name: people.get(x.person_id)?.name })) : undefined,
+      tag: t.facebook_post_tags.some((x) => x.post_id === p.id)
+        ? t.facebook_post_tags.filter((x) => x.post_id === p.id).map((x) => ({ type: "Mention", name: people.get(x.person_id)?.name })) : undefined,
       location: p.place_name || p.latitude != null
         ? { type: "Place", name: p.place_name || undefined, "afterwrd:address": p.place_address || undefined,
           latitude: p.latitude ?? undefined, longitude: p.longitude ?? undefined } : undefined,
       context: p.group_name ? { type: "Group", name: p.group_name } : undefined,
       "afterwrd:kind": p.kind,
       "afterwrd:onWallOf": person(p.target_id),
-      "afterwrd:source": p.id >= SITE_POSTS_FROM ? "afterwrd" : "facebook",
+      "afterwrd:source": p.source,
       "afterwrd:facebookId": p.fbid || undefined,
       "afterwrd:poll": poll(p),
       replies: replies(key),
@@ -147,19 +146,25 @@ function documents(t) {
     },
     "posts.json": collection(posts, { name: "Posts" }),
     "photos.json": collection(photos, { name: "Photos and videos" }),
-    "albums.json": collection(t.albums.map((a) => ({
-      type: "Collection",
-      name: a.name,
-      summary: a.description || undefined,
-      updated: iso(a.last_modified),
-      "afterwrd:cover": a.cover_media_id && t.media.find((m) => m.id === a.cover_media_id)?.hash
-        ? `${site}/photos/sha256/${t.media.find((m) => m.id === a.cover_media_id).hash}` : undefined,
-      items: t.media.filter((m) => m.album_id === a.id && m.hash).map((m) => `${site}/photos/sha256/${m.hash}`),
-    })), { name: "Albums" }),
-    "facebook-comments.json": collection([...t.comments].sort(newest).map((c) => ({
+    "albums.json": collection(t.albums.map((a) => {
+      const inIt = t.media.filter((m) => m.album_id === a.id && m.hash);
+      // Facebook says when its albums last changed and which photo is the cover; afterwrd's go by their newest photo.
+      const cover = t.media.find((m) => m.id === a.cover_media_id && m.hash) ?? [...inIt].sort(newest)[0];
+      return {
+        type: "Collection",
+        name: a.name,
+        summary: a.description || undefined,
+        published: iso(a.created_at),
+        updated: iso(a.last_modified ?? [...inIt].sort(newest)[0]?.created_at),
+        "afterwrd:source": a.source,
+        "afterwrd:cover": cover ? `${site}/photos/sha256/${cover.hash}` : undefined,
+        items: inIt.map((m) => `${site}/photos/sha256/${m.hash}`),
+      };
+    }), { name: "Albums" }),
+    "facebook-comments.json": collection([...t.facebook_comments].sort(newest).map((c) => ({
       type: "Note",
       attributedTo: c.author_id && c.author_id !== me?.id ? person(c.author_id) : actorId(site),
-      published: iso(c.timestamp),
+      published: iso(c.created_at),
       summary: c.title || undefined,
       mediaType: "text/plain",
       content: c.text ?? undefined,
@@ -170,21 +175,21 @@ function documents(t) {
       "afterwrd:on": c.target_kind || c.target_owner_id
         ? { type: "Object", "afterwrd:kind": c.target_kind || undefined, attributedTo: person(c.target_owner_id) } : undefined,
     })), { name: "Your comments on Facebook" }),
-    "facebook-likes.json": collection([...t.reactions].sort(newest).map((r) => ({
+    "facebook-likes.json": collection([...t.facebook_reactions].sort(newest).map((r) => ({
       type: "Like",
       actor: actorId(site),
-      published: iso(r.timestamp),
+      published: iso(r.created_at),
       summary: r.title || undefined,
       object: r.url || { type: "Object", "afterwrd:kind": r.target_kind || undefined, attributedTo: person(r.target_owner_id) },
       context: r.group_name ? { type: "Group", name: r.group_name } : undefined,
       "afterwrd:reaction": r.reaction,
       "afterwrd:facebookId": r.fbid || undefined,
     })), { name: "Your likes and reactions on Facebook" }),
-    "facebook-tagged.json": collection([...t.tagged_photos].sort(newest).map((x) => ({
-      type: "Image", url: x.url || undefined, published: iso(x.timestamp), attributedTo: person(x.owner_id),
+    "facebook-tagged.json": collection([...t.facebook_tagged_photos].sort(newest).map((x) => ({
+      type: "Image", url: x.url || undefined, published: iso(x.created_at), attributedTo: person(x.owner_id),
       "afterwrd:facebookId": x.fbid || undefined,
     })), { name: "Photos you're tagged in on Facebook" }),
-    "facebook-people.json": collection(t.people.filter((p) => !p.is_me).map((p) => ({
+    "facebook-people.json": collection(t.facebook_people.filter((p) => !p.is_me).map((p) => ({
       type: "Person", name: p.name, "afterwrd:friendSince": iso(p.friend_since), "afterwrd:unfriendedAt": iso(p.unfriended_at),
     })), { name: "People from your Facebook download" }),
     "connections.json": collection(t.connections.map((c) => ({

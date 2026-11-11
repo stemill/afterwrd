@@ -5,16 +5,18 @@
 //   POST /_admin/import/missing    {hashes} -> which files aren't stored yet
 //   PUT  /_admin/import/files/<sha256>   one photo, video or thumbnail
 //   POST /_admin/import/finish     {sections}: swap every _next table in at once, then delete unused files
-// Visitors keep seeing the previous import until finish swaps the tables in one transaction.
-import { ARCHIVE, MAX_FILE, SERVABLE_TYPES } from "../public/static/import/schema.js";
+// Visitors keep seeing the previous import until finish swaps the tables in one transaction. Posts, photos and albums
+// made on afterwrd share their tables with Facebook's (schema.js `merged`) and are never touched by an import.
+import { POST_KEY_RE } from "../public/static/activity.js";
+import { ARCHIVE, createTable, MAX_FILE, SERVABLE_TYPES } from "../public/static/import/schema.js";
 import { SECTIONS } from "../public/static/import/select.js";
 import { importPage } from "./views/import.js";
-import { mirror, SITE_ID } from "./posts.js";
 import { HASH_RE, mediaStore } from "./media.js";
 import { html, json, pageData } from "./util.js";
 
 // D1 limits statements to 100 KB of UTF-8; a JavaScript character is at most 3 bytes of it.
 const STATEMENT_CHARS = 30_000;
+const MAX_UPLOAD_ID = 100_000_000; // far more rows than any download has
 const SHARDS = [..."0123456789abcdef"];
 
 export async function handleImport(request, env, url, owner) {
@@ -38,10 +40,9 @@ export async function handleImport(request, env, url, owner) {
 }
 
 async function start(env) {
-  const statements = Object.entries(ARCHIVE).flatMap(([table, { columns, primaryKey }]) => [
+  const statements = Object.keys(ARCHIVE).flatMap((table) => [
     `DROP TABLE IF EXISTS ${table}_next`,
-    `CREATE TABLE ${table}_next (${Object.entries(columns).map(([c, type]) => `${c} ${type}`).join(", ")}${
-      primaryKey ? `, PRIMARY KEY (${primaryKey})` : ""})`,
+    createTable(`${table}_next`, table),
   ]);
   await env.DB.batch(statements.map((s) => env.DB.prepare(s)));
   return json({ ok: true });
@@ -90,8 +91,9 @@ function checked(table, column, type, value) {
   } else if (typeof value !== "string" || value.length > 1_000_000) throw bad();
   if (table === "media" && (column === "hash" || column === "thumb_hash") && !HASH_RE.test(value)) throw bad();
   if (table === "media" && column === "type" && !SERVABLE_TYPES.has(value)) throw bad();
-  // Ids from SITE_ID up belong to posts, photos and albums made on the site (posts.js).
-  if (column === "id" && ["posts", "media", "albums"].includes(table) && value >= SITE_ID) throw bad();
+  // Ids count up from 1 in an upload; finish moves them above the ones in use.
+  if (type.startsWith("INTEGER") && column.endsWith("id") && (value < 1 || value > MAX_UPLOAD_ID)) throw bad();
+  if (table === "posts" && column === "key" && !POST_KEY_RE.test(value)) throw bad();
   return value;
 }
 
@@ -128,17 +130,36 @@ async function finish(env, { sections }) {
   if (!Array.isArray(sections) || !sections.length || !sections.every((s) => SECTIONS.includes(s))) {
     throw new Error("Bad sections.");
   }
+  const db = env.DB;
+  // How far each merged table's uploaded ids move: above every id it has used, so a Facebook row never takes an
+  // afterwrd row's id, or one a deleted row had.
+  const shift = {};
+  for (const table of Object.keys(ARCHIVE).filter((t) => ARCHIVE[t].merged)) {
+    const max = await db.prepare(`SELECT COALESCE(MAX(id), 0) AS n FROM ${table}`).first();
+    const used = await db.prepare("SELECT COALESCE(MAX(seq), 0) AS n FROM sqlite_sequence WHERE name = ?").bind(table)
+      .first().catch(() => ({ n: 0 }));
+    shift[table] = Math.max(max.n, used.n);
+  }
   // One transaction: if any _next table is missing the whole swap rolls back and the old import stays.
-  const statements = Object.entries(ARCHIVE).flatMap(([table, { indexes = {} }]) => [
-    `DROP TABLE IF EXISTS ${table}`,
-    `ALTER TABLE ${table}_next RENAME TO ${table}`,
-    ...Object.entries(indexes).map(([name, column]) => `CREATE INDEX ${name} ON ${table}(${column})`),
-  ]);
-  // The owner's own posts (src/posts.js) are copied back in, so their files count as in use below.
-  await env.DB.batch([
-    ...statements.map((s) => env.DB.prepare(s)),
-    env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('sections', ?)").bind(JSON.stringify(sections)),
-    ...mirror(env.DB),
+  const statements = Object.entries(ARCHIVE).flatMap(([table, { columns, merged, refs = {}, indexes = {} }]) => {
+    const names = Object.keys(columns);
+    const values = names.map((c) => (c === "id" && merged ? `id + ${shift[table]}`
+      : refs[c] ? `${c} + ${shift[refs[c]]}` : c)).join(", "); // NULL + n stays NULL
+    return merged ? [
+      `DELETE FROM ${table} WHERE source = 'facebook'`,
+      `INSERT OR IGNORE INTO ${table} (source, ${names.join(", ")}) SELECT 'facebook', ${values} FROM ${table}_next`,
+      `DROP TABLE ${table}_next`,
+    ] : [
+      `DROP TABLE IF EXISTS ${table}`,
+      createTable(table, table),
+      `INSERT OR IGNORE INTO ${table} (${names.join(", ")}) SELECT ${values} FROM ${table}_next`,
+      `DROP TABLE ${table}_next`,
+      ...Object.entries(indexes).map(([name, column]) => `CREATE INDEX ${name} ON ${table}(${column})`),
+    ];
+  });
+  await db.batch([
+    ...statements.map((s) => db.prepare(s)),
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('sections', ?)").bind(JSON.stringify(sections)),
   ]);
 
   const { results } = await env.DB.prepare(`

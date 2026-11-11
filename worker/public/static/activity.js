@@ -2,7 +2,7 @@
 // src/peers.js) and the browser (Download everything, export/main.js). Everything has a permanent address on
 // the site it belongs to, so two sites, or two people's downloads, agree on what replied to what:
 //   the owner          <site>/                        Person
-//   a post             <site>/posts/<post key>        Note; the key survives re-imports (postKey)
+//   a post             <site>/posts/<post key>        Note; the key is kept with the post (posts.key), never worked out again
 //   a photo or video   <site>/photos/sha256/<hash>    Image or Video; the file itself is <site>/files/<hash>
 //   a comment          <post or photo address>#c<n>   Note, inReplyTo the post or photo
 //   a group            <site>/groups/<n>              Group, on the site of the owner who made it
@@ -18,9 +18,18 @@ function fingerprint(text) {
   return (h >>> 0).toString(16).padStart(8, "0");
 }
 
-/** A post's name for comments and links: its time and a fingerprint of what it says, as ids change on re-import. */
-export const postKey = (p) =>
-  `post-${p.timestamp}-${fingerprint([p.kind, p.title, p.text, p.link_url, p.group_name].map((v) => v ?? "").join("\0"))}`;
+/**
+ * A Facebook post's address: its time and a fingerprint of what it says, made once by the importer and kept with it
+ * (posts.key). Ids change with every import; this doesn't, as long as Facebook's download says the same.
+ */
+export const facebookPostKey = (p) =>
+  `post-${p.created_at}-${fingerprint([p.kind, p.title, p.text, p.link_url, p.group_name].map((v) => v ?? "").join("\0"))}`;
+
+/** A new afterwrd post's address: its time and 8 random hex digits, nothing to do with what it says or shows. */
+export function newPostKey(createdAt) {
+  const bytes = crypto.getRandomValues(new Uint8Array(4));
+  return `post-${createdAt}-${[...bytes].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
 
 export const POST_KEY_RE = /^post-\d+-[0-9a-f]{8}$/;
 
@@ -51,15 +60,15 @@ export function mediaObject(site, m, extra = {}) {
     height: m.height ?? undefined,
     preview: m.thumb_hash ? { type: "Image", url: fileUrl(site, m.thumb_hash), mediaType: "image/jpeg" } : undefined,
     name: m.description || undefined,
-    published: iso(m.timestamp),
-    "afterwrd:takenAt": m.taken_at && m.taken_at !== m.timestamp ? iso(m.taken_at) : undefined,
+    published: iso(m.created_at),
+    "afterwrd:takenAt": m.taken_at && m.taken_at !== m.created_at ? iso(m.taken_at) : undefined,
     location: m.latitude != null && m.longitude != null ? { type: "Place", latitude: m.latitude, longitude: m.longitude } : undefined,
     ...extra,
   };
 }
 
 /**
- * A comment written on a site (a site_comments row) as a Note. `author` is who wrote it: the owner's address, a
+ * A comment written on a site (a comments row) as a Note. `author` is who wrote it: the owner's address, a
  * connected friend's site, or just a name for someone invited to look.
  */
 export function commentNote(site, c, author) {

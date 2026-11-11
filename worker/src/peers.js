@@ -5,7 +5,7 @@
 //   GET  /_peer/albums                    posts, albums, an album's photos, one photo; files come as signed links
 //   GET  /_peer/albums/<key>?page=n
 //   GET  /_peer/photos/<sha256>
-//   POST /_peer/comments                a Note inReplyTo a post or photo here: their owner comments on it
+//   POST /_peer/comments                a Note inReplyTo a post or photo made on afterwrd: their owner comments on it
 //   POST /_peer/comments/<n>/delete     their owner deletes a comment they made
 //   POST /_peer/vote                    {inReplyTo: a post here, afterwrd:choices: [n…]}: their owner answers its poll
 //                                       (none takes it back); answers with the poll as they now see it (polls.js)
@@ -21,8 +21,7 @@
 // share (share.js), and nothing else, even to a friend who knows a photo's fingerprint. Plus the helpers for calling
 // other sites.
 import { commentId, CONTEXT, POST_KEY_RE, postId, tidy } from "../public/static/activity.js";
-import { findTarget, MAX_COMMENT } from "./archive/comments.js";
-import { SITE_ID } from "./posts.js";
+import { commentable, findTarget, MAX_COMMENT } from "./archive/comments.js";
 import { notes, ownerActor, photoShared, postShared, shareAlbum, shareAlbums, sharePhoto, sharePosts } from "./share.js";
 import { json, now, sha256 } from "./util.js";
 import { notifyComment, receiveNote } from "./notify.js";
@@ -169,7 +168,7 @@ export async function handlePeer(request, env, url, work) {
     const note = await request.json().catch(() => ({}));
     const text = note?.type === "Note" && typeof note.content === "string" ? note.content.replace(/\r\n?/g, "\n").trim() : "";
     if (!text || text.length > MAX_COMMENT) return json({ error: `Comments need 1 to ${MAX_COMMENT} characters.` }, 400);
-    // Connected friends can comment on anything here they can see: a post, or a photo.
+    // Connected friends can comment on what they can see that was made on afterwrd: a post, or a photo.
     const reply = typeof note.inReplyTo === "string" ? note.inReplyTo : "";
     const target = reply.startsWith(postId(url.origin, "")) ? reply.slice(postId(url.origin, "").length)
       : reply.startsWith(`${url.origin}/photos/sha256/`) ? `photo-${reply.slice(`${url.origin}/photos/sha256/`.length)}` : "";
@@ -177,11 +176,12 @@ export async function handlePeer(request, env, url, work) {
     // Only what they're shown: something unshared answers as if it weren't there.
     const visible = found && (found.post ? await postShared(db, found.post) : await photoShared(db, found.photo));
     if (!visible) return json({ error: "That isn't there any more." }, 404);
+    if (!commentable(found)) return json({ error: "Only posts and photos added on afterwrd take comments." }, 403);
     // Limits checked in the same statement as the insert, so comments sent all at once can't slip past.
-    const row = await db.prepare(`INSERT INTO site_comments (target, author_id, author_name, text, created_at, origin)
+    const row = await db.prepare(`INSERT INTO comments (target, author_id, author_name, text, created_at, origin)
       SELECT ?1, NULL, ?2, ?3, ?4, ?5
-      WHERE (SELECT COUNT(*) FROM site_comments WHERE origin = ?5 AND created_at > ?4 - ?6) < ?7
-        AND (SELECT COUNT(*) FROM site_comments WHERE origin = ?5 AND created_at > ?4 - 86400) < ?8
+      WHERE (SELECT COUNT(*) FROM comments WHERE origin = ?5 AND created_at > ?4 - ?6) < ?7
+        AND (SELECT COUNT(*) FROM comments WHERE origin = ?5 AND created_at > ?4 - 86400) < ?8
       RETURNING id`).bind(target, peer.name, text, now(), peer.origin, RATE.seconds, RATE.count, DAILY).first();
     if (!row) return json({ error: "That's a lot of comments for now. Try again later." }, 429);
     await notifyComment(env, url.origin, target, { name: peer.name, text, from: peer.origin });
@@ -194,9 +194,9 @@ export async function handlePeer(request, env, url, work) {
     const key = reply.startsWith(postId(url.origin, "")) ? reply.slice(postId(url.origin, "").length) : "";
     // Polls are only ever in posts written here, which friends can always see.
     const found = POST_KEY_RE.test(key) && (await findTarget(db, key));
-    const id = found?.post?.id >= SITE_ID ? found.post.id - SITE_ID : null;
+    const id = found?.post?.source === "afterwrd" ? found.post.id : null;
     if (!id) return json({ error: "That isn't there any more." }, 404);
-    const trouble = await answerHere(db, id, peer.origin, peer.name, body["afterwrd:choices"], Number(key.split("-")[1]));
+    const trouble = await answerHere(db, id, peer.origin, peer.name, body["afterwrd:choices"]);
     if (trouble) return json({ error: trouble }, 400);
     return json(tidy({ "@context": CONTEXT, "afterwrd:poll": pollObject((await sitePolls(db, [id], peer.origin)).get(id)) }));
   }
@@ -213,7 +213,7 @@ export async function handlePeer(request, env, url, work) {
 
   const del = /^POST \/_peer\/comments\/(\d+)\/delete$/.exec(route);
   if (del) {
-    await db.prepare("DELETE FROM site_comments WHERE id = ? AND origin = ?").bind(Number(del[1]), peer.origin).run();
+    await db.prepare("DELETE FROM comments WHERE id = ? AND origin = ?").bind(Number(del[1]), peer.origin).run();
     return json({ ok: true });
   }
   return json({ error: "Not found." }, 404);
@@ -224,8 +224,8 @@ export async function handlePeer(request, env, url, work) {
  * `viewer`'s own answer: the friend's site asking).
  */
 async function feed(env, site, viewer) {
-  const { results: posts } = await env.DB.prepare("SELECT * FROM posts WHERE id >= ? ORDER BY timestamp DESC, id DESC LIMIT ?")
-    .bind(SITE_ID, FEED_POSTS).all();
+  const { results: posts } = await env.DB.prepare("SELECT * FROM posts WHERE source = 'afterwrd' ORDER BY created_at DESC, id DESC LIMIT ?")
+    .bind(FEED_POSTS).all();
   return tidy({
     "@context": CONTEXT,
     type: "OrderedCollection",

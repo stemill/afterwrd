@@ -6,14 +6,11 @@
 //   photo(hash)      one photo or video, with comments, the post it came with, and its neighbours
 // Photos and videos aren't sent: each comes with a link signed here ("afterwrd:fetch") that the friend's browser
 // loads straight from this site for the next hour or two (signedFile, checked in index.js).
-import {
-  actorId, commentAuthor, commentNote, iso, mediaObject, postId, postKey,
-} from "../public/static/activity.js";
+import { actorId, commentAuthor, commentNote, iso, mediaObject, postId } from "../public/static/activity.js";
 import { loadThreads } from "./archive/comments.js";
 import { mediaSet } from "./archive/routes.js";
 import { profilePictures } from "./photos.js";
 import { pollObject, sitePolls } from "./polls.js";
-import { SITE_ID } from "./posts.js";
 import { fromBase64Url, now, randomToken, toBase64Url } from "./util.js";
 
 const POSTS_PAGE = 30;
@@ -84,7 +81,8 @@ async function threadOf(db, site, target) {
 
 /**
  * Posts as Notes, with photos (signed links), tags, place, a poll if one asks something (with `viewer`'s own answer:
- * the friend's site asking), and, unless asked not to, their comments.
+ * the friend's site asking), and, unless asked not to, their comments. Facebook posts take no comments (for now),
+ * so they come without `replies`.
  */
 export async function notes(env, site, posts, { replies = true, viewer = null } = {}) {
   const db = env.DB;
@@ -92,17 +90,18 @@ export async function notes(env, site, posts, { replies = true, viewer = null } 
   const ids = posts.map((p) => p.id);
   const marks = ids.map(() => "?").join(",");
   const [photos, tags] = await db.batch([
-    db.prepare(`SELECT * FROM media WHERE post_id IN (${marks}) AND hash IS NOT NULL ORDER BY timestamp, id`).bind(...ids),
-    db.prepare(`SELECT t.post_id, p.name FROM post_tags t JOIN people p ON p.id = t.person_id WHERE t.post_id IN (${marks})`).bind(...ids),
+    db.prepare(`SELECT * FROM media WHERE post_id IN (${marks}) AND hash IS NOT NULL ORDER BY created_at, id`).bind(...ids),
+    db.prepare(`SELECT t.post_id, p.name FROM facebook_post_tags t JOIN facebook_people p ON p.id = t.person_id
+      WHERE t.post_id IN (${marks})`).bind(...ids),
   ]);
-  const keys = posts.map(postKey);
-  const threads = replies ? await loadThreads(db, keys) : new Map();
-  const polls = await sitePolls(db, ids.filter((id) => id >= SITE_ID).map((id) => id - SITE_ID), viewer);
-  return Promise.all(posts.map(async (p, i) => ({
+  const own = posts.filter((p) => p.source === "afterwrd");
+  const threads = replies ? await loadThreads(db, own.map((p) => p.key)) : new Map();
+  const polls = await sitePolls(db, own.map((p) => p.id), viewer);
+  return Promise.all(posts.map(async (p) => ({
     type: "Note",
-    id: postId(site, keys[i]),
+    id: postId(site, p.key),
     attributedTo: actorId(site),
-    published: iso(p.timestamp),
+    published: iso(p.created_at),
     summary: p.title || undefined,
     mediaType: "text/plain",
     content: p.text ?? "",
@@ -113,21 +112,21 @@ export async function notes(env, site, posts, { replies = true, viewer = null } 
     tag: tags.results.filter((t) => t.post_id === p.id).map((t) => ({ type: "Mention", name: t.name })),
     location: p.place_name ? { type: "Place", name: p.place_name } : undefined,
     context: p.group_name ? { type: "Group", name: p.group_name } : undefined,
-    "afterwrd:kind": p.kind,
-    "afterwrd:poll": polls.has(p.id - SITE_ID) ? pollObject(polls.get(p.id - SITE_ID)) : undefined,
-    replies: replies ? {
-      type: "Collection", totalItems: threads.get(keys[i]).length,
-      items: threads.get(keys[i]).map((c) => commentNote(site, c, commentAuthor(site, c))),
+    "afterwrd:kind": p.kind ?? undefined, // Facebook's; afterwrd's own posts have none
+    "afterwrd:poll": polls.has(p.id) ? pollObject(polls.get(p.id)) : undefined,
+    replies: threads.has(p.key) ? {
+      type: "Collection", totalItems: threads.get(p.key).length,
+      items: threads.get(p.key).map((c) => commentNote(site, c, commentAuthor(site, c))),
     } : undefined,
   })));
 }
 
 export async function sharePosts(env, site, page, name, viewer = null) {
   const db = env.DB;
-  const own = (await chosen(db)).includes("posts") ? "" : `WHERE id >= ${SITE_ID}`;
+  const own = (await chosen(db)).includes("posts") ? "" : "WHERE source = 'afterwrd'";
   const [count, rows] = await db.batch([
     db.prepare(`SELECT COUNT(*) AS n FROM posts ${own}`),
-    db.prepare(`SELECT * FROM posts ${own} ORDER BY timestamp DESC, id DESC LIMIT ? OFFSET ?`).bind(POSTS_PAGE, (page - 1) * POSTS_PAGE),
+    db.prepare(`SELECT * FROM posts ${own} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`).bind(POSTS_PAGE, (page - 1) * POSTS_PAGE),
   ]);
   const total = count.results[0].n;
   return {
@@ -136,16 +135,16 @@ export async function sharePosts(env, site, page, name, viewer = null) {
   };
 }
 
-/** The albums the friend may see: all of them if Photos is published, otherwise just "Posted on afterwrd". */
+/** The albums the friend may see: all of them if Photos is published, otherwise just those made on afterwrd. */
 async function setKeys(db) {
   const imported = (await chosen(db)).includes("photos");
-  const { results } = await db.prepare(`SELECT id FROM albums ${imported ? "" : `WHERE id >= ${SITE_ID}`}`).all();
+  const { results } = await db.prepare(`SELECT id FROM albums ${imported ? "" : "WHERE source = 'afterwrd'"}`).all();
   return [...results.map((a) => String(a.id)), ...(imported ? ["other", "videos"] : [])];
 }
 
 async function setInfo(db, key) {
   const set = mediaSet(key);
-  const stats = await db.prepare(`SELECT COUNT(*) AS count, MIN(timestamp) AS first_ts, MAX(timestamp) AS last_ts,
+  const stats = await db.prepare(`SELECT COUNT(*) AS count, MIN(created_at) AS first_ts, MAX(created_at) AS last_ts,
     MAX(id) AS last_id FROM media WHERE ${set.where} AND hash IS NOT NULL`).bind(...set.params).first();
   const album = set.title === null ? await db.prepare("SELECT * FROM albums WHERE id = ?").bind(...set.params).first() : null;
   return { set, stats, name: set.title ?? album?.name, album };
@@ -157,7 +156,7 @@ export async function shareAlbums(env, site) {
   for (const key of await setKeys(db)) {
     const { set, stats, name, album } = await setInfo(db, key);
     if (!stats.count) continue;
-    const cover = await db.prepare(`SELECT * FROM media WHERE ${album?.cover_media_id ? "id = ?" : `${set.where} AND hash IS NOT NULL ORDER BY timestamp DESC`} LIMIT 1`)
+    const cover = await db.prepare(`SELECT * FROM media WHERE ${album?.cover_media_id ? "id = ?" : `${set.where} AND hash IS NOT NULL ORDER BY created_at DESC`} LIMIT 1`)
       .bind(...(album?.cover_media_id ? [album.cover_media_id] : set.params)).first();
     items.push({
       type: "Collection", name, totalItems: stats.count, "afterwrd:key": key,
@@ -172,7 +171,7 @@ export async function shareAlbum(env, site, key, page) {
   if (!(await setKeys(db)).includes(key)) return null;
   const { set, stats, name, album } = await setInfo(db, key);
   const { results } = await db.prepare(`SELECT * FROM media WHERE ${set.where} AND hash IS NOT NULL
-    ORDER BY COALESCE(timestamp, 0), id LIMIT ? OFFSET ?`).bind(...set.params, PHOTOS_PAGE, (page - 1) * PHOTOS_PAGE).all();
+    ORDER BY COALESCE(created_at, 0), id LIMIT ? OFFSET ?`).bind(...set.params, PHOTOS_PAGE, (page - 1) * PHOTOS_PAGE).all();
   return {
     type: "OrderedCollectionPage", name, summary: album?.description || undefined, totalItems: stats.count,
     published: iso(stats.first_ts), updated: iso(stats.last_ts), "afterwrd:key": key, "afterwrd:page": page,
@@ -182,8 +181,10 @@ export async function shareAlbum(env, site, key, page) {
 
 /** Whether a friend may see this post: one written here, or any if the owner has shared their Facebook posts. */
 export async function postShared(db, post) {
-  return post.id >= SITE_ID || (await chosen(db)).includes("posts");
+  return post.source === "afterwrd" || (await chosen(db)).includes("posts");
 }
+
+const postById = (db, id) => db.prepare("SELECT * FROM posts WHERE id = ?").bind(id).first();
 
 /**
  * Whether a friend may see this photo or video: it's in an album they're shown, or it came with a post they're
@@ -192,24 +193,26 @@ export async function postShared(db, post) {
 export async function photoShared(db, m) {
   const key = m.album_id ? String(m.album_id) : m.kind === "video" ? "videos" : "other";
   if ((await setKeys(db)).includes(key)) return true;
-  return Boolean(m.post_id) && postShared(db, { id: m.post_id });
+  const post = m.post_id && await postById(db, m.post_id);
+  return Boolean(post) && postShared(db, post);
 }
 
 export async function sharePhoto(env, site, hash) {
   const db = env.DB;
-  const m = await db.prepare("SELECT * FROM media WHERE hash = ? ORDER BY id LIMIT 1").bind(hash).first();
+  // A picture both imported and posted on afterwrd is shown as afterwrd's.
+  const m = await db.prepare("SELECT * FROM media WHERE hash = ? ORDER BY source = 'afterwrd' DESC, id LIMIT 1").bind(hash).first();
   if (!m || !(await photoShared(db, m))) return null;
   const key = m.album_id ? String(m.album_id) : m.kind === "video" ? "videos" : "other";
   const neighbours = {};
   if ((await setKeys(db)).includes(key)) {
     const { set, stats, name } = await setInfo(db, key);
-    const order = "(COALESCE(timestamp, 0), id)";
-    const at = [m.timestamp ?? 0, m.id];
+    const order = "(COALESCE(created_at, 0), id)";
+    const at = [m.created_at ?? 0, m.id];
     const [prev, next, before] = await db.batch([
       db.prepare(`SELECT hash FROM media WHERE ${set.where} AND hash IS NOT NULL AND ${order} < (?, ?)
-        ORDER BY COALESCE(timestamp, 0) DESC, id DESC LIMIT 1`).bind(...set.params, ...at),
+        ORDER BY COALESCE(created_at, 0) DESC, id DESC LIMIT 1`).bind(...set.params, ...at),
       db.prepare(`SELECT hash FROM media WHERE ${set.where} AND hash IS NOT NULL AND ${order} > (?, ?)
-        ORDER BY COALESCE(timestamp, 0), id LIMIT 1`).bind(...set.params, ...at),
+        ORDER BY COALESCE(created_at, 0), id LIMIT 1`).bind(...set.params, ...at),
       db.prepare(`SELECT COUNT(*) AS n FROM media WHERE ${set.where} AND hash IS NOT NULL AND ${order} < (?, ?)`).bind(...set.params, ...at),
     ]);
     Object.assign(neighbours, {
@@ -218,12 +221,13 @@ export async function sharePhoto(env, site, hash) {
     });
   }
   // The post it came with, if that's one the friend may see.
-  const post = m.post_id && (await postShared(db, { id: m.post_id }))
-    ? await db.prepare("SELECT * FROM posts WHERE id = ?").bind(m.post_id).first() : null;
+  const withPost = m.post_id && await postById(db, m.post_id);
+  const post = withPost && (await postShared(db, withPost)) ? withPost : null;
   return {
     ...await media(env, site, m),
     ...neighbours,
     "afterwrd:postedWith": post ? (await notes(env, site, [post], { replies: false }))[0] : undefined,
-    replies: await threadOf(db, site, `photo-${hash}`),
+    // Only photos made on afterwrd take comments, for now.
+    replies: m.source === "afterwrd" ? await threadOf(db, site, `photo-${hash}`) : undefined,
   };
 }

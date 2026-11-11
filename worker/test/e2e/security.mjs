@@ -149,6 +149,11 @@ check("import refuses markup in a number column", (await post("/_admin/import/ro
 check("import refuses a fake file address", (await post("/_admin/import/rows", media({ hash: "../../etc" }), ownerCookie)).status === 400);
 check("import refuses a page as a media type", (await post("/_admin/import/rows", media({ type: "text/html" }), ownerCookie)).status === 400);
 check("import accepts a proper row", (await post("/_admin/import/rows", media({ width: 800, height: 600, hash: "a".repeat(64), type: "image/jpeg" }), ownerCookie)).ok);
+check("import refuses ids that could reach another row's", (await post("/_admin/import/rows", media({ id: -5 }), ownerCookie)).status === 400
+  && (await post("/_admin/import/rows", media({ post_id: 0 }), ownerCookie)).status === 400);
+const facebookPost = (key) => ({ table: "posts", rows: [{ id: 1, key, created_at: 1700000000, kind: "status" }] });
+check("import refuses a post without a proper address", (await post("/_admin/import/rows", facebookPost("../../x"), ownerCookie)).status === 400
+  && (await post("/_admin/import/rows", facebookPost(null), ownerCookie)).status === 400);
 
 // --- media store: re-uploading can't damage a stored file -----------------------------------------
 const bytes = Buffer.from("not really a jpeg, but bytes are bytes");
@@ -162,7 +167,7 @@ check("re-uploading a stored file leaves it intact", second.existing === true &&
 
 // --- lookups by name can't reach object internals --------------------------------------------
 sql(`INSERT OR REPLACE INTO settings (key, value) VALUES ('sections', '["overview","timeline","posts","photos","comments","likes","friends"]');
-     INSERT OR REPLACE INTO people (id, name, is_me) VALUES (1, 'Me', 1)`);
+     INSERT OR REPLACE INTO facebook_people (id, name, is_me) VALUES (1, 'Me', 1)`);
 for (const path of ["/friends?sort=constructor", "/friends?sort=__proto__", "/people/1?tab=__proto__", "/people/1?tab=constructor"]) {
   const res = await fetch(BASE + path, { headers: { Cookie: `__Host-session=${ownerCookie}` } });
   check(`${path} is handled, not a crash`, res.status === 200, `HTTP ${res.status}`);

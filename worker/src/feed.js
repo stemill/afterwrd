@@ -42,6 +42,7 @@ export function rememberPicture(db, connection, avatar) {
  * to come from this site is left out: a friend's site can't put words in the owner's mouth.
  */
 export async function markMine(db, connectionId, target, comments, ownOrigin) {
+  if (!comments) return null; // nothing there takes comments
   const { results } = await db.prepare("SELECT remote_id, text FROM comments_elsewhere WHERE connection_id = ? AND target = ?")
     .bind(connectionId, target).all();
   const sent = new Map(results.map((r) => [r.remote_id, r.text]));

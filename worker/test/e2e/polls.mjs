@@ -114,7 +114,7 @@ check("…and two options", (await text(ann, "#composer .error")) === "Give your
 await ann.setViewport({ width: 390, height: 844 });
 await ann.screenshot({ path: `${OUT}/poll-composer-phone.png` });
 await ann.setViewport({ width: 1280, height: 800 });
-check("nothing was posted", n(stateA, "site_posts") === 0);
+check("nothing was posted", n(stateA, "posts WHERE source = 'afterwrd'") === 0);
 check("the server says the same", (await post(ann, "/_admin/posts", { text: "Q", poll: { options: ["a"] } })).status === 400
   && (await post(ann, "/_admin/posts", { text: "", poll: { options: ["a", "b"] } })).status === 400
   && (await post(ann, "/_admin/posts", { text: "Q", poll: { options: ["a", "A"] } })).status === 400);
@@ -125,11 +125,11 @@ await ask(ann, "Which Saturday for the walk?", ["Sat 5th", "Sat 12th", "Sat 19th
 let annPoll = await pollIn(ann, "article.own");
 check("Ann's post shows her poll: three options, nobody's answered", annPoll?.options.map((o) => o.name).join() === "Sat 5th,Sat 12th,Sat 19th"
   && counts(annPoll) === "0,0,0" && annPoll.facts.includes("Nobody's answered yet") && annPoll.buttons === 3 && annPoll.canClose, JSON.stringify(annPoll));
-check("…kept with the post", n(stateA, "site_polls") === 1);
+check("…kept with the post", n(stateA, "polls") === 1);
 await choose(ann, "article.own", 0);
 annPoll = await pollIn(ann, "article.own");
 check("one tap answers it", counts(annPoll) === "1,0,0" && chosen(annPoll) === "Sat 5th" && annPoll.facts.includes("1 person answered"), JSON.stringify(annPoll));
-check("…and lands back on the poll", new URL(ann.url()).hash === `#poll-${sql(stateA, "SELECT id FROM posts WHERE id >= 1000000000")[0].id}`, ann.url());
+check("…and lands back on the poll", new URL(ann.url()).hash === `#poll-${sql(stateA, "SELECT id FROM posts WHERE source = 'afterwrd'")[0].id}`, ann.url());
 
 // Bob answers from his Home; he sees the totals and his own choice, never who.
 await bob.goto(`${B}/`);
@@ -138,10 +138,10 @@ check("Bob's Home shows Ann's poll with its totals", counts(bobPoll) === "1,0,0"
 await choose(bob, "article.from-friend", 1);
 bobPoll = await pollIn(bob, "article.from-friend");
 check("Bob answers it from his own site", counts(bobPoll) === "1,1,0" && chosen(bobPoll) === "Sat 12th", JSON.stringify(bobPoll));
-check("…Ann's site keeps it, under his name", sql(stateA, "SELECT voter, name, choices FROM site_poll_votes WHERE voter != 'site'")
+check("…Ann's site keeps it, under his name", sql(stateA, "SELECT voter, name, choices FROM poll_votes WHERE voter != 'site'")
   .some((v) => v.voter === B && v.name === "Bob Example" && v.choices === 2));
 check("…and his site keeps nothing about it", !JSON.stringify(sql(stateB, "SELECT name FROM sqlite_master WHERE type = 'table'")).includes("vote")
-  || n(stateB, "site_poll_votes") === 0);
+  || n(stateB, "poll_votes") === 0);
 await cat.goto(`${C}/`);
 await choose(cat, "article.from-friend", 1);
 await bob.goto(`${B}/`);
@@ -160,15 +160,15 @@ check("Ann, who asked, sees who chose what", annPoll.who?.includes("Only you can
   && /Sat 12th\s+Cat Example/.test(annPoll.who) && /Sat 19th\s+Bob Example/.test(annPoll.who), annPoll.who);
 
 // Forged answers.
-const key = sql(stateA, "SELECT id FROM posts WHERE id >= 1000000000")[0];
+const key = sql(stateA, "SELECT id FROM posts WHERE source = 'afterwrd'")[0];
 const postKey = (await bob.$eval("article.from-friend", (a) => a.id)).replace(/^f\d+-/, "");
 const vote = (choices, target = `${A}/posts/${postKey}`, k = bobKey) => call(A, "/_peer/vote", k, { type: "afterwrd:Vote", inReplyTo: target, "afterwrd:choices": choices });
 check("two choices on a one-choice poll are refused", (await vote([0, 1])).status === 400);
 check("…as are options it doesn't have", (await vote([3])).status === 400 && (await vote(["x"])).status === 400 && (await vote("0")).status === 400);
 check("…and posts that aren't there", (await vote([0], `${A}/posts/post-1-00000000`)).status === 404 && (await vote([0], `${B}/posts/${postKey}`)).status === 404);
 check("…and anyone who isn't a friend", (await vote([0], undefined, "x".repeat(43))).status === 401);
-check("Bob's answer is still his last", sql(stateA, `SELECT choices FROM site_poll_votes WHERE voter = '${B}'`)[0]?.choices === 4);
-check("an answer with nothing chosen takes it back", (await vote([])).status === 200 && n(stateA, `site_poll_votes WHERE voter = '${B}'`) === 0);
+check("Bob's answer is still his last", sql(stateA, `SELECT choices FROM poll_votes WHERE voter = '${B}'`)[0]?.choices === 4);
+check("an answer with nothing chosen takes it back", (await vote([])).status === 200 && n(stateA, `poll_votes WHERE voter = '${B}'`) === 0);
 await vote([2]);
 
 // Closing.
@@ -177,7 +177,7 @@ await Promise.all([ann.waitForNavigation(), ann.click("article.own .poll form:no
 annPoll = await pollIn(ann, "article.own");
 check("Ann closes her poll: the totals stay, the buttons go", counts(annPoll) === "1,1,1" && annPoll.buttons === 0 && annPoll.facts.includes("Closed") && !annPoll.canClose, JSON.stringify(annPoll));
 check("…and no answer is taken after, or taken back", (await vote([0])).status === 400 && (await vote([])).status === 400
-  && sql(stateA, `SELECT choices FROM site_poll_votes WHERE voter = '${B}'`)[0]?.choices === 4);
+  && sql(stateA, `SELECT choices FROM poll_votes WHERE voter = '${B}'`)[0]?.choices === 4);
 await bob.goto(`${B}/`);
 bobPoll = await pollIn(bob, "article.from-friend");
 check("Bob sees it closed, his answer still marked", bobPoll.facts.includes("Closed") && bobPoll.buttons === 0 && chosen(bobPoll) === "Sat 19th", JSON.stringify(bobPoll));
@@ -195,19 +195,19 @@ await bob.click("article.from-friend .poll-option:nth-of-type(3) input");
 await Promise.all([bob.waitForNavigation(), bob.click("article.from-friend .poll-form button.chip")]);
 bobPoll = await pollIn(bob, "article.from-friend");
 check("Bob picks two", counts(bobPoll) === "1,0,1" && chosen(bobPoll) === "Sandwiches,Flask of tea", JSON.stringify(bobPoll));
-const multiPost = sql(stateA, "SELECT post_id FROM site_polls WHERE multiple = 1")[0].post_id;
-sql(stateA, `UPDATE site_polls SET closes_at = ${Math.floor(Date.now() / 1000) - 1} WHERE post_id = ${multiPost}`);
+const multiPost = sql(stateA, "SELECT post_id FROM polls WHERE multiple = 1")[0].post_id;
+sql(stateA, `UPDATE polls SET closes_at = ${Math.floor(Date.now() / 1000) - 1} WHERE post_id = ${multiPost}`);
 await bob.goto(`${B}/`);
 bobPoll = await pollIn(bob, "article.from-friend");
 check("a poll closes by itself at its time", bobPoll.facts.includes("Closed") && bobPoll.ticks === 0, JSON.stringify(bobPoll));
 
 // In the archive and the download; and deleting the post takes the poll with it.
-const rows = await ann.evaluate(() => fetch("/_admin/export/rows?table=site_poll_votes").then((r) => r.json()));
+const rows = await ann.evaluate(() => fetch("/_admin/export/rows?table=poll_votes").then((r) => r.json()));
 check("Download everything includes polls and answers", rows.rows?.length === 4, JSON.stringify(rows).slice(0, 200));
 await ann.goto(`${A}/posts`);
 await Promise.all([ann.waitForNavigation(), ann.click("article.own header .delete")]);
-check("deleting a post deletes its poll and answers", n(stateA, `site_polls WHERE post_id = ${multiPost}`) === 0 && n(stateA, `site_poll_votes WHERE post_id = ${multiPost}`) === 0
-  && n(stateA, "site_polls") === 1);
+check("deleting a post deletes its poll and answers", n(stateA, `polls WHERE post_id = ${multiPost}`) === 0 && n(stateA, `poll_votes WHERE post_id = ${multiPost}`) === 0
+  && n(stateA, "polls") === 1);
 await ann.screenshot({ path: `${OUT}/poll-own.png`, fullPage: true });
 
 // --- in a group ---------------------------------------------------------------------------------------------------------

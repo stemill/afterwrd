@@ -1,9 +1,10 @@
 // Comments the owner writes on their own site, under their posts and photos (friends' comments arrive through
-// /_peer/comments from their own sites). They show straight away; the author or the owner can delete one. Forms post here and land back on the page they came from:
+// /_peer/comments from their own sites). They show straight away; the author or the owner can delete one. Forms post
+// here and land back on the page they came from:
 //   POST /_comments                 target, text, back
 //   POST /_comments/<id>/delete     back
-// See migrations/0006_site_comments.sql for how `target` survives a re-import.
-import { postKey } from "../../public/static/activity.js";
+// A comment's `target` is the post's address (posts.key) or the picture's (photo-<sha256>). Only posts and photos made
+// on afterwrd take comments, for now: a Facebook post's address may not survive a new download (docs/tables-plan.md).
 import { safeNext } from "../auth.js";
 import { messagePage } from "../views/pages.js";
 import { html, now, Refusal } from "../util.js";
@@ -13,13 +14,12 @@ export const MAX_COMMENT = 2000;
 // Plenty for a conversation, too few for a runaway script.
 const RATE = { count: 30, seconds: 600 };
 const DAILY = 200; // from one person in a day, whatever the pace
-const TARGET_RE = /^(?:post-(\d+)-[0-9a-f]{8}|photo-([0-9a-f]{64}))$/;
+const TARGET_RE = /^(?:post-\d+-[0-9a-f]{8}|photo-([0-9a-f]{64}))$/;
 
-export { postKey };
 export const photoKey = (m) => (m.hash ? `photo-${m.hash}` : null);
 
 const COMMENT_SQL = `
-  SELECT c.*, COALESCE(u.name, c.author_name) AS name, (c.author_id IS NOT NULL) AS author_is_owner FROM site_comments c
+  SELECT c.*, COALESCE(u.name, c.author_name) AS name, (c.author_id IS NOT NULL) AS author_is_owner FROM comments c
   LEFT JOIN users u ON u.id = c.author_id`;
 
 /** Map of target -> its comments, oldest first. */
@@ -36,14 +36,14 @@ export async function loadThreads(db, keys) {
 // In a group: what it said (group_inbox, see notify.js), while the owner's still in it.
 const GROUP_THERE = "FROM group_inbox i JOIN groups g ON g.id = i.group_id AND g.joined_at IS NOT NULL";
 
-// Notifications: comments here (site_comments), comments on friends' posts and photos the owner has commented on
+// Notifications: comments here (comments), comments on friends' posts and photos the owner has commented on
 // too, which their sites send (inbox, see notify.js), and comments in groups and changes to events there the owner is
 // going to. One list, newest first. For a group, `connection_id` is the group, `friend` its name, `target` the post,
 // `own_post` whether the owner wrote it, and `kind` NULL for a comment, or 'changed' or 'cancelled' for an event.
 const NOTIFICATIONS_SQL = `
   SELECT 'here' AS source, c.id, c.target, c.text, c.created_at, COALESCE(u.name, c.author_name) AS name, c.author_id,
     NULL AS connection_id, NULL AS friend, NULL AS own_post, NULL AS kind
-  FROM site_comments c LEFT JOIN users u ON u.id = c.author_id
+  FROM comments c LEFT JOIN users u ON u.id = c.author_id
   UNION ALL
   SELECT 'friend', i.id, i.target, i.text, i.created_at, i.actor, NULL, i.connection_id, co.name, NULL, NULL
   FROM inbox i ${INBOX_JOIN} WHERE i.kind = 'comment'
@@ -67,25 +67,30 @@ export async function latestComments(db, page, size) {
 /** How many notifications arrived since this person last opened Notifications (their own comments aren't news). */
 export async function newCount(db, user) {
   const row = await db.prepare(`SELECT
-    (SELECT COUNT(*) FROM site_comments WHERE created_at > ?1 AND (author_id IS NULL OR author_id != ?2))
+    (SELECT COUNT(*) FROM comments WHERE created_at > ?1 AND (author_id IS NULL OR author_id != ?2))
     + (SELECT COUNT(*) FROM inbox i ${INBOX_JOIN} WHERE i.kind = 'comment' AND i.created_at > ?1)
     + (SELECT COUNT(*) ${GROUP_THERE} WHERE i.created_at > ?1) AS n`)
     .bind(user.activity_seen_at ?? 0, user.id).first();
   return row.n;
 }
 
-/** The post or photo a target names, if it's still in the archive: { post } or { photo }. */
+/**
+ * The post or photo a target names, if it's still here: { post } or { photo }. A picture both imported and posted on
+ * afterwrd is found as afterwrd's.
+ */
 export async function findTarget(db, target) {
   const match = TARGET_RE.exec(target ?? "");
   if (!match) return null;
-  if (match[2]) {
-    const photo = await db.prepare("SELECT * FROM media WHERE hash = ? ORDER BY id LIMIT 1").bind(match[2]).first();
+  if (match[1]) {
+    const photo = await db.prepare("SELECT * FROM media WHERE hash = ? ORDER BY source = 'afterwrd' DESC, id LIMIT 1").bind(match[1]).first();
     return photo && { photo };
   }
-  const { results } = await db.prepare("SELECT * FROM posts WHERE timestamp = ? ORDER BY id").bind(Number(match[1])).all();
-  const post = results.find((p) => postKey(p) === target);
+  const post = await db.prepare("SELECT * FROM posts WHERE key = ?").bind(target).first();
   return post && { post };
 }
+
+/** Whether what findTarget found takes comments: only posts and photos made on afterwrd, for now. */
+export const commentable = (found) => (found?.post ?? found?.photo)?.source === "afterwrd";
 
 export async function handleComments(request, env, url, user) {
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
@@ -119,12 +124,14 @@ export async function addComment(env, origin, user, { target, text }) {
   text = text.replace(/\r\n?/g, "\n").trim();
   if (!text) return null;
   if (text.length > MAX_COMMENT) throw new Refusal(`Comments can be up to ${MAX_COMMENT} characters.`, 400);
-  if (!(await findTarget(db, target))) throw new Refusal("That's no longer in the archive.", 404);
+  const found = await findTarget(db, target);
+  if (!found) throw new Refusal("That's no longer here.", 404);
+  if (!commentable(found)) throw new Refusal("Only posts and photos added on afterwrd take comments.", 403);
   // The limits are checked in the same statement as the insert, so comments sent all at once can't slip past.
-  const row = await db.prepare(`INSERT INTO site_comments (target, author_id, author_name, text, created_at, origin)
+  const row = await db.prepare(`INSERT INTO comments (target, author_id, author_name, text, created_at, origin)
     SELECT ?1, ?2, ?3, ?4, ?5, ?6
-    WHERE (SELECT COUNT(*) FROM site_comments WHERE author_id = ?2 AND created_at > ?5 - ?7) < ?8
-      AND (SELECT COUNT(*) FROM site_comments WHERE author_id = ?2 AND created_at > ?5 - 86400) < ?9
+    WHERE (SELECT COUNT(*) FROM comments WHERE author_id = ?2 AND created_at > ?5 - ?7) < ?8
+      AND (SELECT COUNT(*) FROM comments WHERE author_id = ?2 AND created_at > ?5 - 86400) < ?9
     RETURNING id`).bind(target, user.id, user.name, text, now(), "site", RATE.seconds, RATE.count, DAILY).first();
   if (!row) throw new Refusal("That's a lot of comments for now. Try again later.", 429);
   await notifyComment(env, origin, target, { name: user.name, text });
@@ -134,9 +141,9 @@ export async function addComment(env, origin, user, { target, text }) {
 /** Deletes a comment here. Returns { target } (what it was on), or null if it wasn't here. */
 export async function deleteComment(env, id) {
   const db = env.DB;
-  const comment = await db.prepare("SELECT * FROM site_comments WHERE id = ?").bind(id).first();
+  const comment = await db.prepare("SELECT * FROM comments WHERE id = ?").bind(id).first();
   if (!comment) return null;
-  await db.prepare("DELETE FROM site_comments WHERE id = ?").bind(comment.id).run();
+  await db.prepare("DELETE FROM comments WHERE id = ?").bind(comment.id).run();
   return { target: comment.target };
 }
 

@@ -30,7 +30,7 @@ export async function handleLive(request, env, url, user, work) {
   const [requests, posts, here, there, groups] = await db.batch([
     db.prepare("SELECT COUNT(*) AS n FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL"),
     db.prepare(`SELECT COUNT(*) AS n FROM inbox i ${INBOX_JOIN} WHERE i.kind = 'post' AND i.created_at >= ?`).bind(since),
-    db.prepare(`SELECT COUNT(*) AS n FROM site_comments WHERE created_at >= ? AND (author_id IS NULL OR author_id != ?)
+    db.prepare(`SELECT COUNT(*) AS n FROM comments WHERE created_at >= ? AND (author_id IS NULL OR author_id != ?)
       AND target IN (${targets.map(() => "?").join(",") || "NULL"})`).bind(since, user.id, ...targets),
     db.prepare(`SELECT COUNT(*) AS n FROM inbox i ${INBOX_JOIN} WHERE i.kind = 'comment' AND i.created_at >= ?
       AND (${remote.map(() => "(i.connection_id = ? AND i.target = ?)").join(" OR ") || "0"})`)

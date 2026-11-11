@@ -19,13 +19,15 @@
 // site's own /_version?health=1 (which runs the database migrations and a few typical reads) until the new version
 // answers. Healthy: done. Errors, or no answer within a few minutes: the old version is put back at once, that release
 // is marked as not taking (never tried again by itself), and Home says so. The database isn't restored (the update
-// grant has no database access); migrations only add, so the old code runs on the upgraded database. The time of
-// every switch is kept for a later, owner-chosen restore.
+// grant has no database access), and migrations may change anything (migrate.js), so once the new version has
+// changed the database the old one can't run on it: then the new version is kept, and Home says what happened.
+// (Versions before 0.41.0 didn't know this, and put the old version back regardless.) The time of every switch is
+// kept for a later, owner-chosen restore.
 import pkg from "../package.json";
 import { exchangeCode, pkce, readCookie, RELAY, testingHere, withCookie, CODE_RE, donePage } from "./cloudflare.js";
 import { existingDatabase, findWorker, liveVersion, loadRelease, stageVersion, switchTo, uploadAssets, useApiBase, api } from "./deploy.js";
 import { GROUP_RELEASE, isGroupWorker } from "./groupsites.js";
-import { ensureSchema } from "./migrate.js";
+import { checkNewer, ensureSchema } from "./migrate.js";
 import { releaseKey, signedList } from "./signing.js";
 import { groupsBehind } from "./update.js";
 import { json, now, html } from "./util.js";
@@ -211,9 +213,10 @@ async function runOnce(env, state) {
     const switched = await step(env, origin, { step: "switch", token, account, script, versionId: staged.versionId });
     const last = { at: now(), version: choice.ready.version, from: VERSION, result: switched.result, previous: switched.previous };
     // Tried again once (a passing hiccup shouldn't turn down a security fix for good), then not by itself.
-    const tries = { ...(state.tries ?? {}), [choice.ready.version]: (state.tries?.[choice.ready.version] ?? 0) + (switched.result === "done" ? 0 : 1) };
+    const tries = { ...(state.tries ?? {}), [choice.ready.version]: (state.tries?.[choice.ready.version] ?? 0) + (["done", "kept"].includes(switched.result) ? 0 : 1) };
     const failed = tries[choice.ready.version] >= TRIES ? [...new Set([...(state.failed ?? []), choice.ready.version])].slice(-20) : state.failed;
     const words = switched.result === "done" ? `Installed afterwrd ${choice.ready.version}. Your groups follow on the next look.`
+      : switched.result === "kept" ? `afterwrd ${choice.ready.version} had already updated your site's database when it failed its checks, so it was kept: the older version can't run on it.`
       : `afterwrd ${choice.ready.version} didn't ${switched.result === "unhealthy" ? "work" : "start"}, so the site was put back as it was.`;
     await saveState(env.DB, { lastRun: Date.now(), last, failed, tries, waiting: null, problem: null, lastCheck: { at: now(), words } });
     return;
@@ -361,7 +364,8 @@ export async function handleAutoStep(request, env, url) {
     }
     if (body.step === "switch") {
       if (typeof body.versionId !== "string" || !/^[0-9a-f-]{36}$/.test(body.versionId)) throw new Error("Unknown version.");
-      return json(await switchCarefully(env, url.origin, body.token, body.account, body.script, body.versionId, healthCheck(env, url.origin), env.VERSION?.id));
+      return json(await switchCarefully(env, url.origin, body.token, body.account, body.script, body.versionId, healthCheck(env, url.origin), env.VERSION?.id,
+        { migrated: () => checkNewer(env) }));
     }
     if (!VERSION_RE.test(body.version ?? "") || !newer(body.version, VERSION) || !/^[0-9a-f]{64}$/.test(body.manifestSha256 ?? "")) {
       throw new Error("Unknown release.");
@@ -415,10 +419,11 @@ async function groupStep(env, origin, body) {
 }
 
 /**
- * Makes `versionId` live, waits for `check` to find it healthy, and puts the old version back if it doesn't. Run by
- * the version that's live now. {result: "done" | "unhealthy" | "no-answer", previous, at}.
+ * Makes `versionId` live, waits for `check` to find it healthy, and puts the old version back if it doesn't, unless
+ * `migrated()` says the new version has already changed the database, which the old one couldn't run on (migrate.js).
+ * Run by the version that's live now. {result: "done" | "unhealthy" | "no-answer" | "kept", previous, at}.
  */
-export async function switchCarefully(env, origin, token, account, script, versionId, check, runningAs = null) {
+export async function switchCarefully(env, origin, token, account, script, versionId, check, runningAs = null, { migrated = null } = {}) {
   // On this computer a test may wait less (and only there: a setting alone can't change a real site's patience).
   const testing = testingHere(env, origin);
   const waitMs = testing && Number(env.TEST_HEALTH_MS) > 0 ? Number(env.TEST_HEALTH_MS) : HEALTH_MS;
@@ -438,6 +443,7 @@ export async function switchCarefully(env, origin, token, account, script, versi
     if (answer.healthy) return { result: "done", previous, at };
     if (answer.answered >= 500) errors++;
   }
+  if (migrated && await migrated()) return { result: "kept", previous, at };
   await switchTo(token, account, script, previous);
   return { result: errors ? "unhealthy" : "no-answer", previous, at };
 }

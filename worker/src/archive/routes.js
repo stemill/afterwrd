@@ -1,9 +1,10 @@
-// The archive's pages, ported from the routes in afterwrd/app.py and reading the D1 copy that
-// `npm run publish` uploads. Only the sections chosen at publish time are served.
+// The site's pages for the owner: their posts and photos (made on afterwrd, and from their Facebook download, in the
+// same tables, told apart by `source`), Facebook's record of their life there (facebook_*), friends, groups and
+// messages. Of the Facebook download, only the sections chosen when importing are served.
 import { groupPostId } from "../../public/static/activity.js";
 import { FINISHED_SQL, icsFile } from "../calendar.js";
 import { connectedToken } from "../cloudflare.js";
-import { findTarget, latestComments, loadThreads, newCount, photoKey, postKey } from "./comments.js";
+import { commentable, findTarget, latestComments, loadThreads, newCount, photoKey } from "./comments.js";
 import { sitePolls } from "../polls.js";
 import { connectionById, loadFeed, markMine, noteAnswer, rememberPicture } from "../feed.js";
 import * as friend from "../friends.js";
@@ -11,7 +12,6 @@ import { MAX_GROUP_PHOTOS, MAX_MEMBERS } from "../groups.js";
 import { whereAmI } from "../groupsites.js";
 import * as groups from "../membership.js";
 import { ownerName } from "../peers.js";
-import { SITE_ID } from "../posts.js";
 import { profilePictures } from "../photos.js";
 import { newDevices } from "../admin.js";
 import { newPushDevices } from "../push.js";
@@ -25,26 +25,28 @@ import { chatPage, friendMessage, groupChat, messagesIndex, unreadChats } from "
 import * as messageViews from "../views/messages.js";
 
 const PAGE_SIZE = 50;
+export const AFTERWRD_KIND = "afterwrd"; // the Posts filter's choice for posts written here
 const PHOTO_PAGE_SIZE = 150;
 
 const POST_SQL = `
   SELECT p.*, t.name AS target_name FROM posts p
-  LEFT JOIN people t ON t.id = p.target_id`;
+  LEFT JOIN facebook_people t ON t.id = p.target_id`;
+// The owner's comments and likes on Facebook (not comments here, which are archive/comments.js).
 const COMMENT_SQL = `
   SELECT c.*, o.name AS owner_name, a.name AS author_name, a.is_me AS author_is_me
-  FROM comments c
-  LEFT JOIN people o ON o.id = c.target_owner_id
-  LEFT JOIN people a ON a.id = c.author_id`;
+  FROM facebook_comments c
+  LEFT JOIN facebook_people o ON o.id = c.target_owner_id
+  LEFT JOIN facebook_people a ON a.id = c.author_id`;
 const REACTION_SQL = `
-  SELECT r.*, o.name AS owner_name FROM reactions r
-  LEFT JOIN people o ON o.id = r.target_owner_id`;
-const MEDIA_ORDER = "ORDER BY COALESCE(timestamp, 0), id";
+  SELECT r.*, o.name AS owner_name FROM facebook_reactions r
+  LEFT JOIN facebook_people o ON o.id = r.target_owner_id`;
+const MEDIA_ORDER = "ORDER BY COALESCE(created_at, 0), id";
 const PERSON_TABS = {
-  comments: ["Comments", `${COMMENT_SQL} WHERE c.target_owner_id = ? ORDER BY c.timestamp DESC`],
-  likes: ["Likes", `${REACTION_SQL} WHERE r.target_owner_id = ? ORDER BY r.timestamp DESC`],
-  wall: ["Wall posts", `${POST_SQL} WHERE p.target_id = ? ORDER BY p.timestamp DESC`],
-  tags: ["Tagged together", `${POST_SQL} JOIN post_tags pt ON pt.post_id = p.id WHERE pt.person_id = ? ORDER BY p.timestamp DESC`],
-  photos: ["Photos of you", "SELECT * FROM tagged_photos t WHERE t.owner_id = ? ORDER BY t.timestamp DESC"],
+  comments: ["Comments", `${COMMENT_SQL} WHERE c.target_owner_id = ? ORDER BY c.created_at DESC`],
+  likes: ["Likes", `${REACTION_SQL} WHERE r.target_owner_id = ? ORDER BY r.created_at DESC`],
+  wall: ["Wall posts", `${POST_SQL} WHERE p.target_id = ? ORDER BY p.created_at DESC`],
+  tags: ["Tagged together", `${POST_SQL} JOIN facebook_post_tags pt ON pt.post_id = p.id WHERE pt.person_id = ? ORDER BY p.created_at DESC`],
+  photos: ["Photos of you", "SELECT * FROM facebook_tagged_photos t WHERE t.owner_id = ? ORDER BY t.created_at DESC"],
 };
 
 // [pattern, section(s) any of which must be published (null: always), loader, view]. A loader gathers the page's
@@ -103,7 +105,7 @@ export async function renderArchive(request, env, url, user, work) {
   const db = env.DB;
   const [settings, me] = await db.batch([
     db.prepare("SELECT value FROM settings WHERE key = 'sections'"),
-    db.prepare(`SELECT p.*, pm.hash AS profile_hash, cm.hash AS cover_hash FROM people p
+    db.prepare(`SELECT p.*, pm.hash AS profile_hash, cm.hash AS cover_hash FROM facebook_people p
       LEFT JOIN media pm ON pm.id = p.profile_media_id
       LEFT JOIN media cm ON cm.id = p.cover_media_id
       WHERE p.is_me = 1`),
@@ -201,7 +203,7 @@ async function paginate(db, sql, params, page, size = PAGE_SIZE) {
 }
 
 async function years(db, table) {
-  const rows = await all(db, `SELECT DISTINCT strftime('%Y', timestamp, 'unixepoch') AS y FROM ${table} ORDER BY y DESC`);
+  const rows = await all(db, `SELECT DISTINCT strftime('%Y', created_at, 'unixepoch') AS y FROM ${table} ORDER BY y DESC`);
   return rows.map((r) => r.y);
 }
 
@@ -209,24 +211,27 @@ async function years(db, table) {
 async function withMedia(db, rows, column) {
   if (!rows.length) return rows;
   const ids = rows.map((r) => r.id);
-  const media = await all(db, `SELECT * FROM media WHERE ${column} IN (${marks(ids)}) ORDER BY timestamp, id`, ids);
+  const media = await all(db, `SELECT * FROM media WHERE ${column} IN (${marks(ids)}) ORDER BY created_at, id`, ids);
   return rows.map((r) => ({ ...r, media: media.filter((m) => m[column] === r.id) }));
 }
 
-/** Posts with their photos, tags and (unless `threads` is false) the comments written on them here. */
+/**
+ * Posts with their photos, tags and (unless `threads` is false) the comments written on them here. `thread` is
+ * undefined without threads, null for a post that takes no comments (Facebook's, for now), else its comments.
+ */
 async function loadPosts(db, rows, { threads = true } = {}) {
   const posts = await withMedia(db, rows, "post_id");
   if (!posts.length) return posts;
   const ids = posts.map((p) => p.id);
-  const tags = await all(db, `SELECT t.post_id, p.id, p.name FROM post_tags t JOIN people p ON p.id = t.person_id
+  const tags = await all(db, `SELECT t.post_id, p.id, p.name FROM facebook_post_tags t JOIN facebook_people p ON p.id = t.person_id
     WHERE t.post_id IN (${marks(ids)})`, ids);
-  const keys = posts.map(postKey);
-  const comments = threads ? await loadThreads(db, keys) : null;
+  const own = posts.filter((p) => p.source === "afterwrd");
+  const comments = threads ? await loadThreads(db, own.map((p) => p.key)) : null;
   // Polls in posts written here, with who chose what: this is the owner's own site.
-  const polls = await sitePolls(db, ids.filter((id) => id >= SITE_ID).map((id) => id - SITE_ID), "site");
-  return posts.map((p, i) => ({
-    ...p, tags: tags.filter((t) => t.post_id === p.id), key: keys[i], thread: comments?.get(keys[i]),
-    poll: polls.get(p.id - SITE_ID) ?? null,
+  const polls = await sitePolls(db, own.map((p) => p.id), "site");
+  return posts.map((p) => ({
+    ...p, tags: tags.filter((t) => t.post_id === p.id), thread: comments ? comments.get(p.key) ?? null : undefined,
+    poll: polls.get(p.id) ?? null,
   }));
 }
 
@@ -246,28 +251,29 @@ function groupBy(items, key) {
 
 async function overview(ctx) {
   const { db } = ctx;
-  const tables = ["posts", "comments", "reactions", "media", "albums", "tagged_photos"];
+  const tables = { posts: "posts", comments: "facebook_comments", reactions: "facebook_reactions", media: "media", albums: "albums",
+    tagged_photos: "facebook_tagged_photos" };
   const counts = {};
   const results = await db.batch([
-    ...tables.map((t) => db.prepare(`SELECT COUNT(*) AS n FROM ${t}`)),
-    db.prepare("SELECT COUNT(*) AS n FROM people WHERE friend_since IS NOT NULL"),
+    ...Object.values(tables).map((t) => db.prepare(`SELECT COUNT(*) AS n FROM ${t}`)),
+    db.prepare("SELECT COUNT(*) AS n FROM facebook_people WHERE friend_since IS NOT NULL"),
   ]);
-  tables.forEach((t, i) => { counts[t] = results[i].results[0].n; });
+  Object.keys(tables).forEach((name, i) => { counts[name] = results[i].results[0].n; });
   counts.friends = results.at(-1).results[0].n;
   const byYear = await all(db, `
     SELECT year, SUM(t = 'p') AS posts, SUM(t = 'c') AS comments, SUM(t = 'r') AS reactions, SUM(t = 'm') AS photos
     FROM (
-      SELECT strftime('%Y', timestamp, 'unixepoch') AS year, 'p' AS t FROM posts
-      UNION ALL SELECT strftime('%Y', timestamp, 'unixepoch'), 'c' FROM comments
-      UNION ALL SELECT strftime('%Y', timestamp, 'unixepoch'), 'r' FROM reactions
-      UNION ALL SELECT strftime('%Y', timestamp, 'unixepoch'), 'm' FROM media WHERE timestamp IS NOT NULL
+      SELECT strftime('%Y', created_at, 'unixepoch') AS year, 'p' AS t FROM posts
+      UNION ALL SELECT strftime('%Y', created_at, 'unixepoch'), 'c' FROM facebook_comments
+      UNION ALL SELECT strftime('%Y', created_at, 'unixepoch'), 'r' FROM facebook_reactions
+      UNION ALL SELECT strftime('%Y', created_at, 'unixepoch'), 'm' FROM media WHERE created_at IS NOT NULL
     )
     GROUP BY year ORDER BY year DESC`);
   const topPeople = await all(db, `
     SELECT p.id, p.name, p.friend_since,
-      (SELECT COUNT(*) FROM comments c WHERE c.target_owner_id = p.id) AS comments,
-      (SELECT COUNT(*) FROM reactions r WHERE r.target_owner_id = p.id) AS reactions
-    FROM people p WHERE p.is_me = 0
+      (SELECT COUNT(*) FROM facebook_comments c WHERE c.target_owner_id = p.id) AS comments,
+      (SELECT COUNT(*) FROM facebook_reactions r WHERE r.target_owner_id = p.id) AS reactions
+    FROM facebook_people p WHERE p.is_me = 0
     ORDER BY comments + reactions DESC LIMIT 15`);
   return { counts, byYear, topPeople };
 }
@@ -276,13 +282,13 @@ async function timeline(ctx, params) {
   const { db } = ctx;
   const year = params.get("year") ?? "";
   const f = new Filters();
-  if (year) f.add("strftime('%Y', timestamp, 'unixepoch') = ?", year);
+  if (year) f.add("strftime('%Y', created_at, 'unixepoch') = ?", year);
   const sql = `
     SELECT * FROM (
-      SELECT 'post' AS type, id, timestamp FROM posts
-      UNION ALL SELECT 'comment', id, timestamp FROM comments
-      UNION ALL SELECT 'reaction', id, timestamp FROM reactions
-    ) ${f.sql} ORDER BY timestamp DESC, type, id DESC`;
+      SELECT 'post' AS type, id, created_at FROM posts
+      UNION ALL SELECT 'comment', id, created_at FROM facebook_comments
+      UNION ALL SELECT 'reaction', id, created_at FROM facebook_reactions
+    ) ${f.sql} ORDER BY created_at DESC, type, id DESC`;
   const { rows, paging } = await paginate(db, sql, f.params, pageNumber(params));
 
   async function load(type, baseSql, alias, loader) {
@@ -298,7 +304,7 @@ async function timeline(ctx, params) {
     reaction: await load("reaction", REACTION_SQL, "r"),
   };
   const items = rows.map((r) => [r.type, lookup[r.type].get(r.id)]);
-  const allYears = [...new Set([...await years(db, "posts"), ...await years(db, "comments"), ...await years(db, "reactions")])]
+  const allYears = [...new Set([...await years(db, "posts"), ...await years(db, "facebook_comments"), ...await years(db, "facebook_reactions")])]
     .sort().reverse();
   return { items, paging, years: allYears, year };
 }
@@ -307,14 +313,17 @@ async function posts(ctx, params) {
   const { db } = ctx;
   const [q, year, kind] = ["q", "year", "kind"].map((k) => params.get(k) ?? "");
   const f = new Filters();
-  if (!ctx.chosen.includes("posts")) f.add("p.id >= ?", SITE_ID);
+  if (!ctx.chosen.includes("posts")) f.add("p.source = 'afterwrd'");
   if (q) f.add("(p.text LIKE ? OR p.title LIKE ? OR p.link_url LIKE ?)", ...Array(3).fill(`%${q}%`));
-  if (year) f.add("strftime('%Y', p.timestamp, 'unixepoch') = ?", year);
-  if (kind) f.add("p.kind = ?", kind);
-  const { rows, paging } = await paginate(db, `${POST_SQL} ${f.sql} ORDER BY p.timestamp DESC`, f.params, pageNumber(params));
-  const own = ctx.chosen.includes("posts") ? "" : `WHERE id >= ${SITE_ID}`;
-  const kinds = (await all(db, `SELECT kind FROM posts ${own} GROUP BY kind ORDER BY COUNT(*) DESC`)).map((r) => r.kind);
-  const postYears = (await all(db, `SELECT DISTINCT strftime('%Y', timestamp, 'unixepoch') AS y FROM posts ${own} ORDER BY y DESC`))
+  if (year) f.add("strftime('%Y', p.created_at, 'unixepoch') = ?", year);
+  // Facebook's kinds, or AFTERWRD_KIND for posts written here (which have none).
+  if (kind === AFTERWRD_KIND) f.add("p.source = 'afterwrd'");
+  else if (kind) f.add("p.kind = ?", kind);
+  const { rows, paging } = await paginate(db, `${POST_SQL} ${f.sql} ORDER BY p.created_at DESC`, f.params, pageNumber(params));
+  const own = ctx.chosen.includes("posts") ? "" : "WHERE source = 'afterwrd'";
+  const kinds = (await all(db, `SELECT COALESCE(kind, '${AFTERWRD_KIND}') AS kind FROM posts ${own} GROUP BY 1 ORDER BY COUNT(*) DESC`))
+    .map((r) => r.kind);
+  const postYears = (await all(db, `SELECT DISTINCT strftime('%Y', created_at, 'unixepoch') AS y FROM posts ${own} ORDER BY y DESC`))
     .map((r) => r.y);
   return { posts: await loadPosts(db, rows), paging, q, year, kind, years: postYears, kinds };
 }
@@ -324,13 +333,13 @@ async function comments(ctx, params) {
   const [q, year, kind] = ["q", "year", "kind"].map((k) => params.get(k) ?? "");
   const f = new Filters();
   if (q) f.add("(c.text LIKE ? OR o.name LIKE ? OR c.group_name LIKE ?)", ...Array(3).fill(`%${q}%`));
-  if (year) f.add("strftime('%Y', c.timestamp, 'unixepoch') = ?", year);
+  if (year) f.add("strftime('%Y', c.created_at, 'unixepoch') = ?", year);
   if (kind) f.add("c.target_kind = ?", kind);
-  const { rows, paging } = await paginate(db, `${COMMENT_SQL} ${f.sql} ORDER BY c.timestamp DESC`, f.params, pageNumber(params));
-  const kinds = (await all(db, `SELECT target_kind FROM comments WHERE target_kind IS NOT NULL
+  const { rows, paging } = await paginate(db, `${COMMENT_SQL} ${f.sql} ORDER BY c.created_at DESC`, f.params, pageNumber(params));
+  const kinds = (await all(db, `SELECT target_kind FROM facebook_comments WHERE target_kind IS NOT NULL
     GROUP BY target_kind ORDER BY COUNT(*) DESC`)).map((r) => r.target_kind);
   return {
-    comments: await loadComments(db, rows), paging, q, year, kind, years: await years(db, "comments"), kinds,
+    comments: await loadComments(db, rows), paging, q, year, kind, years: await years(db, "facebook_comments"), kinds,
   };
 }
 
@@ -339,35 +348,38 @@ async function likes(ctx, params) {
   const [q, year, reaction] = ["q", "year", "reaction"].map((k) => params.get(k) ?? "");
   const f = new Filters();
   if (q) f.add("(o.name LIKE ? OR r.group_name LIKE ?)", ...Array(2).fill(`%${q}%`));
-  if (year) f.add("strftime('%Y', r.timestamp, 'unixepoch') = ?", year);
+  if (year) f.add("strftime('%Y', r.created_at, 'unixepoch') = ?", year);
   if (reaction) f.add("r.reaction = ?", reaction);
-  const { rows, paging } = await paginate(db, `${REACTION_SQL} ${f.sql} ORDER BY r.timestamp DESC`, f.params, pageNumber(params));
-  const reactionTypes = (await all(db, "SELECT reaction FROM reactions GROUP BY reaction ORDER BY COUNT(*) DESC"))
+  const { rows, paging } = await paginate(db, `${REACTION_SQL} ${f.sql} ORDER BY r.created_at DESC`, f.params, pageNumber(params));
+  const reactionTypes = (await all(db, "SELECT reaction FROM facebook_reactions GROUP BY reaction ORDER BY COUNT(*) DESC"))
     .map((r) => r.reaction);
-  return { reactions: rows, paging, q, year, reaction, years: await years(db, "reactions"), reactionTypes };
+  return { reactions: rows, paging, q, year, reaction, years: await years(db, "facebook_reactions"), reactionTypes };
 }
 
-/** Filter for a photo set: an album id, 'other' (unalbumed photos) or 'videos'. */
+/**
+ * Filter for a photo set: an album id, or 'other' and 'videos' (Facebook's photos and videos outside albums: every
+ * photo made on afterwrd is in an album).
+ */
 export function mediaSet(key) {
-  if (key === "videos") return { title: "Videos", where: "album_id IS NULL AND kind = 'video'", params: [] };
-  if (key === "other") return { title: "Other photos", where: "album_id IS NULL AND kind = 'photo'", params: [] };
+  if (key === "videos") return { title: "Videos", where: "album_id IS NULL AND source = 'facebook' AND kind = 'video'", params: [] };
+  if (key === "other") return { title: "Other photos", where: "album_id IS NULL AND source = 'facebook' AND kind = 'photo'", params: [] };
   if (/^\d+$/.test(key)) return { title: null, where: "album_id = ?", params: [Number(key)] };
   return null;
 }
 
 const setStats = (db, where, params) => first(db,
-  `SELECT COUNT(*) AS count, MIN(timestamp) AS first_ts, MAX(timestamp) AS last_ts FROM media WHERE ${where}`, params);
+  `SELECT COUNT(*) AS count, MIN(created_at) AS first_ts, MAX(created_at) AS last_ts FROM media WHERE ${where}`, params);
 
 async function photos(ctx) {
   const { db } = ctx;
   const imported = ctx.chosen.includes("photos");
   const albums = await all(db, `
     SELECT a.id, a.name, m.hash, m.thumb_hash, m.kind, m.width, m.height,
-      COUNT(x.id) AS count, MIN(x.timestamp) AS first_ts, MAX(x.timestamp) AS last_ts
+      COUNT(x.id) AS count, MIN(x.created_at) AS first_ts, MAX(x.created_at) AS last_ts
     FROM albums a
     JOIN media x ON x.album_id = a.id
-    LEFT JOIN media m ON m.id = a.cover_media_id
-    ${imported ? "" : `WHERE a.id >= ${SITE_ID}`}
+    LEFT JOIN media m ON m.id = COALESCE(a.cover_media_id, (SELECT MAX(id) FROM media y WHERE y.album_id = a.id))
+    ${imported ? "" : "WHERE a.source = 'afterwrd'"}
     GROUP BY a.id ORDER BY first_ts DESC`);
   const byYear = groupBy(albums, (a) => fmtDate(a.first_ts).slice(-4));
 
@@ -375,17 +387,17 @@ async function photos(ctx) {
   for (const key of imported ? ["other", "videos"] : []) {
     const { title, where, params } = mediaSet(key);
     const stats = await setStats(db, where, params);
-    const cover = await first(db, `SELECT * FROM media WHERE ${where} ORDER BY timestamp DESC LIMIT 1`, params);
+    const cover = await first(db, `SELECT * FROM media WHERE ${where} ORDER BY created_at DESC LIMIT 1`, params);
     if (cover) collections.push({ key, title, cover, ...stats });
   }
-  const taggedCount = imported ? (await first(db, "SELECT COUNT(*) AS n FROM tagged_photos")).n : 0;
+  const taggedCount = imported ? (await first(db, "SELECT COUNT(*) AS n FROM facebook_tagged_photos")).n : 0;
   return { byYear, collections, tagged: taggedCount };
 }
 
 async function album(ctx, params, key) {
   const { db } = ctx;
   const set = mediaSet(key);
-  if (!set || (!ctx.chosen.includes("photos") && !(/^\d+$/.test(key) && Number(key) >= SITE_ID))) return null;
+  if (!set) return null;
   let { title } = set;
   let info = null;
   if (title === null) {
@@ -393,20 +405,22 @@ async function album(ctx, params, key) {
     if (!info) return null;
     title = info.name;
   }
+  // Facebook's albums only if Photos was published from the download.
+  if (info?.source !== "afterwrd" && !ctx.chosen.includes("photos")) return null;
   const stats = await setStats(db, set.where, set.params);
   const { rows, paging } = await paginate(db, `SELECT * FROM media WHERE ${set.where} ${MEDIA_ORDER}`, set.params,
     pageNumber(params), PHOTO_PAGE_SIZE);
   // Long-running sets read better split by month; a single trip's album doesn't need it.
   const spansMonths = fmtMonth(stats.first_ts) !== fmtMonth(stats.last_ts);
-  const groups = spansMonths ? groupBy(rows, (m) => fmtMonth(m.timestamp)) : [[null, rows]];
+  const groups = spansMonths ? groupBy(rows, (m) => fmtMonth(m.created_at)) : [[null, rows]];
   return { key, title, info, stats, groups, paging };
 }
 
 async function tagged(ctx, params) {
   if (!ctx.chosen.includes("photos")) return null;
   const { rows, paging } = await paginate(ctx.db, `
-    SELECT t.*, p.name AS owner_name FROM tagged_photos t LEFT JOIN people p ON p.id = t.owner_id
-    ORDER BY t.timestamp DESC`, [], pageNumber(params));
+    SELECT t.*, p.name AS owner_name FROM facebook_tagged_photos t LEFT JOIN facebook_people p ON p.id = t.owner_id
+    ORDER BY t.created_at DESC`, [], pageNumber(params));
   return { tagged: rows, paging };
 }
 
@@ -417,11 +431,11 @@ async function photo(ctx, params, id) {
   const setKey = m.album_id ? String(m.album_id) : m.kind === "video" ? "videos" : "other";
   const { where, params: setParams, title } = mediaSet(setKey);
   const setTitle = title ?? (await first(db, "SELECT name FROM albums WHERE id = ?", setParams)).name;
-  const order = "(COALESCE(timestamp, 0), id)";
-  const position = [m.timestamp ?? 0, m.id];
+  const order = "(COALESCE(created_at, 0), id)";
+  const position = [m.created_at ?? 0, m.id];
   const [prev, next, index] = await db.batch([
     db.prepare(`SELECT * FROM media WHERE ${where} AND ${order} < (?, ?)
-      ORDER BY COALESCE(timestamp, 0) DESC, id DESC LIMIT 1`).bind(...setParams, ...position),
+      ORDER BY COALESCE(created_at, 0) DESC, id DESC LIMIT 1`).bind(...setParams, ...position),
     db.prepare(`SELECT * FROM media WHERE ${where} AND ${order} > (?, ?) ${MEDIA_ORDER} LIMIT 1`).bind(...setParams, ...position),
     db.prepare(`SELECT COUNT(*) AS n FROM media WHERE ${where} AND ${order} < (?, ?)`).bind(...setParams, ...position),
   ]);
@@ -434,7 +448,7 @@ async function photo(ctx, params, id) {
   return {
     m, setKey, setTitle, prev: prev.results[0], next: next.results[0], index: before + 1,
     total: (await setStats(db, where, setParams)).count, albumPage: Math.floor(before / PHOTO_PAGE_SIZE) + 1, post, comment,
-    key: photoKey(m), thread: (await loadThreads(db, [photoKey(m)])).get(photoKey(m)),
+    ...await photoThread(db, m),
   };
 }
 
@@ -453,18 +467,18 @@ async function friends(ctx, params) {
   const order = Object.hasOwn(orders, sort) ? orders[sort] : orders.name;
   const people = await all(ctx.db, `
     SELECT p.*,
-      (SELECT COUNT(*) FROM comments c WHERE c.target_owner_id = p.id) AS comments,
-      (SELECT COUNT(*) FROM reactions r WHERE r.target_owner_id = p.id) AS reactions,
+      (SELECT COUNT(*) FROM facebook_comments c WHERE c.target_owner_id = p.id) AS comments,
+      (SELECT COUNT(*) FROM facebook_reactions r WHERE r.target_owner_id = p.id) AS reactions,
       (SELECT COUNT(*) FROM posts x WHERE x.target_id = p.id) AS wall,
-      (SELECT COUNT(*) FROM tagged_photos t WHERE t.owner_id = p.id) AS tagged
-    FROM people p ${f.sql} ORDER BY ${order}`, f.params);
+      (SELECT COUNT(*) FROM facebook_tagged_photos t WHERE t.owner_id = p.id) AS tagged
+    FROM facebook_people p ${f.sql} ORDER BY ${order}`, f.params);
   return { people, q, show, sort };
 }
 
 async function person(ctx, params, id) {
   const { db } = ctx;
   const personId = Number(id);
-  const p = await first(db, "SELECT * FROM people WHERE id = ?", [personId]);
+  const p = await first(db, "SELECT * FROM facebook_people WHERE id = ?", [personId]);
   if (!p) return null;
   const keys = Object.keys(PERSON_TABS);
   const countRows = await db.batch(keys.map((k) => db.prepare(`SELECT COUNT(*) AS n FROM (${PERSON_TABS[k][1]})`).bind(personId)));
@@ -511,7 +525,7 @@ const INTRODUCTIONS_SQL = `SELECT i.id, i.origin, i.name, i.note, c.name AS by_n
 /** Home: write something, then the owner's own posts written here and their friends' newest, together. */
 async function home(ctx, params) {
   const { db } = ctx;
-  const own = await loadPosts(db, await all(db, `${POST_SQL} WHERE p.id >= ? ORDER BY p.timestamp DESC LIMIT 30`, [SITE_ID]));
+  const own = await loadPosts(db, await all(db, `${POST_SQL} WHERE p.source = 'afterwrd' ORDER BY p.created_at DESC LIMIT 30`));
   const friendsFeed = await loadFeed(db, ctx.url.origin);
   return {
     own, feed: friendsFeed, onThisDay: await onThisDay(ctx, 2), friends: friendsFeed.connections,
@@ -537,14 +551,21 @@ async function memories(ctx) {
 async function onThisDay(ctx, limit) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" })
     .formatToParts(new Date()).map(({ type, value }) => [type, value]));
-  const rows = await all(ctx.db, `${POST_SQL} WHERE strftime('%m-%d', p.timestamp, 'unixepoch') = ?
-    AND strftime('%Y', p.timestamp, 'unixepoch') < ? ORDER BY p.timestamp DESC LIMIT ?`, [`${parts.month}-${parts.day}`, parts.year, limit]);
+  const rows = await all(ctx.db, `${POST_SQL} WHERE strftime('%m-%d', p.created_at, 'unixepoch') = ?
+    AND strftime('%Y', p.created_at, 'unixepoch') < ? ORDER BY p.created_at DESC LIMIT ?`, [`${parts.month}-${parts.day}`, parts.year, limit]);
   return loadPosts(ctx.db, rows, { threads: false });
 }
 
-/** A photo's permanent address (public/static/activity.js), which survives re-imports, leads to its page. */
+/** A photo's comments ({key, thread}), if it takes them: only a picture posted on afterwrd, for now. */
+async function photoThread(db, m) {
+  const key = photoKey(m);
+  if (!key || !commentable(await findTarget(db, key))) return { key: null, thread: null };
+  return { key, thread: (await loadThreads(db, [key])).get(key) };
+}
+
+/** A photo's permanent address (public/static/activity.js) leads to its page: afterwrd's, if it's there too. */
 async function photoByHash(ctx, params, hash) {
-  const m = await first(ctx.db, "SELECT id FROM media WHERE hash = ? ORDER BY id LIMIT 1", [hash]);
+  const m = await first(ctx.db, "SELECT id FROM media WHERE hash = ? ORDER BY source = 'afterwrd' DESC, id LIMIT 1", [hash]);
   return m ? Response.redirect(`${ctx.url.origin}/photos/${m.id}${ctx.url.hash}`, 302) : null;
 }
 
@@ -577,7 +598,7 @@ async function friendsIndex(ctx) {
   const [connections, links, people, requests, invites, introductions] = await db.batch([
     db.prepare("SELECT * FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NOT NULL ORDER BY name COLLATE NOCASE"),
     db.prepare("SELECT * FROM friend_links"),
-    db.prepare("SELECT id, name, friend_since FROM people WHERE is_me = 0 AND friend_since IS NOT NULL ORDER BY name COLLATE NOCASE"),
+    db.prepare("SELECT id, name, friend_since FROM facebook_people WHERE is_me = 0 AND friend_since IS NOT NULL ORDER BY name COLLATE NOCASE"),
     db.prepare(`SELECT id, origin, name, invited_as, via_kind, via_name, connected_at FROM connections
       WHERE connected_at IS NOT NULL AND approved_at IS NULL ORDER BY connected_at DESC`),
     db.prepare(`SELECT person_name, MAX(created_at) AS invited_at FROM connect_links
@@ -609,7 +630,7 @@ async function friendsIndex(ctx) {
 
 /** Who a friend on afterwrd is in the owner's Facebook download, if the owner has linked them. */
 async function facebookSelf(db, connection) {
-  return first(db, `SELECT p.id, p.name FROM friend_links l JOIN people p ON p.name = l.person_name COLLATE NOCASE AND p.is_me = 0
+  return first(db, `SELECT p.id, p.name FROM friend_links l JOIN facebook_people p ON p.name = l.person_name COLLATE NOCASE AND p.is_me = 0
     WHERE l.connection_id = ? LIMIT 1`, [connection.id]);
 }
 

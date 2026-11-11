@@ -15,10 +15,9 @@
 // owner wrote or commented on that post there (receiveGroupNote). The only other note a group sends is to those going
 // to an event (or who might) when it changes or is called off (notifyEventChange); a member's site keeps it only if
 // its owner still has plans for that event (group_plans).
-import { CONTEXT, groupPostId, POST_KEY_RE, postId, postKey, targetId } from "../public/static/activity.js";
+import { CONTEXT, groupPostId, POST_KEY_RE, postId, targetId } from "../public/static/activity.js";
 import { eventObject, eventWhen, parseEvent } from "./calendar.js";
 import { outbox } from "./outbox.js";
-import { SITE_ID } from "./posts.js";
 import { now } from "./util.js";
 
 const SNIPPET = 200;
@@ -35,20 +34,20 @@ async function send(env, connections, note) {
   if (connections.length) await outbox(env).send(connections.map((c) => c.id), { "@context": CONTEXT, ...note });
 }
 
-/** Tells every friend about the newest post here (call after it's been made and mirrored). */
-export async function notifyNewPost(env, origin) {
+/** Tells every friend about a new post here, by its address (posts.key), once it's been made. */
+export async function notifyNewPost(env, origin, key) {
   const db = env.DB;
-  const post = await db.prepare("SELECT * FROM posts WHERE id >= ? ORDER BY timestamp DESC, id DESC LIMIT 1").bind(SITE_ID).first();
+  const post = await db.prepare("SELECT * FROM posts WHERE key = ? AND source = 'afterwrd'").bind(key).first();
   if (!post) return;
   const { results } = await db.prepare(`SELECT id FROM connections
     WHERE connected_at IS NOT NULL AND approved_at IS NOT NULL ORDER BY id`).all();
-  await send(env, results, { type: "Create", object: { type: "Note", id: postId(origin, postKey(post)), content: snippet(post.text || post.title) } });
+  await send(env, results, { type: "Create", object: { type: "Note", id: postId(origin, post.key), content: snippet(post.text || post.title) } });
 }
 
 /** Tells the friends who've commented on `target` here about a new comment on it, apart from its writer's site. */
 export async function notifyComment(env, origin, target, { name, text, from = null }) {
   const { results } = await env.DB.prepare(`SELECT DISTINCT c.id FROM connections c
-    JOIN site_comments s ON s.origin = c.origin AND s.target = ?
+    JOIN comments s ON s.origin = c.origin AND s.target = ?
     WHERE c.connected_at IS NOT NULL AND c.approved_at IS NOT NULL AND c.origin != ? ORDER BY c.id`).bind(target, from ?? "").all();
   await send(env, results, { type: "Create", object: { type: "Note", inReplyTo: targetId(origin, target), content: snippet(text),
     attributedTo: { type: "Person", name: snippet(name, 100) } } });

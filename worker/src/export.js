@@ -11,19 +11,22 @@ const PAGE = 1000;
 const TABLES = {
   // The rest of settings are the site's own keys.
   settings: { columns: "key, value", where: "key IN ('sections', 'profile_hash', 'cover_hash')" },
-  people: { columns: "*" },
+  // Posts, photos and albums, made on afterwrd and from the Facebook download (`source` says which).
   albums: { columns: "*" },
   posts: { columns: "*" },
-  post_tags: { columns: "*" },
-  comments: { columns: "*" },
-  reactions: { columns: "*" },
   media: { columns: "*" },
-  tagged_photos: { columns: "*" },
-  site_comments: { columns: "*" },
+  // Facebook's record of the owner's life there.
+  facebook_people: { columns: "*" },
+  facebook_post_tags: { columns: "*" },
+  facebook_comments: { columns: "*" },
+  facebook_reactions: { columns: "*" },
+  facebook_tagged_photos: { columns: "*" },
+  // Comments here, and the owner's on friends' sites.
+  comments: { columns: "*" },
   comments_elsewhere: { columns: "*" },
   // Polls in the owner's posts, and who answered: the owner's own records.
-  site_polls: { columns: "*" },
-  site_poll_votes: { columns: "post_id, voter, name, choices, voted_at" },
+  polls: { columns: "*" },
+  poll_votes: { columns: "post_id, voter, name, choices, voted_at" },
   connections: { columns: "id, origin, name, connected_at", where: "approved_at IS NOT NULL" },
   // Groups: which, and what the owner posted and said in them. No keys.
   groups: { columns: "id, name, about, origin, remote_id, host_name, joined_at, role", where: "joined_at IS NOT NULL" },

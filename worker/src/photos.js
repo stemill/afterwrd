@@ -5,16 +5,18 @@
 //   POST /_admin/albums/<id>/delete         (a form)
 //   POST /_admin/photos/<id>/delete         (a form)
 //   POST /_admin/profile                    role (profile|cover), hash, back (a form): any photo here
-// Album and photo ids are the archive's copies (SITE_ID and up, see posts.js); only those made here can change.
-import { photoKey } from "./archive/comments.js";
+// Only albums and photos made on afterwrd (source 'afterwrd') can change, and "Posted on afterwrd" (role 'posts', where
+// photos posted without an album go) is neither renamed nor deleted.
 import { safeNext } from "./auth.js";
-import { addPhotos, checkPhotos, mirror, removeUnusedFiles, SITE_ID } from "./posts.js";
+import { addPhotos, checkPhotos, newPost, photoCommentsGone, removeUnusedFiles, roleAlbum, ROLE_ALBUMS } from "./posts.js";
 import { html, json, now, pageData, Refusal } from "./util.js";
 import { addPage } from "./views/photos.js";
 import { notifyNewPost } from "./notify.js";
 
 const MAX_BATCH = 50;
-const ROLES = { profile: "Profile pictures", cover: "Cover photos" };
+const ROLES = ["profile", "cover"];
+// An album of the owner's own that they can change, add to and delete.
+const OWN_ALBUM = "SELECT * FROM albums WHERE id = ? AND source = 'afterwrd' AND role IS NOT 'posts'";
 const clean = (v, max) => (typeof v === "string" ? v.replace(/\r\n?/g, "\n").trim().slice(0, max) : "");
 
 /**
@@ -25,9 +27,9 @@ export async function profilePictures(db) {
   const [chosen, facebook] = await db.batch([
     db.prepare(`SELECT s.key, m.id, m.hash, m.thumb_hash FROM settings s
       JOIN media m ON m.hash = s.value WHERE s.key IN ('profile_hash', 'cover_hash') GROUP BY s.key`),
-    db.prepare(`SELECT 'profile_hash' AS key, m.id, m.hash, m.thumb_hash FROM people p JOIN media m ON m.id = p.profile_media_id
+    db.prepare(`SELECT 'profile_hash' AS key, m.id, m.hash, m.thumb_hash FROM facebook_people p JOIN media m ON m.id = p.profile_media_id
         WHERE p.is_me = 1 AND m.hash IS NOT NULL
-      UNION ALL SELECT 'cover_hash', m.id, m.hash, m.thumb_hash FROM people p JOIN media m ON m.id = p.cover_media_id
+      UNION ALL SELECT 'cover_hash', m.id, m.hash, m.thumb_hash FROM facebook_people p JOIN media m ON m.id = p.cover_media_id
         WHERE p.is_me = 1 AND m.hash IS NOT NULL`),
   ]);
   const pick = (key) => chosen.results.find((r) => r.key === key) ?? facebook.results.find((r) => r.key === key) ?? null;
@@ -37,10 +39,11 @@ export async function profilePictures(db) {
 export async function handlePhotos(request, env, url) {
   const db = env.DB;
   if (request.method === "GET" && url.pathname === "/_admin/photos/add") {
-    const { results: albums } = await db.prepare("SELECT id, name FROM site_albums ORDER BY created_at DESC").all();
-    const role = Object.hasOwn(ROLES, url.searchParams.get("for")) ? url.searchParams.get("for") : null;
-    // Albums by their archive ids (posts.js SITE_ID), as everywhere else; `chosen` is the one to start with.
-    return html(addPage(pageData(env, { albums: albums.map((a) => ({ id: SITE_ID + a.id, name: a.name })),
+    const { results: albums } = await db.prepare(`SELECT id, name FROM albums WHERE source = 'afterwrd' AND role IS NOT 'posts'
+      ORDER BY created_at DESC`).all();
+    const role = ROLES.includes(url.searchParams.get("for")) ? url.searchParams.get("for") : null;
+    // `chosen` is the one to start with.
+    return html(addPage(pageData(env, { albums,
       chosen: Number(url.searchParams.get("album")), role, max: role ? 1 : MAX_BATCH })));
   }
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
@@ -82,12 +85,12 @@ export async function handlePhotos(request, env, url) {
   return new Response("Not found", { status: 404 });
 }
 
-// --- actions (see util.js Refusal). Albums and photos go by their archive ids (SITE_ID and up). ----------------------
+// --- actions (see util.js Refusal) -----------------------------------------------------------------------------------
 
 /** A profile picture or cover (`role`), from any photo here (`hash`). Does nothing if either isn't right. */
 export async function choosePicture(env, { role, hash }) {
   const db = env.DB;
-  if (Object.hasOwn(ROLES, role) && (await db.prepare("SELECT 1 FROM media WHERE hash = ?").bind(hash).first())) {
+  if (ROLES.includes(role) && (await db.prepare("SELECT 1 FROM media WHERE hash = ?").bind(hash).first())) {
     await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(`${role}_hash`, hash).run();
   }
 }
@@ -95,14 +98,10 @@ export async function choosePicture(env, { role, hash }) {
 /** Renames an album made here (an empty name changes nothing). False if it isn't one. */
 export async function editAlbum(env, albumId, { name, description }) {
   const db = env.DB;
-  const id = albumId - SITE_ID;
-  if (id < 1 || !(await db.prepare("SELECT 1 FROM site_albums WHERE id = ?").bind(id).first())) return false;
+  if (!(await db.prepare(OWN_ALBUM).bind(albumId).first())) return false;
   name = clean(name, 200);
   if (name) {
-    await db.batch([
-      db.prepare("UPDATE site_albums SET name = ?, description = ? WHERE id = ?").bind(name, clean(description, 2000) || null, id),
-      ...mirror(db),
-    ]);
+    await db.prepare("UPDATE albums SET name = ?, description = ? WHERE id = ?").bind(name, clean(description, 2000) || null, albumId).run();
   }
   return true;
 }
@@ -110,49 +109,43 @@ export async function editAlbum(env, albumId, { name, description }) {
 /** Deletes an album made here and its photos, apart from any also in a post, which move to "Posted on afterwrd". False if it isn't one. */
 export async function deleteAlbum(env, albumId) {
   const db = env.DB;
-  const id = albumId - SITE_ID;
-  if (id < 1 || !(await db.prepare("SELECT 1 FROM site_albums WHERE id = ?").bind(id).first())) return false;
-  const { results: photos } = await db.prepare("SELECT * FROM site_photos WHERE album_id = ?").bind(id).all();
+  if (!(await db.prepare(OWN_ALBUM).bind(albumId).first())) return false;
+  const { results: photos } = await db.prepare("SELECT * FROM media WHERE album_id = ?").bind(albumId).all();
   const going = photos.filter((f) => f.post_id === null);
   await db.batch([
-    db.prepare("DELETE FROM site_photos WHERE album_id = ? AND post_id IS NULL").bind(id),
-    db.prepare("UPDATE site_photos SET album_id = NULL WHERE album_id = ?").bind(id),
-    db.prepare("DELETE FROM site_albums WHERE id = ?").bind(id),
-    ...mirror(db),
-    ...comments(db, going),
+    ...(going.length < photos.length ? [roleAlbum(db, "posts")] : []),
+    db.prepare("DELETE FROM media WHERE album_id = ? AND post_id IS NULL").bind(albumId),
+    db.prepare("UPDATE media SET album_id = (SELECT id FROM albums WHERE role = 'posts') WHERE album_id = ?").bind(albumId),
+    db.prepare("DELETE FROM albums WHERE id = ?").bind(albumId),
+    ...photoCommentsGone(db, going),
   ]);
   await removeUnusedFiles(env, going.flatMap((f) => [f.hash, f.thumb_hash]));
   return true;
 }
 
 /**
- * Deletes a photo made here (and a post left with nothing to show). Returns where it was: { album } (its archive id,
- * or null) and { inPost }; or null if it isn't one.
+ * Deletes a photo made here (and a post left with nothing to show, with its comments). Returns where it was:
+ * { album } (its id) and { inPost }; or null if it isn't one.
  */
 export async function deletePhoto(env, photoId) {
   const db = env.DB;
-  const f = await db.prepare("SELECT * FROM site_photos WHERE id = ?").bind(photoId - SITE_ID).first();
+  const f = await db.prepare("SELECT * FROM media WHERE id = ? AND source = 'afterwrd'").bind(photoId).first();
   if (!f) return null;
+  const EMPTY_POST = "SELECT key FROM posts WHERE id = ?1 AND text IS NULL AND NOT EXISTS (SELECT 1 FROM media WHERE post_id = ?1)";
   await db.batch([
-    db.prepare("DELETE FROM site_photos WHERE id = ?").bind(f.id),
+    db.prepare("DELETE FROM media WHERE id = ?").bind(f.id),
     // A post left with nothing to show goes too.
-    db.prepare(`DELETE FROM site_posts WHERE id = ? AND text IS NULL
-      AND NOT EXISTS (SELECT 1 FROM site_photos WHERE post_id = site_posts.id)`).bind(f.post_id),
-    ...mirror(db),
-    ...comments(db, [f]),
+    db.prepare(`DELETE FROM comments WHERE target IN (${EMPTY_POST})`).bind(f.post_id),
+    db.prepare(`DELETE FROM posts WHERE key IN (${EMPTY_POST})`).bind(f.post_id),
+    ...photoCommentsGone(db, [f]),
   ]);
   await removeUnusedFiles(env, [f.hash, f.thumb_hash]);
-  return { album: f.album_id !== null ? SITE_ID + f.album_id : null, inPost: f.post_id !== null };
+  return { album: f.album_id, inPost: f.post_id !== null };
 }
-
-// Comments on photos are kept by picture (photo-<hash>), so they go only once no photo here shows that picture: an
-// imported photo can have the same one. Run after mirror().
-const comments = (db, photos) => photos.map((f) => db.prepare(`DELETE FROM site_comments WHERE target = ?
-  AND NOT EXISTS (SELECT 1 FROM media WHERE hash = ?)`).bind(photoKey(f), f.hash));
 
 /**
  * Adds uploaded photos to an album here (a new one, one made before, or, for a profile picture or cover (`role`),
- * the album kept for those), and optionally shares them as a post. Returns { album } (its archive id) and { role }.
+ * the album kept for those), and optionally shares them as a post. Returns { album } (its id) and { role }.
  */
 export async function addToAlbum(env, origin, body) {
   const db = env.DB;
@@ -160,25 +153,22 @@ export async function addToAlbum(env, origin, body) {
   if (!photos.length) throw new Refusal("Choose some photos first.");
   const problem = await checkPhotos(env, photos, MAX_BATCH);
   if (problem) throw new Refusal(problem);
-  const role = Object.hasOwn(ROLES, body.role) ? body.role : null;
+  const role = ROLES.includes(body.role) ? body.role : null;
 
   // Which album: a new one, one made here before, or (for a profile picture or cover) the album kept for those.
   let albumId = null;
   let name;
   if (role) {
-    name = ROLES[role];
-    albumId = (await db.prepare("SELECT id FROM site_albums WHERE name = ? ORDER BY id LIMIT 1").bind(name).first())?.id ?? null;
+    name = ROLE_ALBUMS[role];
   } else if (body.album === "new") {
     name = clean(body.name, 200);
     if (!name) throw new Refusal("Give the new album a name.");
+    albumId = (await db.prepare("INSERT INTO albums (source, name, description, created_at) VALUES ('afterwrd', ?, ?, ?) RETURNING id")
+      .bind(name, clean(body.description, 2000) || null, now()).first()).id;
   } else {
-    const found = await db.prepare("SELECT id, name FROM site_albums WHERE id = ?").bind(Number(body.album) - SITE_ID).first();
+    const found = await db.prepare(OWN_ALBUM).bind(Number(body.album)).first();
     if (!found) throw new Refusal("That album isn't there any more.");
     [albumId, name] = [found.id, found.name];
-  }
-  if (albumId === null) {
-    albumId = (await db.prepare("INSERT INTO site_albums (name, description, created_at) VALUES (?, ?, ?) RETURNING id")
-      .bind(name, clean(body.description, 2000) || null, now()).first()).id;
   }
 
   // Optionally as a post too, so friends see it on their Home.
@@ -187,12 +177,14 @@ export async function addToAlbum(env, origin, body) {
   const n = photos.length;
   const title = role === "profile" ? "Updated their profile picture." : role === "cover" ? "Updated their cover photo."
     : `Added ${n} photo${n === 1 ? "" : "s"} to ${name}.`;
+  const [post, postKey] = share ? newPost(db, { text: text || null, title }) : [null, null];
   await db.batch([
-    ...(share ? [db.prepare("INSERT INTO site_posts (created_at, text, title) VALUES (?, ?, ?)").bind(now(), text || null, title)] : []),
-    ...addPhotos(db, photos, { inPost: share, albumId }),
+    ...(post ? [post] : []),
+    ...(role ? [roleAlbum(db, role)] : []),
+    ...addPhotos(db, photos, { albumId, role, postKey }),
     ...(role ? [db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").bind(`${role}_hash`, photos[0].hash)] : []),
-    ...mirror(db),
   ]);
-  if (share) await notifyNewPost(env, origin);
-  return { album: SITE_ID + albumId, role };
+  if (share) await notifyNewPost(env, origin, postKey);
+  albumId ??= (await db.prepare("SELECT id FROM albums WHERE role = ?").bind(role).first()).id;
+  return { album: albumId, role };
 }

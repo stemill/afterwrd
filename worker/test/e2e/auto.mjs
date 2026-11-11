@@ -222,6 +222,29 @@ cf.versions.length = 0; cf.deployments.length = 0;
 s = await dailyRun();
 check("after that it isn't tried again by itself", cf.versions.length === 0 && cf.deployments.length === 0);
 
+// --- a release that fails its checks after changing the database: kept, as the old version can't run on it ---------
+// (Stood in for by a migration this version has never heard of, as the new version's would be.)
+release("99.0.5", { signedAgo: 5 * 86400 });
+const beforeKept = cf.live;
+cf.deployments.push = (d) => { if (d.to !== beforeKept) cf.unhealthy.add(d.to); return realPost(d); };
+sql("INSERT INTO d1_migrations (name) VALUES ('9999_from_a_newer_version')");
+s = await dailyRun();
+check("a release that had changed the database is kept, not put back", s.last?.version === "99.0.5" && s.last?.result === "kept"
+  && cf.live !== beforeKept && cf.deployments.length === 1, `${JSON.stringify(s.last)} deployments=${cf.deployments.length}`);
+check("…and isn't counted as failing", !s.failed?.includes("99.0.5") && !s.tries?.["99.0.5"]);
+const holding = await owner.goto(`${BASE}/`);
+check("this (older) version says the site is being updated, and writes nothing", holding.status() === 503
+  && (await text("body")).includes("This site is being updated"));
+const peerAnswer = await fetch(`${BASE}/_peer/feed`, { headers: { Authorization: `Bearer ${"x".repeat(43)}` } });
+check("…to other sites too", peerAnswer.status === 503 && (await peerAnswer.json()).error?.includes("being updated"));
+sql("DELETE FROM d1_migrations WHERE name = '9999_from_a_newer_version'");
+await owner.goto(`${BASE}/`);
+check("Home says what happened", (await text()).includes("failed its checks after updating your site's database, so it was kept"));
+cf.deployments.push = realPost;
+drop("99.0.5");
+cf.live = beforeKept;
+cf.versions.length = 0; cf.deployments.length = 0;
+
 // --- signatures that don't match, the wait, and new stores -------------------------------------------------------
 release("99.0.4", { signedAgo: 5 * 86400, tamper: true });
 s = await dailyRun();
@@ -298,6 +321,22 @@ check("…and says how to remove it in Cloudflare too", (await text("#auto")).in
 const refreshesBefore = token.refreshes.length;
 s = await dailyRun();
 check("once off, the run does nothing at all", token.refreshes.length === refreshesBefore && cf.versions.length === 0);
+
+// --- what the site keeps about its updates (migrate.js) -----------------------------------------------------------
+const history = sql("SELECT version, from_version FROM updates ORDER BY id");
+check("this version noted itself once, when it first ran", history.length === 1 && history[0].from_version === null, JSON.stringify(history));
+await owner.goto(`${BASE}/_admin/update`);
+check("…and the Update page lists it", (await text("#history")).includes(`afterwrd ${history[0].version}`));
+// A newer version whose database update failed (it notes why, as the database is left as it was).
+const problem = { version: "99.0.7", migration: "0099_example", error: "UNIQUE constraint failed: posts.key", at: Math.floor(Date.now() / 1000) };
+sql(`INSERT OR REPLACE INTO settings (key, value) VALUES ('update_problem', '${JSON.stringify(problem)}')`);
+await owner.goto(`${BASE}/_admin/update`);
+check("the Update page says a newer version couldn't update the database, and why", (await text("#update-problem"))
+  .includes("afterwrd 99.0.7 couldn't update your site's database") && (await text("#update-problem")).includes("0099_example: UNIQUE constraint failed"));
+sql("UPDATE settings SET value = json_set(value, '$.version', '0.0.1') WHERE key = 'update_problem'");
+await owner.goto(`${BASE}/_admin/update`);
+check("…but not one from an older version", !(await owner.$("#update-problem")));
+sql("DELETE FROM settings WHERE key = 'update_problem'");
 
 check("no page errors", errors.length === 0, errors.join(" | "));
 await browser.close();

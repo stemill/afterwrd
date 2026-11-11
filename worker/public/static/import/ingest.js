@@ -1,7 +1,7 @@
-// Reads a Facebook "Download your information" export (JSON format) into the archive's tables.
-// A port of afterwrd/ingest.py that runs in the browser, and in Node for tests: same rules, same order, so the
-// rows match. `source` reads the export's files (see sources.js). Photos aren't opened here; their sizes and
-// thumbnails are worked out while uploading.
+// Reads a Facebook "Download your information" export (JSON format) into the archive's tables (schema.js). Runs in
+// the browser, and in Node for tests. `source` reads the export's files (see sources.js). Photos aren't opened here;
+// their sizes and thumbnails are worked out while uploading.
+import { facebookPostKey } from "../activity.js";
 import { ARCHIVE, emptyRow } from "./schema.js";
 
 const TARGET_KINDS = "life event|post|photo|comment|reel|link|album|note|event|video|status";
@@ -104,6 +104,7 @@ export async function ingest(source, { log = () => {} } = {}) {
   const people = new Map();
   const mediaByPath = new Map();
   const tagsSeen = new Set();
+  const postsByKey = new Map();
   const unparsed = new Map();
 
   function insert(table, fields) {
@@ -115,7 +116,7 @@ export async function ingest(source, { log = () => {} } = {}) {
 
   function person(name, fields = {}) {
     if (!name) return null;
-    if (!people.has(name)) people.set(name, insert("people", { name }));
+    if (!people.has(name)) people.set(name, insert("facebook_people", { name }));
     return Object.assign(people.get(name), fields).id;
   }
 
@@ -150,7 +151,7 @@ export async function ingest(source, { log = () => {} } = {}) {
     const row = insert("media", {
       path: uri,
       kind: (await isVideo(file)) ? "video" : "photo",
-      timestamp: m.creation_timestamp || null,
+      created_at: m.creation_timestamp || null,
       taken_at: meta.taken_timestamp || null,
       description: m.description || null,
       latitude: meta.latitude ?? null,
@@ -172,7 +173,7 @@ export async function ingest(source, { log = () => {} } = {}) {
     return [g.actor, g.verb, (g.own ? g.actor : g.owner) ?? null, g.kind, g.group ?? null];
   }
 
-  // --- the import, in afterwrd/ingest.py's order ------------------------------
+  // --- the import ------------------------------------------------------------------
 
   const profile = await load("personal_information/profile_information/profile_information.json");
   if (!profile) throw new Error("This doesn't look like a Facebook export: it has no profile information.");
@@ -263,8 +264,8 @@ export async function ingest(source, { log = () => {} } = {}) {
 
     place = place || {};
     const coords = place.coordinate || {};
-    const row = insert("posts", {
-      timestamp: p.timestamp,
+    const fields = {
+      created_at: p.timestamp,
       kind,
       title: title || null,
       text,
@@ -276,13 +277,18 @@ export async function ingest(source, { log = () => {} } = {}) {
       latitude: coords.latitude ?? null,
       longitude: coords.longitude ?? null,
       fbid,
-    });
+    };
+    // Two posts at the same second saying exactly the same thing would share an address: they're one post, with
+    // both's photos and tags.
+    const key = facebookPostKey(fields);
+    let row = postsByKey.get(key);
+    if (!row) postsByKey.set(key, row = insert("posts", { key, ...fields }));
     for (const tag of p.tags ?? []) {
       const personId = person(tag.name);
       const key = `${row.id}:${personId}`;
       if (personId === null || tagsSeen.has(key)) continue; // INSERT OR IGNORE
       tagsSeen.add(key);
-      tables.post_tags.push({ post_id: row.id, person_id: personId });
+      tables.facebook_post_tags.push({ post_id: row.id, person_id: personId });
     }
     for (const x of attached) await media(x, { post_id: row.id });
   }
@@ -310,8 +316,8 @@ export async function ingest(source, { log = () => {} } = {}) {
       }
     }
     const authorId = person(data.author || actor);
-    const row = insert("comments", {
-      timestamp: data.timestamp || c.timestamp,
+    const row = insert("facebook_comments", {
+      created_at: data.timestamp || c.timestamp,
       author_id: authorId,
       action: verb === "replied to" ? "replied" : "commented",
       target_owner_id: person(owner),
@@ -361,8 +367,8 @@ export async function ingest(source, { log = () => {} } = {}) {
     const match = candidates.find((c) => c.owner === owner) ?? candidates[0] ?? null;
     if (match) candidates.splice(candidates.indexOf(match), 1);
     const found = match ?? {};
-    insert("reactions", {
-      timestamp: e.timestamp,
+    insert("facebook_reactions", {
+      created_at: e.timestamp,
       reaction: reactionName(raw.reaction || found.reaction),
       target_owner_id: person(owner || found.owner),
       target_kind: kind || found.kind || null,
@@ -374,8 +380,8 @@ export async function ingest(source, { log = () => {} } = {}) {
   }
   for (const [ts, leftovers] of richByTs) {
     for (const r of leftovers) {
-      insert("reactions", {
-        timestamp: ts,
+      insert("facebook_reactions", {
+        created_at: ts,
         reaction: reactionName(r.reaction),
         target_owner_id: person(r.owner),
         target_kind: r.kind,
@@ -391,7 +397,7 @@ export async function ingest(source, { log = () => {} } = {}) {
   const taggedRel = "your_facebook_activity/activity_you're_tagged_in/photos_and_videos_you're_tagged_in.json";
   for (const e of await load(taggedRel) ?? []) {
     const v = labelValues(e);
-    insert("tagged_photos", { timestamp: e.timestamp, owner_id: person(v.Name), url: v.URL ?? null, fbid: e.fbid ?? null });
+    insert("facebook_tagged_photos", { created_at: e.timestamp, owner_id: person(v.Name), url: v.URL ?? null, fbid: e.fbid ?? null });
   }
 
   // My current profile picture and cover photo. The profile update history records each profile picture
@@ -408,9 +414,9 @@ export async function ingest(source, { log = () => {} } = {}) {
   }
   if (!("cover_media_id" in latest)) {
     const coverAlbums = new Set(tables.albums.filter((a) => a.name === "Cover photos").map((a) => a.id));
-    // ORDER BY timestamp DESC, id DESC, with SQLite's NULLs-last for DESC
+    // ORDER BY created_at DESC, id DESC, with SQLite's NULLs-last for DESC
     const newest = tables.media.filter((x) => coverAlbums.has(x.album_id))
-      .sort((a, b) => (b.timestamp ?? -Infinity) - (a.timestamp ?? -Infinity) || b.id - a.id)[0];
+      .sort((a, b) => (b.created_at ?? -Infinity) - (a.created_at ?? -Infinity) || b.id - a.id)[0];
     if (newest) latest.cover_media_id = newest.id;
   }
   if (Object.keys(latest).length) person(me, latest);

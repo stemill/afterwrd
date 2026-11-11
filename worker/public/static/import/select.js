@@ -20,12 +20,12 @@ export function select(tables, sections, sizeOf, { locations = false } = {}) {
   const postsWithMedia = withMedia("post_id");
   const commentsWithMedia = withMedia("comment_id");
   let posts = allPosts ? tables.posts : on("photos") ? tables.posts.filter((p) => postsWithMedia.has(p.id)) : [];
-  let comments = allComments ? tables.comments
-    : on("photos") ? tables.comments.filter((c) => commentsWithMedia.has(c.id)) : [];
-  const reactions = on("likes", "timeline", "overview", "friends") ? tables.reactions : [];
-  const tagged = on("photos", "overview", "friends") ? tables.tagged_photos : [];
+  let comments = allComments ? tables.facebook_comments
+    : on("photos") ? tables.facebook_comments.filter((c) => commentsWithMedia.has(c.id)) : [];
+  const reactions = on("likes", "timeline", "overview", "friends") ? tables.facebook_reactions : [];
+  const tagged = on("photos", "overview", "friends") ? tables.facebook_tagged_photos : [];
   const albums = on("photos", "overview") ? tables.albums : [];
-  const me = tables.people.find((p) => p.is_me);
+  const me = tables.facebook_people.find((p) => p.is_me);
 
   let postIds = new Set(posts.map((p) => p.id));
   let commentIds = new Set(comments.map((c) => c.id));
@@ -45,14 +45,14 @@ export function select(tables, sections, sizeOf, { locations = false } = {}) {
   if (!allComments) comments = comments.filter((c) => media.some((m) => m.comment_id === c.id));
   postIds = new Set(posts.map((p) => p.id));
   commentIds = new Set(comments.map((c) => c.id));
-  const postTags = tables.post_tags.filter((t) => postIds.has(t.post_id));
+  const postTags = tables.facebook_post_tags.filter((t) => postIds.has(t.post_id));
 
   // Everyone, with friendship dates, only if the friends section is published; otherwise just the people the
   // published rows name, without them.
   const named = new Set([me.id, ...posts.map((p) => p.target_id), ...postTags.map((t) => t.person_id),
     ...comments.flatMap((c) => [c.target_owner_id, c.author_id]), ...reactions.map((r) => r.target_owner_id),
     ...tagged.map((t) => t.owner_id)]);
-  const people = tables.people
+  const people = tables.facebook_people
     .filter((p) => on("friends") || named.has(p.id))
     .map((p) => ({
       ...p,
@@ -65,8 +65,8 @@ export function select(tables, sections, sizeOf, { locations = false } = {}) {
   const placeless = (rows) => (locations ? rows : rows.map((r) => ({ ...r, latitude: null, longitude: null })));
   return {
     tables: {
-      people, albums, posts: placeless(posts), post_tags: postTags, comments, reactions, media: placeless(media),
-      tagged_photos: tagged,
+      facebook_people: people, albums, posts: placeless(posts), facebook_post_tags: postTags, facebook_comments: comments,
+      facebook_reactions: reactions, media: placeless(media), facebook_tagged_photos: tagged,
     },
     tooBig,
   };

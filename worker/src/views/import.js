@@ -53,7 +53,7 @@ ${ownerHeader("import")}
 <h1>Import your Facebook archive</h1>
 <p class="meta">Signed in as ${escape(owner)}. Choose the download Facebook gave you, in JSON format.
 Your browser reads it on this computer and uploads only the sections you tick below. Importing replaces
-what's published now; visitors see the old version until the new one is complete.</p>
+what you imported before (never what you've posted on afterwrd); the old version stays until the new one is complete.</p>
 
 <div class="pickers">
   <label class="picker"><strong>The zip file(s) from Facebook</strong>

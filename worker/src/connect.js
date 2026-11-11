@@ -376,7 +376,7 @@ export async function makeFriendLink(env, origin) {
 /** A friend link for someone in the Facebook download alone (replacing one made for them before): { name, link, message }. */
 export async function inviteFromFacebook(env, origin, name) {
   const db = env.DB;
-  const person = await db.prepare("SELECT name FROM people WHERE is_me = 0 AND name = ? COLLATE NOCASE LIMIT 1")
+  const person = await db.prepare("SELECT name FROM facebook_people WHERE is_me = 0 AND name = ? COLLATE NOCASE LIMIT 1")
     .bind(name.trim()).first();
   if (!person) throw new Refusal("That name isn't in your Facebook download.", 404);
   const token = randomToken();
@@ -429,7 +429,7 @@ export async function linkToFacebook(env, id, { unlink, none, name }) {
     return;
   }
   const person = none ? { name: null }
-    : await db.prepare("SELECT name FROM people WHERE is_me = 0 AND name = ? COLLATE NOCASE LIMIT 1").bind(name.trim()).first();
+    : await db.prepare("SELECT name FROM facebook_people WHERE is_me = 0 AND name = ? COLLATE NOCASE LIMIT 1").bind(name.trim()).first();
   if (person) {
     await db.prepare("INSERT OR REPLACE INTO friend_links (connection_id, person_name, created_at) VALUES (?, ?, ?)")
       .bind(id, person.name, now()).run();

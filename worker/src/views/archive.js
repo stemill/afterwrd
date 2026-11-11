@@ -13,7 +13,6 @@ import { eventDay, eventFormValues, eventWhen, finishedAt } from "../calendar.js
 import { asset, FAVICON, icon, ownerMain, ownerMenu, siteHeader } from "./nav.js";
 import { gone } from "../feed.js";
 import { host } from "../peers.js";
-import { SITE_ID } from "../posts.js";
 import { now } from "../util.js";
 import { html, raw } from "./html.js";
 
@@ -109,7 +108,7 @@ function mediaImg(m) {
 /** Rows of photos at a shared height, each keeping its own shape (like Google Photos). */
 function justified(items) {
   return html`<div class="justified">
-  ${items.map((m) => html`<a href="/photos/${m.id}" class="tile" style="--r: ${aspect(m)}" title="${fmtDate(m.timestamp)}">${mediaImg(m)}</a>`)}
+  ${items.map((m) => html`<a href="/photos/${m.id}" class="tile" style="--r: ${aspect(m)}" title="${fmtDate(m.created_at)}">${mediaImg(m)}</a>`)}
 </div>`;
 }
 
@@ -207,16 +206,17 @@ function pollBlock(ctx, poll, { id, action, hidden = {}, closeAction = null, who
 }
 
 function postCard(ctx, p) {
-  // Posts written here look like friends' posts: who, when, and what they did if it's more than writing.
-  if (p.id >= SITE_ID) {
+  // Posts written here look like friends' posts: who, when, and what they did if it's more than writing. `thread` is
+  // undefined where comments weren't loaded (no link, no box), null where the post takes none (Facebook's, for now).
+  if (p.source === "afterwrd") {
     const did = p.title && p.title !== "Posted on afterwrd." ? p.title : "";
     return html`<article class="card social own">
   <header>
     ${ownerFace(ctx)}
     <span class="what"><strong>You</strong>${did && html`<span class="meta">${did}</span>`}</span>
-    ${p.thread ? html`<a class="when" href="/posts/${p.key}" title="${fmtDatetime(p.timestamp)}"><time>${fmtAgo(p.timestamp)}</time></a>`
-      : html`<time title="${fmtDatetime(p.timestamp)}">${fmtAgo(p.timestamp)}</time>`}
-    ${p.thread && html`<form method="post" action="/_admin/posts/${p.id}/delete"
+    ${p.thread !== undefined ? html`<a class="when" href="/posts/${p.key}" title="${fmtDatetime(p.created_at)}"><time>${fmtAgo(p.created_at)}</time></a>`
+      : html`<time title="${fmtDatetime(p.created_at)}">${fmtAgo(p.created_at)}</time>`}
+    ${p.thread !== undefined && html`<form method="post" action="/_admin/posts/${p.id}/delete"
       data-confirm="Delete this post, its photos and its comments? This can’t be undone." data-confirm-ok="Delete"><button class="delete">Delete</button></form>`}
   </header>
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
@@ -233,10 +233,8 @@ function postCard(ctx, p) {
   <header>
     <span class="badge badge-${p.kind}">${p.kind}</span>
     <span class="what">${what}</span>
-    ${p.thread ? html`<a class="when" href="/posts/${p.key}" title="Link to this post"><time>${fmtDatetime(p.timestamp)}</time></a>`
-      : html`<time>${fmtDatetime(p.timestamp)}</time>`}
-    ${p.id >= SITE_ID && p.thread && html`<form method="post" action="/_admin/posts/${p.id}/delete"
-      data-confirm="Delete this post, its photos and its comments? This can’t be undone." data-confirm-ok="Delete"><button class="delete">Delete</button></form>`}
+    ${p.thread !== undefined ? html`<a class="when" href="/posts/${p.key}" title="Link to this post"><time>${fmtDatetime(p.created_at)}</time></a>`
+      : html`<time>${fmtDatetime(p.created_at)}</time>`}
   </header>
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
   ${collage(p.media)}
@@ -256,7 +254,7 @@ function commentCard(ctx, c) {
   <header>
     <span class="badge badge-comment">${c.action === "replied" ? "reply" : "comment"}</span>
     <span class="what">${what}</span>
-    <time>${fmtDatetime(c.timestamp)}</time>
+    <time>${fmtDatetime(c.created_at)}</time>
   </header>
   ${!c.author_is_me && c.author_name && html`<p class="meta">Posted anonymously as ${c.author_name}</p>`}
   ${c.text ? html`<div class="text">${linkify(c.text)}</div>`
@@ -272,7 +270,7 @@ function reactionRow(ctx, r) {
   return html`<li class="reaction">
   <span class="emoji" title="${r.reaction}">${EMOJI[r.reaction] ?? "👍"}</span>
   <span class="what">${verb} ${ownerPhrase(ctx, r.target_owner_id, r.owner_name)} ${r.target_kind || "post"}${r.group_name && html` in <em>${r.group_name}</em>`}</span>
-  <time>${fmtDatetime(r.timestamp)}</time>
+  <time>${fmtDatetime(r.created_at)}</time>
   ${safeUrl(r.url) && html`<a class="out" href="${r.url}" target="_blank" rel="noopener noreferrer" title="Open on Facebook">↗</a>`}
 </li>`;
 }
@@ -437,7 +435,7 @@ ${fresh && composer()}
   <input type="search" name="q" value="${q}" placeholder="Search posts">
   <select name="kind" onchange="this.form.submit()">
     <option value="">All kinds</option>
-    ${options(kinds, kind)}
+    ${options(kinds, kind, (k) => (k === "afterwrd" ? "Written on afterwrd" : k))}
   </select>
   ${yearSelect(years, year)}
   <button>Search</button>
@@ -525,7 +523,7 @@ ${byYear.map(([year, albums]) => html`
 }
 
 export function albumPage(ctx, { key, title, info, stats, groups, paging }) {
-  const mine = Number(key) > SITE_ID; // an album made here, not imported or "Posted on afterwrd"
+  const mine = info?.source === "afterwrd" && info.role !== "posts"; // an album made here, not imported or "Posted on afterwrd"
   return page(ctx, title, html`
 <p class="crumbs"><a href="/photos">Photos</a> /</p>
 <header class="album-head">
@@ -560,7 +558,7 @@ export function taggedPage(ctx, { tagged, paging }) {
   ${tagged.map((t) => html`<li class="reaction">
     <span class="emoji">🏷️</span>
     <span class="what">Tagged in ${ownerPhrase(ctx, t.owner_id, t.owner_name)} photo</span>
-    <time>${fmtDatetime(t.timestamp)}</time>
+    <time>${fmtDatetime(t.created_at)}</time>
     ${safeUrl(t.url) && html`<a class="out" href="${t.url}" target="_blank" rel="noopener noreferrer" title="Open on Facebook">↗</a>`}
   </li>`)}
 </ul>
@@ -584,13 +582,13 @@ export function photoPage(ctx, { m, setKey, setTitle, prev, next, index, total, 
 
   <aside class="info">
     <a class="album-link" href="${back}">${setTitle}</a>
-    <time class="when">${fmtDatetime(m.taken_at || m.timestamp)}</time>
+    <time class="when">${fmtDatetime(m.taken_at || m.created_at)}</time>
 
     ${m.description && !(post && post.text === m.description) && html`<div class="caption">${linkify(m.description)}</div>`}
 
     <dl class="details">
-      ${m.taken_at && m.taken_at !== m.timestamp && html`<dt>Taken</dt><dd>${fmtDatetime(m.taken_at)}</dd>`}
-      <dt>Uploaded</dt><dd>${fmtDatetime(m.timestamp)}</dd>
+      ${m.taken_at && m.taken_at !== m.created_at && html`<dt>Taken</dt><dd>${fmtDatetime(m.taken_at)}</dd>`}
+      <dt>Uploaded</dt><dd>${fmtDatetime(m.created_at)}</dd>
       ${m.width && html`<dt>Size</dt><dd>${m.width} × ${m.height}</dd>`}
       ${m.latitude && m.longitude && html`
         <dt>Where</dt>
@@ -603,7 +601,7 @@ export function photoPage(ctx, { m, setKey, setTitle, prev, next, index, total, 
         <input type="hidden" name="back" value="${ctx.url.pathname}">
         <button class="chip">${role === "profile" ? "Make profile picture" : "Make cover"}</button>
       </form>`)}
-      ${m.id >= SITE_ID && html`<form method="post" action="/_admin/photos/${m.id}/delete"
+      ${m.source === "afterwrd" && html`<form method="post" action="/_admin/photos/${m.id}/delete"
         data-confirm="Delete this photo and its comments? This can’t be undone." data-confirm-ok="Delete"><button class="chip danger">Delete photo</button></form>`}
     </div>`}
     ${key && html`<h2>Comments</h2>${thread(ctx, key, comments)}`}
@@ -668,7 +666,7 @@ export function personPage(ctx, { person, tabs, counts, tab, rows, paging }) {
     ${rows.length ? rows.map((t) => html`<li class="reaction">
       <span class="emoji">🏷️</span>
       <span class="what">Tagged you in a photo</span>
-      <time>${fmtDatetime(t.timestamp)}</time>
+      <time>${fmtDatetime(t.created_at)}</time>
       ${safeUrl(t.url) && html`<a class="out" href="${t.url}" target="_blank" rel="noopener noreferrer" title="Open on Facebook">↗</a>`}
     </li>`) : raw('<li class="empty">No photos.</li>')}
   </ul>`;
@@ -777,6 +775,7 @@ function remoteMedia(m, { full = false } = {}) {
 
 /** Comments on a friend's post or photo; yours are sent to their site (feed.js), which keeps them. */
 function remoteThread(ctx, c, target, comments) {
+  if (!comments) return ""; // from their Facebook download: no comments
   const back = ctx.url.pathname + ctx.url.search;
   return html`<section class="thread" id="t-${target}" aria-label="Comments">
   ${comments.map((r) => html`<div class="comment" id="r${c.id}-${r.id}">
@@ -1118,7 +1117,7 @@ export function friendAlbumPage(ctx, { friend: c, album }) {
   ${album.description && html`<p>${album.description}</p>`}
 </header>
 <div class="justified">
-  ${album.media.map((m) => html`<a href="${friendBase(c)}/photos/${m.hash}" class="tile" style="--r: ${aspect(m)}" title="${fmtDate(m.timestamp)}">${remoteMedia(m)}</a>`)}
+  ${album.media.map((m) => html`<a href="${friendBase(c)}/photos/${m.hash}" class="tile" style="--r: ${aspect(m)}" title="${fmtDate(m.created_at)}">${remoteMedia(m)}</a>`)}
 </div>
 ${(album.paging.page > 1 || album.paging.hasNext) && pager(ctx, album.paging)}`, "wide");
 }
@@ -1136,7 +1135,7 @@ export function friendPhotoPage(ctx, { friend: c, photo: m }) {
   </section>
   <aside class="info">
     <a class="album-link" href="${back}">${m.album?.name ?? `${c.name}'s photos`}</a>
-    <time class="when">${fmtDatetime(m.timestamp)}</time>
+    <time class="when">${fmtDatetime(m.created_at)}</time>
     <p class="meta"><a href="${friendBase(c)}/posts">${c.name}</a></p>
     ${m.description && !(m.post && m.post.text === m.description) && html`<div class="caption">${linkify(m.description)}</div>`}
     <h2>Comments</h2>
@@ -1730,7 +1729,7 @@ function onThisDayCard(ctx, memories) {
     const words = p.text ? p.text.slice(0, 140) + (p.text.length > 140 ? "…" : "") : summary(p.title, ctx.me.name);
     return html`<a class="memory" href="${href}">
       ${photo && html`<img src="${thumbUrl(photo)}" alt="" loading="lazy">`}
-      <span class="year">${new Date(p.timestamp * 1000).getUTCFullYear()}</span>
+      <span class="year">${new Date(p.created_at * 1000).getUTCFullYear()}</span>
       <span>${words}</span>
     </a>`;
   })}
@@ -1745,7 +1744,7 @@ const listed = (items) => (items.length < 2 ? items.join("") : `${items.slice(0,
 
 export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { devices: [], canConfirm: false }, newNotifying = [], securityFix = null, asking = [], introductions = [], unchecked = false, checkRequests = [], auto = { on: false } }) {
   const stream = [
-    ...own.map((p) => ({ at: p.timestamp, card: postCard(ctx, p) })),
+    ...own.map((p) => ({ at: p.created_at, card: postCard(ctx, p) })),
     ...feed.posts.map((p) => ({ at: p.created_at, card: remoteCard(ctx, p.connection, p) })),
   ].sort((a, b) => b.at - a.at);
   return page(ctx, "Home", html`
@@ -1757,6 +1756,7 @@ export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { de
     ${(auto.problem || auto.on && (auto.last?.result && auto.last.result !== "done" || auto.waiting?.needsHand)) && html`<p class="notice alert">
       ${auto.waiting?.needsHand ? html`afterwrd ${auto.waiting.version} has to be installed by hand.`
         : auto.problem ? html`An automatic update couldn't run.`
+        : auto.last.result === "kept" ? html`afterwrd ${auto.last.version} failed its checks after updating your site's database, so it was kept.`
         : html`afterwrd ${auto.last.version} didn't work on this site, so it was put back as it was.`}
       <a href="/_admin/update#auto">See what happened</a>.</p>`}
     ${!auto.on && !auto.later && !auto.problem && html`<form class="notice" method="post" action="/_admin/update/auto-later">

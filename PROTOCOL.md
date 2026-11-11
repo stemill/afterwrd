@@ -395,7 +395,7 @@ Source: `src/peers.js:123-127`, `src/share.js:164-175`, `src/friends.js:110-119`
 | `afterwrd:album` | `{key, name, totalItems, index}`: its set, and its 1-based position in it. Only present if the friend may see that set. |
 | `afterwrd:prev`, `afterwrd:next` | The hashes of its neighbours in that set. |
 | `afterwrd:postedWith` | The post it came with, as a Note without `replies`. Only present if the friend may see that post. |
-| `replies` | A `Collection` of its comments. |
+| `replies` | A `Collection` of its comments. Left out for a photo from the owner's Facebook download, which takes no comments (since 0.41.0). |
 
 A friend may see a photo or video only if it's in a set they're shown (5.4), or it came with a post they're shown (5.3). Anything else answers exactly as if it didn't exist, so knowing a hash gets a friend nothing: `404 {"error": "That isn't there any more."}`.
 
@@ -423,6 +423,7 @@ Receiver rules:
 - `type` must be `Note`.
 - `content` must be a string. It is normalised (`\r\n` and `\r` become `\n`, then trimmed) and must then be 1 to 2000 characters. Otherwise: `400 {"error": "Comments need 1 to 2000 characters."}`.
 - `inReplyTo` must be `<this site>/posts/<post key>` or `<this site>/photos/sha256/<hash>`, and that post or photo must exist here and be one the friend is shown (5.3, 5.6). Otherwise: `404 {"error": "That isn't there any more."}`, the same answer either way.
+- Since 0.41.0, only posts and photos made on afterwrd take comments: one from the owner's Facebook download (a post, or a picture not also posted on afterwrd) gets `403 {"error": "Only posts and photos added on afterwrd take comments."}`. A Facebook post's address may not survive a new download, so a comment on it could be cut off. Such posts and photos come without `replies` (6.3, 5.6), which tells the friend's site not to offer a comment box.
 - `attributedTo` in the body is **ignored**. The comment is credited to the name and origin this site stores for the connection.
 - Rate limits per calling origin: 30 comments per 600 s and 300 per day. Over either: `429`. Both limits are checked in the same statement as the insert.
 - On success: `200 {"id": "<inReplyTo>#c<n>"}`.
@@ -565,12 +566,12 @@ Every object has a permanent address on the site it belongs to. These addresses 
 | Post in a group | `<group site>/groups/<n>/posts/<m>` |
 | Comment in a group | `<group post id>#c<k>` |
 
-The **post key** matches `^post-\d+-[0-9a-f]{8}$`. It is made of:
+The **post key** matches `^post-\d+-[0-9a-f]{8}$`: the post's Unix time, then 8 hex digits. It's made once and kept with the post (since 0.41.0), so it never changes:
 
-- the post's Unix time;
-- an FNV-1a 32-bit fingerprint, computed over the UTF-16 code units of `kind`, `title`, `text`, `link_url` and `group_name`, joined with NUL characters.
+- a post written on afterwrd: 8 random hex digits;
+- a post from the Facebook download: an FNV-1a 32-bit fingerprint, computed over the UTF-16 code units of `kind`, `title`, `text`, `link_url` and `group_name`, joined with NUL characters, so a re-import gives it the same key while Facebook's download says the same. (Posts written on afterwrd before 0.41.0 kept the fingerprint key they already had; posts imported before 0.41.0 have `post-<time>-<8 hex digits of their row number>` until the next import.)
 
-The fingerprint only tells apart posts made in the same second, and it keeps the key stable when the archive is re-imported. Other sites should treat the key as opaque. They must accept any value matching the pattern.
+Other sites should treat the key as opaque. They must accept any value matching the pattern.
 
 Source: `public/static/activity.js:14-41`, `src/archive/routes.js:51`, `src/archive/routes.js:58`, `src/groups.js:515`.
 
@@ -612,9 +613,9 @@ Source: `src/share.js:57-65`.
 | `tag` | Names of people tagged (from an imported post). Names only, no ids. |
 | `location` | A place **name** only. |
 | `context` | On a friend's post, the name of the Facebook group an imported post was made in. |
-| `afterwrd:kind` | One of `status`, `photo`, `video`, `link`, `checkin`, `shared` or `review`. Receivers default to `status`. |
+| `afterwrd:kind` | Facebook's kind for a post from the download: one of `status`, `photo`, `video`, `link`, `checkin`, `shared` or `review`. Left out for a post written on afterwrd (since 0.41.0). Receivers default to `status`. |
 | `afterwrd:poll` | A poll the post asks (its `content` is the question): see below. Only on posts written on afterwrd (0.40.0). |
-| `replies` | Left out in `afterwrd:postedWith`. |
+| `replies` | Left out in `afterwrd:postedWith`, and for a post from the Facebook download, which takes no comments (since 0.41.0; 5.7). |
 
 What a receiver accepts (`parseNote`). It drops the Note unless all of these hold:
 

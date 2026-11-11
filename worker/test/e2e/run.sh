@@ -137,9 +137,9 @@ run_upgrade() { # $1: an older release tag
   ln -s "$WORKER/node_modules" "$OUT/old/worker/node_modules"
   stop
   (cd "$OUT/old/worker" && "$WRANGLER" dev --port 8787 --ip 127.0.0.1 --persist-to "$OUT/stateU" --var SETUP_CODE:local-test-setup-code > "$OUT/dev.log" 2>&1 &)
-  wait_for 8787; suite upgrade.mjs before "$PHOTOS"; stop
+  wait_for 8787; suite upgrade.mjs before "$PHOTOS" "$OUT/fake-export.zip"; stop
   (cd "$WORKER" && "$WRANGLER" dev --port 8787 --ip 127.0.0.1 --persist-to "$OUT/stateU" --var SETUP_CODE:local-test-setup-code $CHECKS > "$OUT/dev.log" 2>&1 &)
-  wait_for 8787; suite upgrade.mjs after "$PHOTOS"; stop
+  wait_for 8787; suite upgrade.mjs after "$PHOTOS" "$OUT/fake-export.zip"; stop
   git -C "$WORKER" worktree remove --force "$OUT/old"
 }
 

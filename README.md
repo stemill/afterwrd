@@ -128,20 +128,6 @@ photos and videos. To check a release for yourself, see [Check it yourself](SECU
   wasn't you, remove it in *Your devices*.
 - **Use a Cloudflare account just for afterwrd** if you use Cloudflare for anything else (see step 1).
 
-## Browsing an export locally
-
-Request the export from Facebook in **JSON** format, unzip it, then:
-
-```sh
-uv run afterwrd-ingest ~/Downloads/facebook-<you>-<date>-<id>   # one-off import
-uv run afterwrd                                                  # http://127.0.0.1:8000
-```
-
-The import writes `data/afterwrd.db` (SQLite) and copies the referenced photos
-and videos to `data/media/`, so the original export can be archived. Re-running
-it rebuilds the database from scratch. `data/` is git-ignored: it's personal.
-Set `AFTERWRD_DATA` to keep it somewhere else.
-
 ## Running and developing the Worker
 
 `worker/` is a Cloudflare Worker that shows your archive only to people who've signed in with a passkey.
@@ -269,10 +255,10 @@ every file attached, including `installer.js`. To build one locally instead:
 updated `public/static/licenses.txt`, which carries the licences of everything installed with afterwrd. The release
 won't build while it's out of date, or if the Worker bundles a package it doesn't cover.
 
-**Testing.** `npm run test:ingest -- <export folder>` checks the browser importer against
-`uv run afterwrd-ingest` row by row. To try the site locally: `npx wrangler d1 migrations apply afterwrd --local`,
-`npm run dev`, then `npm run owner -- "Test" --local` and import at
-`http://localhost:8787/_admin/import`. Passkeys work on `localhost` but not on `127.0.0.1`.
+**Testing.** To try the site locally: `npm run dev` (the site brings its database up to date on its first request:
+apply migrations that way, not with `wrangler d1 migrations apply`, which only knows the `.sql` ones), then
+`npm run owner -- "Test" --local` and import at `http://localhost:8787/_admin/import`. Passkeys work on `localhost`
+but not on `127.0.0.1`.
 
 ## What the import does
 
@@ -284,31 +270,36 @@ won't build while it's out of date, or if the Worker bundles a package it doesn'
   one with only summary lines) by timestamp.
 - Folds in group posts and group comments, which live in a separate folder.
 - Links each photo or video to its album, post or comment.
-- Records each photo's dimensions and writes a thumbnail (max 900×600) to
-  `data/thumbs/`, used by the grids; the full image is only loaded in the viewer.
+- Records each photo's dimensions and makes a thumbnail, used by the grids; the full image is only loaded in the
+  viewer.
 - Picks your current profile picture from the profile update history, and your
   cover photo as the newest upload in the "Cover photos" album (Facebook
   doesn't record cover changes).
 
 ## Data model
 
-| Table           | What                                                              |
-|-----------------|-------------------------------------------------------------------|
-| `people`        | Everyone named anywhere; `friend_since` set for current friends   |
-| `posts`         | Your posts, wall posts on friends' profiles, group posts          |
-| `post_tags`     | People tagged in your posts                                       |
-| `comments`      | Your comments and replies, with whose thing they were on          |
-| `reactions`     | Your likes and reactions                                          |
-| `media`         | Photos and videos, linked to an album, post or comment            |
-| `albums`        | Your photo albums                                                 |
-| `tagged_photos` | Other people's photos you're tagged in (links only, no images)    |
+Posts, photos and albums written on afterwrd and those from your Facebook download share their tables, told apart by
+`source` (`afterwrd` or `facebook`). An import replaces only the Facebook ones.
+
+| Table                    | What                                                                          |
+|--------------------------|-------------------------------------------------------------------------------|
+| `posts`                  | Your posts; each keeps its permanent address in `key`                         |
+| `media`                  | Photos and videos, linked to an album, post or (Facebook) comment             |
+| `albums`                 | Your photo albums                                                             |
+| `comments`               | Comments on your afterwrd posts and photos, from you or friends' sites        |
+| `polls`, `poll_votes`    | Polls in your afterwrd posts, and who answered                                |
+| `facebook_people`        | Everyone named in the download; `friend_since` set for current friends        |
+| `facebook_post_tags`     | People tagged in your Facebook posts                                          |
+| `facebook_comments`      | Your comments and replies on Facebook, with whose thing they were on          |
+| `facebook_reactions`     | Your likes and reactions on Facebook                                          |
+| `facebook_tagged_photos` | Other people's photos you're tagged in (links only, no images)                |
 
 ### Linking with friends' exports (next step)
 
 Your export doesn't say which post a comment was on, only "X's photo" plus the
 comment's timestamp. A friend's export contains their posts *and* the comments
 on them, including yours with the same author name and timestamp, so
-`(author, timestamp)` on a comment is the join key. `comments.target_owner_id`
+`(author, created_at)` on a comment is the join key. `facebook_comments.target_owner_id`
 and `target_kind` narrow the search.
 
 ## Known limitations

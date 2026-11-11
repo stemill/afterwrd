@@ -5,9 +5,10 @@
 //   POST /_admin/posts/<id>/delete    a form on the post itself
 //   POST /_admin/posts/<id>/vote      choice (one, or several if the poll takes more), back: the owner answers their poll
 //   POST /_admin/posts/<id>/close     back: the owner closes their poll
-// They're kept in site_posts and site_photos (with albums in site_albums, photos.js) and copied into the archive's
-// tables by mirror().
-import { photoKey, postKey } from "./archive/comments.js";
+// They're kept in `posts`, with their photos in `media` and albums in `albums` (photos.js), beside Facebook's, as
+// source 'afterwrd'. Each post's address (posts.key) is made when it's written and never changes.
+import { newPostKey } from "../public/static/activity.js";
+import { photoKey } from "./archive/comments.js";
 import { HASH_RE, mediaStore } from "./media.js";
 import { html, json, now, Refusal } from "./util.js";
 import { notifyNewPost } from "./notify.js";
@@ -15,40 +16,46 @@ import { safeNext } from "./auth.js";
 import { answerHere, readPoll } from "./polls.js";
 import { messagePage } from "./views/pages.js";
 
-// Copies take ids from here up, far beyond any an import gives out.
-export const SITE_ID = 1_000_000_000;
-const ALBUM = "Posted on afterwrd"; // photos posted without an album of their own
 const MAX_TEXT = 5000;
 const MAX_PHOTOS = 20;
 const MAX_SIDE = 20_000;
 
-/**
- * Statements that rebuild the archive's copy of the owner's posts, albums and photos; run with every change and
- * every import. A site album n becomes album SITE_ID + n; SITE_ID itself is "Posted on afterwrd".
- */
-export function mirror(db) {
-  return [
-    db.prepare("DELETE FROM posts WHERE id >= ?").bind(SITE_ID),
-    db.prepare("DELETE FROM media WHERE id >= ?").bind(SITE_ID),
-    db.prepare("DELETE FROM albums WHERE id >= ?").bind(SITE_ID),
-    db.prepare(`INSERT INTO posts (id, timestamp, kind, title, text)
-      SELECT ?1 + p.id, p.created_at,
-        CASE WHEN EXISTS (SELECT 1 FROM site_photos f WHERE f.post_id = p.id) THEN 'photo' ELSE 'status' END,
-        COALESCE(p.title, 'Posted on afterwrd.'), p.text
-      FROM site_posts p`).bind(SITE_ID),
-    db.prepare(`INSERT INTO media (id, path, kind, timestamp, width, height, album_id, post_id, hash, thumb_hash, size, type)
-      SELECT ?1 + f.id, 'afterwrd/' || f.hash || '.jpg', 'photo', COALESCE(f.created_at, p.created_at), f.width, f.height,
-        CASE WHEN f.album_id IS NULL THEN ?1 ELSE ?1 + f.album_id END, CASE WHEN f.post_id IS NULL THEN NULL ELSE ?1 + f.post_id END,
-        f.hash, f.thumb_hash, f.size, 'image/jpeg'
-      FROM site_photos f LEFT JOIN site_posts p ON p.id = f.post_id`).bind(SITE_ID),
-    db.prepare(`INSERT INTO albums (id, name, last_modified, cover_media_id)
-      SELECT ?1, ?2, MAX(timestamp), MAX(id) FROM media WHERE album_id = ?1 HAVING COUNT(*) > 0`).bind(SITE_ID, ALBUM),
-    db.prepare(`INSERT INTO albums (id, name, description, last_modified, cover_media_id)
-      SELECT ?1 + a.id, a.name, a.description,
-        (SELECT MAX(timestamp) FROM media WHERE album_id = ?1 + a.id), (SELECT MAX(id) FROM media WHERE album_id = ?1 + a.id)
-      FROM site_albums a`).bind(SITE_ID),
-  ];
+// Albums afterwrd keeps for a purpose (albums.role): photos posted without an album of their own, and the owner's
+// profile pictures and covers.
+export const ROLE_ALBUMS = { posts: "Posted on afterwrd", profile: "Profile pictures", cover: "Cover photos" };
+
+/** A statement making the album for `role` (ROLE_ALBUMS), unless there is one. */
+export function roleAlbum(db, role) {
+  return db.prepare(`INSERT INTO albums (source, name, created_at, role) SELECT 'afterwrd', ?, ?, ?
+    WHERE NOT EXISTS (SELECT 1 FROM albums WHERE role = ?)`).bind(ROLE_ALBUMS[role], now(), role, role);
 }
+
+/**
+ * Statements adding photos (in order) to an album: `albumId`, or else the one for `role`; and to the post whose
+ * address is `postKey`, if given.
+ */
+export function addPhotos(db, photos, { albumId = null, role = null, postKey = null }) {
+  return photos.map((f) => db.prepare(`INSERT INTO media (source, path, kind, created_at, width, height, album_id,
+      post_id, hash, thumb_hash, size, type)
+    VALUES ('afterwrd', ?, 'photo', ?, ?, ?, COALESCE(?, (SELECT id FROM albums WHERE role = ?)),
+      (SELECT id FROM posts WHERE key = ?), ?, ?, ?, 'image/jpeg')`)
+    .bind(`afterwrd/${f.hash}.jpg`, now(), f.width, f.height, albumId, role, postKey, f.hash, f.thumb_hash, f.size));
+}
+
+/** A new post's row: its address, made now. Returns [statement, key]. */
+export function newPost(db, { text = null, title = null }) {
+  const at = now();
+  const key = newPostKey(at);
+  return [db.prepare("INSERT INTO posts (key, source, created_at, title, text) VALUES (?, 'afterwrd', ?, ?, ?)")
+    .bind(key, at, title, text), key];
+}
+
+/**
+ * Statements deleting the comments on these photos' pictures (photo-<sha256>), once no photo made on afterwrd shows
+ * that picture any more. Run after the photos have gone.
+ */
+export const photoCommentsGone = (db, photos) => photos.map((f) => db.prepare(`DELETE FROM comments WHERE target = ?
+  AND NOT EXISTS (SELECT 1 FROM media WHERE hash = ? AND source = 'afterwrd')`).bind(photoKey(f), f.hash));
 
 /** An error message if these uploaded photos' details aren't right, or they aren't all stored yet; else null. */
 export async function checkPhotos(env, photos, max = MAX_PHOTOS) {
@@ -62,13 +69,6 @@ export async function checkPhotos(env, photos, max = MAX_PHOTOS) {
   const stored = (await Promise.all([...new Set(hashes.map((h) => h[0]))].map((shard) =>
     mediaStore(env, shard).has(hashes.filter((h) => h[0] === shard))))).flat();
   return stored.length === hashes.length ? null : "Some photos didn't finish uploading. Try again.";
-}
-
-/** Statements adding photos (in order) to the newest site post if `inPost`, and to a site album if given. */
-export function addPhotos(db, photos, { inPost = false, albumId = null } = {}) {
-  return photos.map((f) => db.prepare(`INSERT INTO site_photos (post_id, album_id, hash, thumb_hash, width, height, size, created_at)
-    VALUES (${inPost ? "(SELECT MAX(id) FROM site_posts)" : "NULL"}, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind(albumId, f.hash, f.thumb_hash, f.width, f.height, f.size, now()));
 }
 
 /** Deletes stored files nothing in the archive uses any more (a photo can share a file with an imported one). */
@@ -140,50 +140,47 @@ export async function createPost(env, origin, body) {
   if (!text && !photos.length) throw new Refusal("Write something or add a photo.");
   const problem = await checkPhotos(env, photos);
   if (problem) throw new Refusal(problem);
-  // One transaction: the post, its photos, its poll and the archive's copy.
+  // One transaction: the post, its photos (in "Posted on afterwrd") and its poll.
+  const [post, key] = newPost(db, { text: text || null });
   await db.batch([
-    db.prepare("INSERT INTO site_posts (created_at, text) VALUES (?, ?)").bind(now(), text || null),
-    ...addPhotos(db, photos, { inPost: true }),
-    ...(poll ? [db.prepare(`INSERT INTO site_polls (post_id, options, multiple, closes_at) VALUES ((SELECT MAX(id) FROM site_posts), ?, ?, ?)`)
-      .bind(JSON.stringify(poll.options), poll.multiple, poll.closes_at)] : []),
-    ...mirror(db),
+    post,
+    ...(photos.length ? [roleAlbum(db, "posts"), ...addPhotos(db, photos, { role: "posts", postKey: key })] : []),
+    ...(poll ? [db.prepare(`INSERT INTO polls (post_id, options, multiple, closes_at) VALUES ((SELECT id FROM posts WHERE key = ?), ?, ?, ?)`)
+      .bind(key, JSON.stringify(poll.options), poll.multiple, poll.closes_at)] : []),
   ]);
-  await notifyNewPost(env, origin);
+  await notifyNewPost(env, origin, key);
 }
 
-// Deletes a post made here (by its archive id) and the comments on it. Its photos go too (files included, unless
-// something else uses them), apart from any that were added to an album, which stay there. Nothing if it isn't one.
+/**
+ * Deletes a post made here and the comments on it. Its photos go too (files included, unless something else uses
+ * them), apart from any that are also in an album of the owner's, which stay there. Nothing if it isn't one.
+ */
 export async function deletePost(env, postId) {
   const db = env.DB;
-  const id = postId - SITE_ID;
-  const post = await db.prepare("SELECT * FROM posts WHERE id = ?").bind(SITE_ID + id).first();
-  if (post && id > 0) {
-    const { results: photos } = await db.prepare("SELECT * FROM site_photos WHERE post_id = ?").bind(id).all();
-    const going = photos.filter((f) => f.album_id === null);
-    // Photo comments are kept by picture, so they go only once no photo here shows it (an imported one can).
-    await db.batch([
-      db.prepare("DELETE FROM site_comments WHERE target = ?").bind(postKey(post)),
-      db.prepare("DELETE FROM site_photos WHERE post_id = ? AND album_id IS NULL").bind(id),
-      db.prepare("UPDATE site_photos SET post_id = NULL WHERE post_id = ?").bind(id),
-      db.prepare("DELETE FROM site_posts WHERE id = ?").bind(id),
-      db.prepare("DELETE FROM site_polls WHERE post_id = ?").bind(id),
-      db.prepare("DELETE FROM site_poll_votes WHERE post_id = ?").bind(id),
-      ...mirror(db),
-      ...going.map((f) => db.prepare("DELETE FROM site_comments WHERE target = ? AND NOT EXISTS (SELECT 1 FROM media WHERE hash = ?)")
-        .bind(photoKey(f), f.hash)),
-    ]);
-    await removeUnusedFiles(env, going.flatMap((f) => [f.hash, f.thumb_hash]));
-  }
+  const post = await db.prepare("SELECT * FROM posts WHERE id = ? AND source = 'afterwrd'").bind(postId).first();
+  if (!post) return;
+  const IN_POSTS = "album_id IN (SELECT id FROM albums WHERE role = 'posts')";
+  const { results: going } = await db.prepare(`SELECT * FROM media WHERE post_id = ? AND ${IN_POSTS}`).bind(post.id).all();
+  await db.batch([
+    db.prepare("DELETE FROM comments WHERE target = ?").bind(post.key),
+    db.prepare(`DELETE FROM media WHERE post_id = ? AND ${IN_POSTS}`).bind(post.id),
+    db.prepare("UPDATE media SET post_id = NULL WHERE post_id = ?").bind(post.id),
+    db.prepare("DELETE FROM polls WHERE post_id = ?").bind(post.id),
+    db.prepare("DELETE FROM poll_votes WHERE post_id = ?").bind(post.id),
+    db.prepare("DELETE FROM posts WHERE id = ?").bind(post.id),
+    ...photoCommentsGone(db, going),
+  ]);
+  await removeUnusedFiles(env, going.flatMap((f) => [f.hash, f.thumb_hash]));
 }
 
-/** The owner answers the poll in their post `postId` (its archive id): `choices`, the options' numbers. */
+/** The owner answers the poll in their post `postId`: `choices`, the options' numbers. */
 export async function answerPoll(env, postId, choices) {
   const owner = await env.DB.prepare("SELECT name FROM users LIMIT 1").first();
-  const trouble = await answerHere(env.DB, postId - SITE_ID, "site", owner?.name ?? "You", choices);
+  const trouble = await answerHere(env.DB, postId, "site", owner?.name ?? "You", choices);
   if (trouble) throw new Refusal(trouble);
 }
 
-/** The owner closes the poll in their post `postId` (its archive id): its answers stay, and no more are taken. */
+/** The owner closes the poll in their post `postId`: its answers stay, and no more are taken. */
 export async function closePoll(env, postId) {
-  await env.DB.prepare("UPDATE site_polls SET closed_at = ? WHERE post_id = ? AND closed_at IS NULL").bind(now(), postId - SITE_ID).run();
+  await env.DB.prepare("UPDATE polls SET closed_at = ? WHERE post_id = ? AND closed_at IS NULL").bind(now(), postId).run();
 }

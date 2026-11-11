@@ -19,9 +19,6 @@ const sql = (q) => JSON.parse(execFileSync("./node_modules/.bin/wrangler", ["d1"
 const results = [];
 const check = (name, ok, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? `  (${extra})` : ""}`); };
 const errors = [];
-sql("DELETE FROM site_comments");
-sql("DELETE FROM site_photos");
-sql("DELETE FROM site_posts"); // the import below rebuilds the archive's copy
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
 async function person(link) {
@@ -80,7 +77,7 @@ check("picked photos preview, removable", (await owner.$$("#composer .picked li"
 await Promise.all([owner.waitForNavigation({ timeout: 60_000 }), owner.click("#composer button.post")]);
 first = (await cards(owner))[0];
 check("photo post appears first with both photos", first.text === "Two photos" && first.what === "You" && first.photos === 2, JSON.stringify(first));
-const stored = sql("SELECT id, hash, thumb_hash, width, height FROM media WHERE id >= 1000000000 ORDER BY id");
+const stored = sql("SELECT id, hash, thumb_hash, width, height FROM media WHERE source = 'afterwrd' ORDER BY id");
 const cookie = await cookieOf(owner);
 const get = (hash, c = cookie) => fetch(`${BASE}/files/${hash}`, { headers: { Cookie: `__Host-session=${c}` } });
 const big = Buffer.from(await (await get(stored[0].hash)).arrayBuffer());
@@ -110,21 +107,22 @@ await owner.goto(`${BASE}/posts`);
 const after = await cards(owner);
 check("both new posts survive a re-import", after[0].text === "Two photos" && after[1].text?.startsWith("First post"), after.slice(0, 2).map((c) => c.text).join(" | "));
 check("their photos are still stored", (await get(stored[0].hash)).ok && (await get(stored[1].thumb_hash)).ok);
-check("comments on them survive too", sql("SELECT COUNT(*) AS n FROM site_comments")[0].n === 2
+check("comments on them survive too", sql("SELECT COUNT(*) AS n FROM comments")[0].n === 2
   && (await owner.$$eval("main article.card:first-of-type .comment", (l) => l.length)) === 1);
 
 // Who may do what.
 const api = (path, body, c, origin = BASE) => fetch(BASE + path, { method: "POST", redirect: "manual",
   headers: { Cookie: `__Host-session=${c}`, Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify(body) });
 check("signed out, nobody can post", ![200, 201].includes((await api("/_admin/posts", { text: "sneaky" }, "nobody")).status));
-check("…or delete", ![200, 201, 303].includes((await api(`/_admin/posts/${1000000000 + 1}/delete`, {}, "nobody")).status));
+const [ownPost] = sql("SELECT id FROM posts WHERE source = 'afterwrd' LIMIT 1");
+check("…or delete", ![200, 201, 303].includes((await api(`/_admin/posts/${ownPost.id}/delete`, {}, "nobody")).status));
 check("another site can't post as the owner", (await api("/_admin/posts", { text: "csrf" }, cookie, "https://evil.example")).status === 403);
 check("empty post refused", (await api("/_admin/posts", { text: "  " }, cookie)).status === 400);
 check("photo that was never uploaded refused", (await api("/_admin/posts", { text: "x", photos: [{ hash: "a".repeat(64),
   thumb_hash: "b".repeat(64), width: 10, height: 10, size: 10 }] }, cookie)).status === 400);
 check("made-up photo details refused", (await api("/_admin/posts", { text: "x", photos: [{ hash: stored[0].hash,
   thumb_hash: stored[0].thumb_hash, width: "<b>", height: 10, size: 10 }] }, cookie)).status === 400);
-check("only the two real posts exist", sql("SELECT COUNT(*) AS n FROM site_posts")[0].n === 2);
+check("only the two real posts exist", sql("SELECT COUNT(*) AS n FROM posts WHERE source = 'afterwrd'")[0].n === 2);
 
 // The owner deletes the photo post: post, photos, files, album and comments all go.
 await owner.goto(`${BASE}/posts`);
@@ -135,10 +133,34 @@ const shared = sql(`SELECT COUNT(*) AS n FROM media WHERE thumb_hash = '${stored
 check("its own files are gone", [stored[0].hash, stored[0].thumb_hash, stored[1].hash].every(Boolean)
   && (await Promise.all([stored[0].hash, stored[0].thumb_hash, stored[1].hash].map(async (h) => (await get(h)).status))).every((s) => s === 404));
 check("a file an imported photo shares is kept", shared === 0 || (await get(stored[1].thumb_hash)).ok, `${shared} imported photo(s) use it`);
-check("its comments are gone", sql("SELECT COUNT(*) AS n FROM site_comments")[0].n === 0);
+check("its comments are gone", sql("SELECT COUNT(*) AS n FROM comments")[0].n === 0);
 await owner.goto(`${BASE}/photos`);
 check("the empty album is gone", !(await owner.$$eval(".albums a.album strong", (l) => l.map((s) => s.textContent))).includes("Posted on afterwrd"));
 check("imported photos untouched", (await owner.$$eval(".albums a.album", (l) => l.length)) >= 1);
+
+// A post with words and one photo: deleting the photo keeps the post, its address and its comments.
+await owner.goto(`${BASE}/posts`);
+await owner.type("#composer textarea", "Words and a photo");
+await (await owner.$("#composer input[type=file]")).uploadFile(`${fixtures}/photo1.jpg`);
+await Promise.all([owner.waitForNavigation({ timeout: 60_000 }), owner.click("#composer button.post")]);
+const address = await owner.$eval("main article.card:first-of-type a.when", (a) => a.getAttribute("href"));
+await owner.type("main article.card:first-of-type .say textarea", "Still here?");
+await Promise.all([owner.waitForNavigation(), owner.click("main article.card:first-of-type .say button")]);
+const [lone] = sql("SELECT m.id FROM media m JOIN posts p ON p.id = m.post_id WHERE p.text = 'Words and a photo'");
+await owner.goto(`${BASE}/photos/${lone.id}`);
+await Promise.all([owner.waitForNavigation(), owner.click(".photo-tools .danger")]);
+await owner.goto(BASE + address);
+check("deleting a post's only photo keeps the post, at the same address, with its comments",
+  (await owner.$eval("article.card .text", (t) => t.textContent).catch(() => null)) === "Words and a photo"
+  && (await owner.$$eval("article.card .comment", (l) => l.length)) === 1, address);
+
+// Ids are never used twice: a post written after the newest is deleted doesn't take its number.
+const newest = sql("SELECT MAX(id) AS id FROM posts")[0].id;
+await owner.goto(`${BASE}/posts`);
+await Promise.all([owner.waitForNavigation(), owner.click("main article.card:first-of-type header .delete")]);
+await owner.type("#composer textarea", "After a delete");
+await Promise.all([owner.waitForNavigation(), owner.click("#composer button.post")]);
+check("a new post never takes a deleted one's id", sql("SELECT id FROM posts WHERE text = 'After a delete'")[0]?.id > newest);
 
 // Phone: composer with photos picked.
 await owner.setViewport({ width: 375, height: 800, isMobile: true });

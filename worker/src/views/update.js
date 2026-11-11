@@ -28,7 +28,10 @@ const day = (seconds) => new Date(seconds * 1000).toLocaleDateString("en-GB", { 
 
 /** Automatic updates (auto.js): on or off, what's next, what last happened, and anything that needs the owner. */
 function autoPart(auto) {
-  const last = auto.last && auto.last.result !== "done" ? `<p class="notice alert">afterwrd ${escape(auto.last.version)} didn't
+  const last = auto.last?.result === "kept" ? `<p class="notice alert">afterwrd ${escape(auto.last.version)} failed its checks on
+    ${escape(day(auto.last.at))}, but it had already updated your site's database, which the older version can't use, so it
+    was kept. If anything isn't working, please tell whoever looks after afterwrd.</p>`
+    : auto.last && auto.last.result !== "done" ? `<p class="notice alert">afterwrd ${escape(auto.last.version)} didn't
     ${auto.last.result === "unhealthy" ? "work" : "start"} on this site on ${escape(day(auto.last.at))}, so it was put back as it was.
     It won't be tried again by itself; a later release will be.</p>`
     : auto.last ? `<p class="meta">Last updated itself to ${escape(auto.last.version)} on ${escape(day(auto.last.at))}.</p>` : "";
@@ -80,7 +83,7 @@ function autoPart(auto) {
 </section>`;
 }
 
-export function updatePage({ owner, version: VERSION, latest, available, securityFix, site, connected, oldToken, groups, go, checked = null, friends = [], checkWait = 0, auto = { on: false } }) {
+export function updatePage({ owner, version: VERSION, latest, available, securityFix, site, connected, oldToken, groups, go, checked = null, friends = [], checkWait = 0, auto = { on: false }, history = [], problem = null }) {
   // Groups this site made that are behind it: brought up to this version, with the same connection.
   const groupsPart = groups.length && !available ? `
 <section class="card" id="groups">
@@ -156,8 +159,15 @@ ${ownerHeader("update")}
 <main>
 <h1>Update afterwrd</h1>
 <p class="meta">Signed in as ${escape(owner)}. This site is afterwrd ${escape(VERSION)}.</p>
+${problem ? `<p class="notice alert" id="update-problem">afterwrd ${escape(problem.version)} couldn't update your site's database on
+  ${escape(day(problem.at))}, so your site stayed on ${escape(VERSION)}, as it was. Please send this to whoever looks after
+  afterwrd: <code>${escape(problem.migration)}: ${escape(problem.error)}</code></p>` : ""}
 ${body}
 ${autoPart(auto)}
+${history.length ? `<section class="card" id="history">
+  <h2>This site's updates</h2>
+  <ul>${history.map((h) => `<li>${escape(day(h.at))}: afterwrd ${escape(h.version)}${h.from_version ? `, from ${escape(h.from_version)}` : ""}</li>`).join("")}</ul>
+</section>` : ""}
 <section class="card" id="check">
   <h2>Get your site checked</h2>
   <p id="last-checked">${checked ? escape(checkedWords(checked)) : "Your site hasn't been checked yet."}</p>

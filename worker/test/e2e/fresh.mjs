@@ -80,7 +80,7 @@ check("imported photo sets stay hidden", (await page.goto(`${BASE}/photos/album/
 // With no picture chosen here, Facebook's profile picture and cover (from the download) are used.
 const sql = (q) => execFileSync("./node_modules/.bin/wrangler", ["d1", "execute", "afterwrd", "--local", "--command", q],
   { cwd: WORKER, stdio: "ignore" });
-sql("UPDATE people SET profile_media_id = (SELECT MIN(id) FROM media WHERE hash IS NOT NULL), cover_media_id = (SELECT MIN(id) FROM media WHERE hash IS NOT NULL) WHERE is_me = 1");
+sql("UPDATE facebook_people SET profile_media_id = (SELECT MIN(id) FROM media WHERE hash IS NOT NULL), cover_media_id = (SELECT MIN(id) FROM media WHERE hash IS NOT NULL) WHERE is_me = 1");
 await page.goto(`${BASE}/posts`);
 check("Facebook's picture and cover head the profile", Boolean(await page.$("section.profile .avatar img")) && Boolean(await page.$("section.profile .cover img"))
   && !(await page.$(".profile-prompt")));
