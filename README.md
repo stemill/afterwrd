@@ -15,7 +15,7 @@ gives you; it never signs in to Facebook or fetches anything from it.
 
 **Messages and the app.** *Messages* are one-to-one chats with friends, kept on your site and theirs, and each
 group has a chat too (its messages go after 30 days: for keeping, there are posts). They aren't
-end-to-end encrypted (yet): both sites hold the text, as they do your posts. Add afterwrd to your phone's home screen
+end-to-end encrypted: both sites hold the text, as they do your posts. Add afterwrd to your phone's home screen
 and it opens like an app, and can tell you when a friend sends you a message, even with the phone locked: that's the
 only thing afterwrd ever notifies you about, and you can mute any chat. The notification is encrypted for your phone
 by your own site, so the phone's push service (Apple's or Google's) passes it on without being able to read it; there's

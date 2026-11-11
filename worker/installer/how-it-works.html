@@ -65,6 +65,7 @@ non-technical version, see <a href="/compared/">how afterwrd is different from F
 <nav class="contents" aria-label="Contents">
   <strong>On this page</strong>
   <ol>
+    <li><a href="#secure">Is it secure?</a></li>
     <li><a href="#code">The code is public</a></li>
     <li><a href="#where">Where your site lives</a></li>
     <li><a href="#talks">What it talks to</a></li>
@@ -77,6 +78,39 @@ non-technical version, see <a href="/compared/">how afterwrd is different from F
     <li><a href="#limits">What it can't protect against</a></li>
   </ol>
 </nav>
+
+<section id="secure">
+  <h2>Is it secure?</h2>
+  <p>Yes, in the way most people mean it: strangers, companies and advertisers can't see your things. Only you and the
+  people you choose can.</p>
+  <div class="boxes">
+    <div class="box"><strong>No company in the middle</strong><p>Your things live in your own Cloudflare account. There's
+    no afterwrd server holding everyone's photos, so nobody who makes afterwrd can read them, sell them, train AI on them
+    or lose them in a hack.</p></div>
+    <div class="box"><strong>Private from the start</strong><p>Nothing on your site is public. Nobody sees anything until
+    you've approved them as a friend or joined a group with them, and then only what you've shared. Your Facebook archive
+    is never shared at all.</p></div>
+    <div class="box"><strong>No passwords</strong><p>You sign in with a passkey, using your phone's face, fingerprint or
+    PIN. There's no password to guess, steal or be tricked out of.</p></div>
+    <div class="box"><strong>Sent securely</strong><p>Everything between your browser, your site and your friends' sites
+    is sent over HTTPS, the same protection your bank uses. Photos you post have their hidden details, such as where they
+    were taken, removed first.</p></div>
+  </div>
+  <h3>Is it end-to-end encrypted?</h3>
+  <p>No, and that's deliberate. Your posts, photos and messages are protected on the way between devices and sites, but
+  they're stored as they are on your site and on the sites you share them with. Your site can read them,
+  and so can Cloudflare, which runs it. There are three reasons:</p>
+  <ul>
+    <li><b>Your memories are safer this way.</b> With end-to-end encryption, losing your key means losing your photos for
+    good, and nobody could get them back. afterwrd is for keeping years of photos, and that's the wrong risk to take with
+    them.</li>
+    <li><b>A website can't keep that promise.</b> A website hands your browser its own encryption code each time you open
+    it, so anyone who could change the site could quietly read past the encryption. Calling it "encrypted" would sound
+    safer than it was.</li>
+    <li><b>It's for friends and family.</b> Each site is an ordinary website under Cloudflare's rules.</li>
+  </ul>
+  <p>The rest of this page explains how all of this works, and <a href="#limits">what it can't protect against</a>.</p>
+</section>
 
 <section id="code">
   <h2>The code is public</h2>

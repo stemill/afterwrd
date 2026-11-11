@@ -58,7 +58,6 @@ export function messagesPage(ctx, { chats, friends, pushKey }) {
   return page(ctx, "Messages", html`
 <style>${raw(STYLE)}</style>
 <div class="feed-head"><h1>Messages</h1></div>
-<p class="meta">Each chat is between your site and your friend's. Not end-to-end encrypted yet: messages are kept on both sites.</p>
 ${chats.length > 0 ? html`<ul class="chats">${chats.map((c) => html`<li><a class="card chat-row${c.unread ? " unread" : ""}" href="/messages/${c.id}">
   <span><strong>${c.name}</strong>${c.unread && raw('<span class="dot" aria-label="unread"></span>')}${c.muted && html`<span class="meta"> · muted</span>`}${c.kind === "group" && html`<span class="meta"> · group</span>`}${!c.friend && html`<span class="meta"> · ${c.kind === "group" ? "no longer a member" : "no longer friends"}</span>`}</span>
   <span class="last meta">${c.last ? html`${c.last.mine ? "You: " : ""}${c.last.text}` : "No messages yet"}</span>
@@ -101,9 +100,9 @@ export function chatPage(ctx, { chat, friend, group, canSend, keepDays, messages
 </div>
 ${isGroup
   ? html`<p class="meta">Everyone in the group sees these. Messages here disappear after ${keepDays} days: for anything worth
-    keeping, make a post. Not end-to-end encrypted: kept on the group's site and each member's.
+    keeping, make a post.
     <span id="notify-words">${chat.notify ? "This chat notifies you." : "This chat doesn't notify you."}</span></p>`
-  : html`<p class="meta">${chat.host} · not end-to-end encrypted: kept on your site and theirs.</p>`}
+  : html`<p class="meta">${chat.host}</p>`}
 <p class="meta" id="muted-note" ${!chat.muted && raw("hidden")}><strong>Muted.</strong> New messages here still show, but don't add to the Messages count, and won't notify you.</p>
 ${earlier && html`<p><a href="/messages/${chat.id}?before=${earlier}">Earlier messages</a></p>`}
 <ol class="chat" id="chat" data-chat="${chat.id}" data-kind="${chat.kind}" data-after="${messages.at(-1)?.id ?? 0}" ${paged && raw("data-paged")}>

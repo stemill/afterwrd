@@ -88,7 +88,6 @@ await Promise.all([ann.waitForNavigation(), ann.click(`a[href="/friend/${samHere
 const annChat = ann.url();
 const annChatId = annChat.split("/").pop();
 check("…which opens a chat with them", /\/messages\/\d+$/.test(annChat) && (await ann.$eval("h1", (h) => h.textContent)) === "Sam Taylor", annChat);
-check("…which says it isn't end-to-end encrypted", (await mainText(ann)).includes("not end-to-end encrypted"));
 
 // Ann sends; Sam's site has it straight away.
 await ann.type("#say textarea", "Are you coming tonight?");
