@@ -513,6 +513,24 @@ A message from the caller's owner to the owner here: one-to-one, between friends
   its owner's own devices; nothing about it goes anywhere else.
 - Not end-to-end encrypted: both sites hold the text, as they do posts and comments.
 
+### 5.15 `POST /_peer/vote` (afterwrd 0.40.0)
+
+The caller's owner answers the poll in a post here (6.3, `afterwrd:poll`):
+
+```json
+{"@context": "https://www.w3.org/ns/activitystreams", "type": "afterwrd:Vote",
+ "inReplyTo": "https://bob.example/posts/post-1762164000-0b918c1b", "afterwrd:choices": [1]}
+```
+
+- `inReplyTo` must be a post written on this site. Otherwise: `404 {"error": "That isn't there any more."}`.
+- `afterwrd:choices` is the options chosen, by number from 0. A poll in `oneOf` form takes exactly one; `anyOf`, any
+  number. An empty list takes the caller's answer back. Anything else, a post without a poll, or a poll that has
+  closed: `400`.
+- One answer per calling origin; a new one replaces it. The answer is kept under the name this site stores for the
+  connection. Answers notify no one.
+- On success: `200 {"afterwrd:poll": { …the Question as the caller now sees it… }}`.
+- Older sites answer `404`.
+
 ## 6. Objects
 
 All objects use ActivityStreams 2.0 vocabulary. afterwrd's own terms use the prefix `afterwrd:` and the IRI `https://afterwrd.app/ns#`:
@@ -595,6 +613,7 @@ Source: `src/share.js:57-65`.
 | `location` | A place **name** only. |
 | `context` | On a friend's post, the name of the Facebook group an imported post was made in. |
 | `afterwrd:kind` | One of `status`, `photo`, `video`, `link`, `checkin`, `shared` or `review`. Receivers default to `status`. |
+| `afterwrd:poll` | A poll the post asks (its `content` is the question): see below. Only on posts written on afterwrd (0.40.0). |
 | `replies` | Left out in `afterwrd:postedWith`. |
 
 What a receiver accepts (`parseNote`). It drops the Note unless all of these hold:
@@ -617,7 +636,24 @@ It then keeps fields within these limits:
 
 A string over its limit is dropped, not cut.
 
-Source: `src/share.js:85-117`, `src/friends.js:48-67`.
+**A poll** (afterwrd 0.40.0) is an ActivityStreams `Question`, as Mastodon's polls are:
+
+```json
+"afterwrd:poll": {"type": "Question",
+  "oneOf": [ {"type": "Note", "name": "Sat 5th", "replies": {"type": "Collection", "totalItems": 3}}, … ],
+  "endTime": "2026-11-14T23:59:59Z", "closed": "2026-11-12T09:00:00Z", "votersCount": 5, "afterwrd:chosen": [0]}
+```
+
+- `oneOf` when one option may be chosen, `anyOf` when several may. 2 to 10 options, each `name` up to 100 characters.
+- `replies.totalItems` is how many chose that option; `votersCount` how many answered.
+- `endTime`, if present, is when it closes by itself. `closed`, if present, is when it closed.
+- `afterwrd:chosen` is the options the **asking** site's owner chose (by number), so each friend sees their own answer.
+- Who chose what is never sent to friends. Only the asker's own site knows it. (In a group, the group tells only the
+  writer's site: `afterwrd:voters` on each option, a list of Persons. A receiver ignores it on anyone else's poll.)
+
+A receiver drops a malformed poll and keeps the post. Older sites ignore the field and show only the question.
+
+Source: `src/share.js:85-117`, `src/friends.js:48-67`, `src/polls.js`.
 
 ### 6.4 Image and Video
 
@@ -1046,6 +1082,9 @@ Rules:
   Otherwise: `400` (`Unexpected photo details.` or `That photo is too big for a group.`).
 - `content` is normalised as for comments and must be 5000 characters or fewer. A post needs text, a photo or an event.
 - `afterwrd:event`, if present, must parse (9.7), must not be cancelled, and must not have finished already. Otherwise: `400`.
+- `afterwrd:poll` (0.40.0), if present, is a `Question` as in 6.3 with only the options' `name`s and an optional
+  `endTime` (within a year). `content` is then its question and must not be empty, and the post can't also be an
+  event. Otherwise: `400`.
 - The rate and size limits in 9.1 are checked before anything is fetched: `429` if over.
 - The group then **fetches each file and thumbnail from the member's signed links**, server-side:
   - redirects are not followed;
@@ -1054,7 +1093,9 @@ Rules:
   - it is stored only if its bytes hash to the given SHA-256.
 
   If any file fails, the post is removed again and the answer is `400`.
-- On success: `200 {"id": "https://g.example/groups/1/posts/<m>"}`. The member's site checks that the id is under that group.
+- On success: `200 {"id": "https://g.example/groups/1/posts/<m>"}`, with `"afterwrd:poll": true` if it kept a poll. The
+  member's site checks that the id is under that group. A group from before polls keeps the post without one and
+  says nothing: the member's site then deletes it again and tells its owner the group needs updating.
 
 #### `POST /_group/posts/<m>/delete` and `POST /_group/comments/<k>/delete`
 
@@ -1105,9 +1146,18 @@ Body: `{}`.
 
 All three event actions answer `200` with the event's post, as `GET /_group/posts/<m>` would return it but with no comments, so that the member's site can update its copy.
 
+#### `POST /_group/polls/<m>/vote` and `POST /_group/polls/<m>/close` (afterwrd 0.40.0)
+
+- `vote`: body `{"afterwrd:choices": [ … ]}`, as in 5.15. One answer per member; a new one replaces it; an empty list
+  takes it back. `400` if the post has no poll, it has closed, or the choices don't fit it.
+- `close`: body `{}`. Only the member who asked it: anyone else gets `400`.
+
+Both answer `200` with the post, as for events. Everyone sees the totals and their own choice; only the writer's site
+is sent `afterwrd:voters`. Answers notify no one.
+
 #### `POST /_group/leave`
 
-Answers `200 {"ok": true}` and forgets the member, along with their answers to events, so rejoining starts afresh. Their posts stay.
+Answers `200 {"ok": true}` and forgets the member, along with their answers to events and polls, so rejoining starts afresh. Their posts stay.
 
 The owner can't leave: `400 {"error": "You own this group: delete it instead."}`.
 

@@ -5,6 +5,7 @@ import { verdict } from "../checks.js";
 import { resultHtml } from "./checks.js";
 import { connectLink } from "../cloudflare.js";
 import { MAX_COMMENT } from "../archive/comments.js";
+import { MAX_OPTION } from "../polls.js";
 import {
   aspect, dateRange, EMOJI, fmtAgo, fmtDate, fmtDatetime, linkify, mediaUrl, number, safeUrl, summary, thumbUrl,
 } from "./format.js";
@@ -159,6 +160,52 @@ function ownerFace(ctx) {
     : html`<span class="who" aria-hidden="true">${initial(ctx.ownerName)}</span>`;
 }
 
+/**
+ * A poll (polls.js): each option with how many chose it. While it's open, choosing is one tap (or, when it takes
+ * several, ticks and Save). `action` takes the answer, with `hidden` fields; `closeAction`, for whoever asked, closes
+ * it. Who chose what shows only where the poll says (to whoever asked), folded away.
+ */
+function pollBlock(ctx, poll, { id, action, hidden = {}, closeAction = null, whoNote = "Only you can see this.", whoLink = null }) {
+  const back = ctx.url.pathname + ctx.url.search;
+  const share = (o) => (poll.voters ? Math.round((o.count / poll.voters) * 100) : 0);
+  const facts = [
+    !poll.voters ? "Nobody's answered yet" : poll.voters === 1 ? "1 person answered" : `${poll.voters} people answered`,
+    poll.open && poll.multiple && "Pick as many as you like",
+    !poll.open ? "Closed" : poll.closes_at && `Closes ${fmtDate(poll.closes_at)}`,
+  ].filter(Boolean).join(" · ");
+  const inside = (o) => html`<span class="fill" aria-hidden="true"></span>
+    <span class="name">${o.name}</span><span class="tally">${o.count}<span class="hidden"> (${share(o)}%)</span></span>`;
+  const fields = html`<input type="hidden" name="back" value="${back}">
+    ${Object.entries(hidden).map(([k, v]) => html`<input type="hidden" name="${k}" value="${v}">`)}`;
+  let options;
+  if (!poll.open) {
+    options = poll.options.map((o) => html`<div class="poll-option${o.chosen ? " chosen" : ""}" style="--share: ${share(o)}%">${inside(o)}</div>`);
+  } else if (poll.multiple) {
+    options = html`<form method="post" action="${action}" class="poll-form">${fields}
+      ${poll.options.map((o, i) => html`<label class="poll-option${o.chosen ? " chosen" : ""}" style="--share: ${share(o)}%">
+        <input type="checkbox" name="choice" value="${i}" ${o.chosen && "checked"}>${inside(o)}</label>`)}
+      <button class="chip">${poll.answered ? "Change my answer" : "Answer"}</button>
+    </form>`;
+  } else {
+    options = html`<form method="post" action="${action}" class="poll-form">${fields}
+      ${poll.options.map((o, i) => html`<button class="poll-option${o.chosen ? " chosen" : ""}" style="--share: ${share(o)}%"
+        name="choice" value="${i}" aria-pressed="${o.chosen ? "true" : "false"}">${inside(o)}</button>`)}
+    </form>`;
+  }
+  const named = poll.options.some((o) => o.voters?.length);
+  const who = (v) => (!v.from || v.from === ctx.url.origin ? "You" : v.name);
+  return html`<div class="poll" id="${id}">
+  ${options}
+  <p class="meta">${facts}</p>
+  ${named ? html`<details class="poll-who"><summary>Who chose what</summary>
+    <p class="meta">${whoNote}</p>
+    <dl>${poll.options.filter((o) => o.voters?.length).map((o) => html`<dt>${o.name}</dt><dd>${o.voters.map(who).join(", ")}</dd>`)}</dl>
+  </details>` : whoLink && poll.voters > 0 && html`<p class="meta"><a href="${whoLink}">See who chose what</a></p>`}
+  ${closeAction && poll.open && html`<form method="post" action="${closeAction}" data-confirm="Close this poll? Nobody will be able to answer any more." data-confirm-ok="Close it">
+    <input type="hidden" name="back" value="${back}"><button class="chip">Close poll</button></form>`}
+</div>`;
+}
+
 function postCard(ctx, p) {
   // Posts written here look like friends' posts: who, when, and what they did if it's more than writing.
   if (p.id >= SITE_ID) {
@@ -173,6 +220,7 @@ function postCard(ctx, p) {
       data-confirm="Delete this post, its photos and its comments? This can’t be undone." data-confirm-ok="Delete"><button class="delete">Delete</button></form>`}
   </header>
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
+  ${p.poll && pollBlock(ctx, p.poll, { id: `poll-${p.id}`, action: `/_admin/posts/${p.id}/vote`, closeAction: `/_admin/posts/${p.id}/close` })}
   ${collage(p.media)}
   ${p.thread && thread(ctx, p.key, p.thread)}
 </article>`;
@@ -336,9 +384,20 @@ function composer({ action = null, max = null, placeholder = "Write something, o
   return html`<form class="card composer" id="composer" ${action && html`data-action="${action}" data-max="${max}"`}>
   <textarea name="text" rows="2" maxlength="5000" placeholder="${placeholder}" aria-label="New post"></textarea>
   <ul class="picked" hidden></ul>
+  <fieldset class="poll-maker" hidden>
+    <legend class="hidden">Poll</legend>
+    <ol class="poll-options">
+      ${[1, 2].map((n) => html`<li><input name="option" maxlength="${MAX_OPTION}" placeholder="Option ${n}" aria-label="Option ${n}"></li>`)}
+    </ol>
+    <button type="button" class="chip add-option">Add an option</button>
+    <label class="tick"><input type="checkbox" name="multiple"> Let people pick more than one</label>
+    <label class="closes"><span>Closes on <span class="meta">(if you like)</span></span><input type="date" name="closes"></label>
+    <button type="button" class="chip remove-poll">Remove the poll</button>
+  </fieldset>
   <p class="error" role="alert"></p>
   <div class="actions">
     <label class="chip">${raw(icon("photos"))}<span>Add photos</span><input type="file" accept="image/*" multiple class="hidden"></label>
+    <button type="button" class="chip add-poll">${raw(icon("poll"))}<span>Poll</span></button>
     <span class="status meta" role="status"></span>
     <button class="post">Post</button>
   </div>
@@ -762,6 +821,7 @@ function remoteCard(ctx, c, p, { thread = true } = {}) {
     <time title="${fmtDatetime(p.created_at)}">${fmtAgo(p.created_at)}</time>
   </header>
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
+  ${p.poll && pollBlock(ctx, p.poll, { id: `poll-f${c.id}-${p.key}`, action: "/_feed/vote", hidden: { connection: c.id, target: p.key } })}
   ${n > 0 && html`<div class="collage collage-${Math.min(n, 4)}">
     ${p.photos.slice(0, 4).map((m, i) => html`
       <a href="${friendBase(c)}/photos/${m.hash}" class="tile" ${n === 1 && m.kind === "photo" && html`style="--bg-img: url('${m.thumbSrc}')"`}>
@@ -1378,6 +1438,10 @@ function groupCard(ctx, g, p) {
   </header>
   ${p.event && eventBlock(ctx, g, p, { full: ctx.url.pathname.includes("/posts/") })}
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
+  ${p.poll && pollBlock(ctx, p.poll, { id: `poll-g${p.id}`, action: `/_groups/${g.id}/polls/${p.id}/vote`,
+    closeAction: p.mine ? `/_groups/${g.id}/polls/${p.id}/close` : null,
+    whoNote: "Only you're shown this. Whoever hosts the group could still look it up.",
+    whoLink: p.mine && !ctx.url.pathname.includes("/posts/") ? `${groupBase(g)}/posts/${p.id}#poll-g${p.id}` : null })}
   ${n > 0 && html`<div class="collage collage-${Math.min(n, 4)}">
     ${p.photos.slice(0, 4).map((m, i) => html`
       <a href="${m.src}" target="_blank" rel="noopener" class="tile" ${n === 1 && html`style="--bg-img: url('${m.thumbSrc}')"`}>

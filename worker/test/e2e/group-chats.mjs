@@ -58,8 +58,8 @@ const call = (site, path, key, body) => fetch(site + path, { method: body ? "POS
   headers: { ...(key && { Authorization: `Bearer ${key}` }), ...(body && { "Content-Type": "application/json" }) }, body: body && JSON.stringify(body) });
 const mainText = (page) => page.$eval("main", (m) => m.textContent);
 const bubbles = (page) => page.$$eval("#chat li.msg", (l) => l.map((li) => ({ id: Number(li.dataset.id), mine: li.classList.contains("mine"),
-  who: li.querySelector(".who")?.firstChild?.textContent.trim() ?? "", text: li.querySelector(".said").textContent, html: li.querySelector(".said").innerHTML,
-  site: li.querySelector(".who .site")?.textContent ?? "",
+  who: li.querySelector(".sender")?.firstChild?.textContent.trim() ?? "", text: li.querySelector(".said").textContent, html: li.querySelector(".said").innerHTML,
+  site: li.querySelector(".sender .site")?.textContent ?? "",
   state: li.querySelector(".state")?.textContent ?? "", everywhere: Boolean(li.querySelector('input[name="everywhere"]')) })));
 const menuCount = (page) => page.$eval('header.site a[href="/messages"]', (a) => a.querySelector(".count")?.firstChild?.textContent ?? "").catch(() => null);
 async function join(page, site, link) {
@@ -128,6 +128,8 @@ await bob.goto(`${B}/messages`);
 check("Messages lists it as a group", await bob.$eval(".chat-row", (a) => a.textContent.includes("Book club") && a.textContent.includes("group")));
 const bobChat = await openGroupChat(bob, B, bobGroup);
 check("Bob's chat shows it, with Ann's name", (await bubbles(bob)).some((m) => !m.mine && m.who === "Ann Example" && m.text === "Hello book club!"));
+check("…as a plain line, not a round picture", await bob.$eval("li .sender", (p) => getComputedStyle(p).borderRadius === "0px"
+  && getComputedStyle(p).backgroundColor === "rgba(0, 0, 0, 0)").catch(() => false));
 
 // Cat answers; Ann's and Bob's open chats get it by themselves, as text.
 const catChat = await openGroupChat(cat, C, catGroup);

@@ -59,7 +59,7 @@ function openChat(list) {
     Object.assign(li.dataset, { id: m.id, state: m.state ?? "" });
     const said = Object.assign(document.createElement("p"), { className: "said", textContent: m.text });
     if (m.author) {
-      const who = Object.assign(document.createElement("p"), { className: "who", textContent: m.author });
+      const who = Object.assign(document.createElement("p"), { className: "sender", textContent: m.author });
       if (m.authorSite) who.append(" ", Object.assign(document.createElement("span"), { className: "site", textContent: m.authorSite }));
       li.append(who);
     }

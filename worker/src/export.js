@@ -21,6 +21,9 @@ const TABLES = {
   tagged_photos: { columns: "*" },
   site_comments: { columns: "*" },
   comments_elsewhere: { columns: "*" },
+  // Polls in the owner's posts, and who answered: the owner's own records.
+  site_polls: { columns: "*" },
+  site_poll_votes: { columns: "post_id, voter, name, choices, voted_at" },
   connections: { columns: "id, origin, name, connected_at", where: "approved_at IS NOT NULL" },
   // Groups: which, and what the owner posted and said in them. No keys.
   groups: { columns: "id, name, about, origin, remote_id, host_name, joined_at, role", where: "joined_at IS NOT NULL" },

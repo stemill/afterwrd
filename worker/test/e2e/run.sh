@@ -100,6 +100,7 @@ run_messages() { # messages between friends (src/messages.js), and notifications
 }
 run_groups() { three_sites groups.mjs group; }
 run_group_chats() { three_sites group-chats.mjs group; }
+run_polls() { three_sites polls.mjs group; }
 run_central() { # the installer at install.afterwrd.app, on 8791, with stand-ins on 8797 and 8799 (central.mjs runs them)
   stop
   (cd "$WORKER" && "$WRANGLER" dev -c central/wrangler.jsonc --port 8791 --ip 127.0.0.1 --infer-origin-from-routes=false --var ALLOW_LOCAL_SITES:1 \
@@ -142,10 +143,10 @@ run_upgrade() { # $1: an older release tag
   git -C "$WORKER" worktree remove --force "$OUT/old"
 }
 
-if [ $# -eq 0 ]; then set -- core fresh albums messages update auto feed groups group_chats checks central forged; fi
+if [ $# -eq 0 ]; then set -- core fresh albums messages update auto feed groups group_chats polls checks central forged; fi
 while [ $# -gt 0 ]; do
   case "$1" in
-    core|fresh|albums|update|auto|feed|groups|checks|central|forged|screenshots|messages|group_chats) "run_$1" ;;
+    core|fresh|albums|update|auto|feed|groups|checks|central|forged|screenshots|messages|group_chats|polls) "run_$1" ;;
     upgrade) shift; run_upgrade "${1:?give an older release tag, e.g. v0.12.0}" ;;
     *) echo "Unknown suite: $1" >&2; FAILED=1 ;;
   esac

@@ -4,6 +4,7 @@ import { groupPostId } from "../../public/static/activity.js";
 import { FINISHED_SQL, icsFile } from "../calendar.js";
 import { connectedToken } from "../cloudflare.js";
 import { findTarget, latestComments, loadThreads, newCount, photoKey, postKey } from "./comments.js";
+import { sitePolls } from "../polls.js";
 import { connectionById, loadFeed, markMine, noteAnswer, rememberPicture } from "../feed.js";
 import * as friend from "../friends.js";
 import { MAX_GROUP_PHOTOS, MAX_MEMBERS } from "../groups.js";
@@ -221,8 +222,11 @@ async function loadPosts(db, rows, { threads = true } = {}) {
     WHERE t.post_id IN (${marks(ids)})`, ids);
   const keys = posts.map(postKey);
   const comments = threads ? await loadThreads(db, keys) : null;
+  // Polls in posts written here, with who chose what: this is the owner's own site.
+  const polls = await sitePolls(db, ids.filter((id) => id >= SITE_ID).map((id) => id - SITE_ID), "site");
   return posts.map((p, i) => ({
     ...p, tags: tags.filter((t) => t.post_id === p.id), key: keys[i], thread: comments?.get(keys[i]),
+    poll: polls.get(p.id - SITE_ID) ?? null,
   }));
 }
 

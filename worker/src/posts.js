@@ -1,13 +1,19 @@
 // The owner's new posts, written with the composer on Posts (public/static/compose.js, which uploads the photos
 // through the import's file endpoints first):
-//   POST /_admin/posts                {text, photos: [{hash, thumb_hash, width, height, size}]}
+//   POST /_admin/posts                {text, photos: [{hash, thumb_hash, width, height, size}], poll?: {options, multiple,
+//                                     closes_at}}: a poll asks the post's words (polls.js)
 //   POST /_admin/posts/<id>/delete    a form on the post itself
+//   POST /_admin/posts/<id>/vote      choice (one, or several if the poll takes more), back: the owner answers their poll
+//   POST /_admin/posts/<id>/close     back: the owner closes their poll
 // They're kept in site_posts and site_photos (with albums in site_albums, photos.js) and copied into the archive's
 // tables by mirror().
 import { photoKey, postKey } from "./archive/comments.js";
 import { HASH_RE, mediaStore } from "./media.js";
-import { json, now, Refusal } from "./util.js";
+import { html, json, now, Refusal } from "./util.js";
 import { notifyNewPost } from "./notify.js";
+import { safeNext } from "./auth.js";
+import { answerHere, readPoll } from "./polls.js";
+import { messagePage } from "./views/pages.js";
 
 // Copies take ids from here up, far beyond any an import gives out.
 export const SITE_ID = 1_000_000_000;
@@ -98,24 +104,48 @@ export async function handlePosts(request, env, url) {
     await deletePost(env, Number(del[1]));
     return Response.redirect(`${url.origin}/posts`, 303);
   }
+  const poll = /^\/_admin\/posts\/(\d+)\/(vote|close)$/.exec(url.pathname);
+  if (poll) {
+    const form = await request.formData().catch(() => new FormData());
+    const back = new URL(safeNext(String(form.get("back") ?? "/"), url), url.origin);
+    try {
+      if (poll[2] === "vote") await answerPoll(env, Number(poll[1]), form.getAll("choice").map(String));
+      else await closePoll(env, Number(poll[1]));
+    } catch (error) {
+      if (error instanceof Refusal) {
+        return html(messagePage(error.message, { href: back.pathname + back.search, label: "Go back" }), error.status);
+      }
+      throw error;
+    }
+    back.hash = `poll-${poll[1]}`;
+    return Response.redirect(back, 303);
+  }
   return new Response("Not found", { status: 404 });
 }
 
 // --- actions (see util.js Refusal) -----------------------------------------------------------------------------------
 
-/** A new post: {text, photos: [{hash, thumb_hash, width, height, size}]}, the photos already uploaded. Friends are told. */
+/**
+ * A new post: {text, photos: [{hash, thumb_hash, width, height, size}], poll}, the photos already uploaded; with a
+ * poll (polls.js readPoll), the text is its question. Friends are told.
+ */
 export async function createPost(env, origin, body) {
   const db = env.DB;
   const text = typeof body.text === "string" ? body.text.replace(/\r\n?/g, "\n").trim() : "";
   const photos = Array.isArray(body.photos) ? body.photos : [];
   if (text.length > MAX_TEXT) throw new Refusal(`Posts can be up to ${MAX_TEXT} characters.`);
+  const { poll, error } = readPoll(body.poll);
+  if (error) throw new Refusal(error);
+  if (poll && !text) throw new Refusal("Write the question your poll asks.");
   if (!text && !photos.length) throw new Refusal("Write something or add a photo.");
   const problem = await checkPhotos(env, photos);
   if (problem) throw new Refusal(problem);
-  // One transaction: the post, its photos and the archive's copy.
+  // One transaction: the post, its photos, its poll and the archive's copy.
   await db.batch([
     db.prepare("INSERT INTO site_posts (created_at, text) VALUES (?, ?)").bind(now(), text || null),
     ...addPhotos(db, photos, { inPost: true }),
+    ...(poll ? [db.prepare(`INSERT INTO site_polls (post_id, options, multiple, closes_at) VALUES ((SELECT MAX(id) FROM site_posts), ?, ?, ?)`)
+      .bind(JSON.stringify(poll.options), poll.multiple, poll.closes_at)] : []),
     ...mirror(db),
   ]);
   await notifyNewPost(env, origin);
@@ -136,10 +166,24 @@ export async function deletePost(env, postId) {
       db.prepare("DELETE FROM site_photos WHERE post_id = ? AND album_id IS NULL").bind(id),
       db.prepare("UPDATE site_photos SET post_id = NULL WHERE post_id = ?").bind(id),
       db.prepare("DELETE FROM site_posts WHERE id = ?").bind(id),
+      db.prepare("DELETE FROM site_polls WHERE post_id = ?").bind(id),
+      db.prepare("DELETE FROM site_poll_votes WHERE post_id = ?").bind(id),
       ...mirror(db),
       ...going.map((f) => db.prepare("DELETE FROM site_comments WHERE target = ? AND NOT EXISTS (SELECT 1 FROM media WHERE hash = ?)")
         .bind(photoKey(f), f.hash)),
     ]);
     await removeUnusedFiles(env, going.flatMap((f) => [f.hash, f.thumb_hash]));
   }
+}
+
+/** The owner answers the poll in their post `postId` (its archive id): `choices`, the options' numbers. */
+export async function answerPoll(env, postId, choices) {
+  const owner = await env.DB.prepare("SELECT name FROM users LIMIT 1").first();
+  const trouble = await answerHere(env.DB, postId - SITE_ID, "site", owner?.name ?? "You", choices);
+  if (trouble) throw new Refusal(trouble);
+}
+
+/** The owner closes the poll in their post `postId` (its archive id): its answers stay, and no more are taken. */
+export async function closePoll(env, postId) {
+  await env.DB.prepare("UPDATE site_polls SET closed_at = ? WHERE post_id = ? AND closed_at IS NULL").bind(now(), postId - SITE_ID).run();
 }

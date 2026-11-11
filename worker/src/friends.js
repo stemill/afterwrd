@@ -7,6 +7,7 @@ import { actorId, POST_KEY_RE, seconds } from "../public/static/activity.js";
 import { MAX_COMMENT } from "./archive/comments.js";
 import { HASH_RE } from "./media.js";
 import { callSite, siteOrigin } from "./peers.js";
+import { parsePoll } from "./polls.js";
 
 const text = (v, max) => (typeof v === "string" && v.length <= max ? v : null);
 const count = (n) => (Number.isSafeInteger(n) && n > 0 ? n : null);
@@ -45,7 +46,7 @@ function parseThread(collection, base, site, friendName) {
   });
 }
 
-export function parseNote(note, site, friendName) {
+export function parseNote(note, site, friendName, env = null) {
   const key = own(site, note?.id, "/posts/");
   const created = seconds(note?.published);
   if (note?.type !== "Note" || !POST_KEY_RE.test(key ?? "") || created === null) return null;
@@ -63,6 +64,8 @@ export function parseNote(note, site, friendName) {
     tags: (Array.isArray(note.tag) ? note.tag.slice(0, 50) : []).map((t) => text(t?.name, 100)).filter(Boolean),
     photos: attachments.map((m) => parseMedia(m, site)).filter(Boolean),
     comments: parseThread(note.replies, note.id, site, friendName),
+    // Their poll, if the post asks one: how many chose what, and what the owner here chose. Never who.
+    poll: note["afterwrd:poll"] === undefined ? null : parsePoll(note["afterwrd:poll"], env),
   };
 }
 

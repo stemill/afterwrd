@@ -24,6 +24,7 @@
 //   POST /_groups/<id>/leave
 //   POST /_groups/<id>/events             an event (the form in views.js): they're going, to start with
 //   POST /_groups/<id>/events/<m>/(answer|edit|cancel)    answer: going, maybe or no; edit: their own; cancel: as delete
+//   POST /_groups/<id>/polls/<m>/(vote|close)              vote: choice…; close: a poll they asked (polls.js)
 //   Running a group (its admins): POST /_groups/<id>/link (JSON), /_groups/<id>/about (name, about),
 //   /_groups/<id>/members/<m>/(approve|decline|remove|admin|member); its owner: /_groups/<id>/delete (groupsites.js)
 import { CONTEXT, fileUrl, groupId, groupPostId, seconds } from "../public/static/activity.js";
@@ -34,6 +35,7 @@ import { parseMedia } from "./friends.js";
 import { cleanName, cleanText, MAX_GROUP_ABOUT, MAX_GROUP_NAME, MAX_GROUP_PHOTOS, MAX_GROUP_TEXT } from "./groups.js";
 import { handleGroupSites } from "./groupsites.js";
 import { receiveGroupMessage } from "./messages.js";
+import { parsePoll, questionFor, readPoll } from "./polls.js";
 import { receiveGroupNote } from "./notify.js";
 import { messagePage } from "./views/pages.js";
 import { callSite, KEY_RE, ownerName, PROTOCOL, siteOrigin } from "./peers.js";
@@ -94,6 +96,8 @@ export function parseGroupNote(note, site, n, env) {
     comments: parseComments(note.replies, note.id, env),
     commentCount: count(note.replies?.totalItems) ?? 0, // the group sends only the newest with a page of posts
     event: note["afterwrd:event"] === undefined ? null : parseGroupEvent(note["afterwrd:event"], env),
+    // Who chose what is read here, but markMine keeps it only on the owner's own polls.
+    poll: note["afterwrd:poll"] === undefined ? null : parsePoll(note["afterwrd:poll"], env, { names: true }),
   };
 }
 
@@ -138,7 +142,7 @@ export function parseGroupMembers(data, site, n, env) {
  * claiming to be from this site is left out.
  */
 export async function markMine(db, group, posts, ownOrigin) {
-  const { results } = await db.prepare(`SELECT kind, post_id, remote_id, text, photos, event, created_at FROM group_mine
+  const { results } = await db.prepare(`SELECT kind, post_id, remote_id, text, photos, event, poll, created_at FROM group_mine
     WHERE site = ? AND remote_group = ?`).bind(group.origin, group.remote_id).all();
   const posted = new Map(results.filter((r) => r.kind === "post").map((r) => [r.remote_id, r]));
   const said = new Map(results.filter((r) => r.kind === "comment").map((r) => [`${r.post_id}:${r.remote_id}`, r]));
@@ -151,11 +155,21 @@ export async function markMine(db, group, posts, ownOrigin) {
     const { title, starts_at, ends_at, all_day, time_zone, place } = kept;
     return { ...e, title, starts_at, ends_at, all_day, time_zone, place };
   };
+  // A poll they asked, with its options as they asked them (how many chose what, and who, are the group's to say).
+  const poll = (sent, q) => {
+    let kept = null;
+    try { kept = JSON.parse(sent.poll ?? "null"); } catch {}
+    if (!q || !kept || kept.options?.length !== q.options.length) return null;
+    return { ...q, multiple: Boolean(kept.multiple), closes_at: kept.closes_at ?? null,
+      options: q.options.map((o, i) => ({ ...o, name: kept.options[i] })) };
+  };
+  // Anyone else's: never who chose what, whatever the group says.
+  const theirs = (q) => q && { ...q, options: q.options.map((o) => ({ ...o, voters: null })) };
   return posts.flatMap((p) => {
     const sent = posted.get(p.id);
     if (!sent && p.from === ownOrigin) return [];
     const post = sent ? { ...p, mine: true, text: sent.text, created_at: sent.created_at, photos: p.photos.filter((m) => hashes(sent).has(m.hash)),
-      event: event(sent, p.event) } : { ...p, mine: false };
+      event: event(sent, p.event), poll: poll(sent, p.poll) } : { ...p, mine: false, poll: theirs(p.poll) };
     return [{ ...post, comments: p.comments.flatMap((c) => {
       const kept = said.get(`${p.id}:${c.id}`);
       if (kept) return [{ ...c, mine: true, text: kept.text, created_at: kept.created_at }];
@@ -364,11 +378,14 @@ export async function findGroup(db, id, { unfinished = false } = {}) {
  * Sends a post to a group; its photos (already uploaded here) go as signed links, and are copied there. Returns
  * { id }, its number there.
  */
-export async function postToGroup(env, site, group, { text: words, photos }) {
+export async function postToGroup(env, site, group, { text: words, photos, poll: asking = undefined }) {
   const db = env.DB;
   const trouble = await checkPhotos(env, photos, MAX_GROUP_PHOTOS);
   if (trouble) throw new Refusal(trouble);
   if (words.length > MAX_GROUP_TEXT) throw new Refusal(`Posts can be up to ${MAX_GROUP_TEXT} characters.`);
+  const { poll, error } = readPoll(asking);
+  if (error) throw new Refusal(error);
+  if (poll && !words) throw new Refusal("Write the question your poll asks.");
   if (!words && !photos.length) throw new Refusal("Write something or add a photo.");
   const attachment = await Promise.all(photos.map(async (f) => ({
     type: "Image", url: fileUrl(site, f.hash), mediaType: "image/jpeg", width: f.width, height: f.height, "afterwrd:size": f.size,
@@ -376,13 +393,19 @@ export async function postToGroup(env, site, group, { text: words, photos }) {
     preview: { type: "Image", url: fileUrl(site, f.thumb_hash), mediaType: "image/jpeg", "afterwrd:fetch": await signedFile(env, site, f.thumb_hash) },
   })));
   try {
-    const reply = await call(group, "/_group/posts", { "@context": CONTEXT, type: "Note", mediaType: "text/plain", content: words, attachment });
+    const reply = await call(group, "/_group/posts", { "@context": CONTEXT, type: "Note", mediaType: "text/plain", content: words, attachment,
+      ...(poll && { "afterwrd:poll": questionFor(poll) }) });
     const prefix = groupPostId(group.origin, group.remote_id, "");
     const id = typeof reply.id === "string" && reply.id.startsWith(prefix) ? reply.id.slice(prefix.length) : "";
     if (!/^\d{1,15}$/.test(id)) throw unexpected();
-    await db.prepare(`INSERT INTO group_mine (group_id, site, remote_group, kind, post_id, remote_id, text, photos, created_at)
-      VALUES (?, ?, ?, 'post', ?, ?, ?, ?, ?)`).bind(group.id, group.origin, group.remote_id, Number(id), Number(id), words || null,
-      JSON.stringify(photos.map((f) => f.hash)), now()).run();
+    // A group's site from before polls keeps the post without one: take it back, and say why.
+    if (poll && reply["afterwrd:poll"] !== true) {
+      await call(group, `/_group/posts/${Number(id)}/delete`, {}).catch(() => {});
+      throw new Error("its site needs updating before it can take polls. Its owner can update it from their Update page");
+    }
+    await db.prepare(`INSERT INTO group_mine (group_id, site, remote_group, kind, post_id, remote_id, text, photos, poll, created_at)
+      VALUES (?, ?, ?, 'post', ?, ?, ?, ?, ?, ?)`).bind(group.id, group.origin, group.remote_id, Number(id), Number(id), words || null,
+      JSON.stringify(photos.map((f) => f.hash)), poll && JSON.stringify(poll), now()).run();
     return { id: Number(id) };
   } catch (error) {
     throw new Refusal(`Couldn't post in ${group.name}: ${error.message}`);
@@ -454,6 +477,25 @@ export async function answerEvent(env, site, group, id, answer) {
     await keepReply(env, site, group, await call(group, `/_group/events/${Number(id)}/answer`, { answer }), id, answer);
   } catch (error) {
     throw new Refusal(`Couldn't send your answer: ${error.message}`);
+  }
+}
+
+/** The owner answers a poll in a group (`choices`: the options' numbers; none takes it back). */
+export async function voteInGroup(env, group, id, choices) {
+  const list = choices.slice(0, 20).map((c) => (/^\d{1,2}$/.test(c) ? Number(c) : -1));
+  try {
+    await call(group, `/_group/polls/${Number(id)}/vote`, { "afterwrd:choices": list });
+  } catch (error) {
+    throw new Refusal(`Couldn't send your answer: ${error.message}`);
+  }
+}
+
+/** The owner closes a poll they asked in a group. */
+export async function closePollInGroup(env, group, id) {
+  try {
+    await call(group, `/_group/polls/${Number(id)}/close`, {});
+  } catch (error) {
+    throw new Refusal(`Couldn't close the poll: ${error.message}`);
   }
 }
 
@@ -547,7 +589,7 @@ export async function handleGroupActions(request, env, url) {
   try {
     if (action === "/posts") {
       const body = await request.json().catch(() => ({}));
-      await postToGroup(env, site, group, { text: cleanText(body.text), photos: Array.isArray(body.photos) ? body.photos : [] });
+      await postToGroup(env, site, group, { text: cleanText(body.text), photos: Array.isArray(body.photos) ? body.photos : [], poll: body.poll });
       return json({ ok: true });
     }
     if (action === "/link") return json({ link: (await admin(group, "link")).link });
@@ -563,6 +605,7 @@ export async function handleGroupActions(request, env, url) {
   const members = new URL(`${home}/members`, site);
   const del = /^\/(posts|comments)\/(\d{1,15})\/delete$/.exec(action);
   const ev = /^\/events\/(\d{1,15})\/(answer|edit|cancel)$/.exec(action);
+  const polled = /^\/polls\/(\d{1,15})\/(vote|close)$/.exec(action);
   const decision = /^\/members\/(\d{1,15})\/(approve|decline|remove|admin|member)$/.exec(action);
   try {
     if (action === "/comments") {
@@ -582,6 +625,10 @@ export async function handleGroupActions(request, env, url) {
       await answerEvent(env, site, group, ev[1], String(form.get("answer") ?? ""));
     } else if (ev?.[2] === "cancel") {
       await cancelEvent(env, site, group, ev[1]);
+    } else if (polled) {
+      if (polled[2] === "vote") await voteInGroup(env, group, polled[1], form.getAll("choice").map(String));
+      else await closePollInGroup(env, group, polled[1]);
+      back.hash = `poll-g${polled[1]}`;
     } else if (action === "/leave") {
       try {
         await leaveGroup(env, group);

@@ -12,7 +12,7 @@ const EXTENSIONS = {
   "video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm",
 };
 const TABLES = ["settings", "people", "albums", "posts", "post_tags", "comments", "reactions", "media", "tagged_photos",
-  "site_comments", "comments_elsewhere", "connections", "friend_links", "users",
+  "site_comments", "comments_elsewhere", "site_polls", "site_poll_votes", "connections", "friend_links", "users",
   "groups", "group_mine", "chats", "messages"];
 
 const form = document.getElementById("export");
@@ -80,6 +80,22 @@ function documents(t) {
   const collection = (items, extra = {}) => ({ "@context": CONTEXT, type: "OrderedCollection", totalItems: items.length, ...extra, orderedItems: items });
   const newest = (a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0);
 
+  // A poll in a post written here (src/polls.js), as a Question: each option with how many chose it, and who.
+  const poll = (p) => {
+    const q = p.id >= SITE_POSTS_FROM && t.site_polls.find((x) => x.post_id === p.id - SITE_POSTS_FROM);
+    if (!q) return undefined;
+    const votes = t.site_poll_votes.filter((v) => v.post_id === q.post_id);
+    const who = (v) => (v.voter === "site" ? { type: "Person", id: actorId(site), name: owner.name } : { type: "Person", id: actorId(v.voter), name: v.name });
+    return {
+      type: "Question",
+      [q.multiple ? "anyOf" : "oneOf"]: JSON.parse(q.options).map((name, i) => {
+        const chose = votes.filter((v) => v.choices & (1 << i));
+        return { type: "Note", name, replies: { type: "Collection", totalItems: chose.length }, "afterwrd:voters": chose.map(who) };
+      }),
+      endTime: iso(q.closes_at), closed: iso(q.closed_at ?? (q.closes_at && q.closes_at * 1000 < Date.now() ? q.closes_at : undefined)),
+      votersCount: votes.length,
+    };
+  };
   const postIds = new Map();
   const posts = [...t.posts].sort(newest).map((p) => {
     const key = postKey(p);
@@ -103,6 +119,7 @@ function documents(t) {
       "afterwrd:onWallOf": person(p.target_id),
       "afterwrd:source": p.id >= SITE_POSTS_FROM ? "afterwrd" : "facebook",
       "afterwrd:facebookId": p.fbid || undefined,
+      "afterwrd:poll": poll(p),
       replies: replies(key),
     };
   });
@@ -185,6 +202,8 @@ function documents(t) {
         type: "Note", id: m.kind === "post" ? post : `${post}#c${m.remote_id}`, attributedTo: actorId(site),
         inReplyTo: m.kind === "post" ? undefined : post, context: groupId(m.site, m.remote_group),
         published: iso(m.created_at), mediaType: "text/plain", content: m.text ?? "",
+        "afterwrd:poll": m.poll ? (({ options, multiple, closes_at: closes }) => ({ type: "Question",
+          [multiple ? "anyOf" : "oneOf"]: options.map((name) => ({ type: "Note", name })), endTime: iso(closes) }))(JSON.parse(m.poll)) : undefined,
       };
     }), { name: "What you've posted and said in groups (the originals are kept on each group's site)" }),
     // Messages with friends and in groups' chats: each chat in order, with everyone's messages. Only there if there are

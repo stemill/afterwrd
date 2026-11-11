@@ -29,6 +29,10 @@
 //   POST /_group/events/<m>/edit   {content, afterwrd:event}: only the member who added it
 //   POST /_group/events/<m>/cancel its writer, or an admin (as for deleting): those going are told
 // An event is a post (POST /_group/posts) with an afterwrd:event, and deleting it calls it off.
+//   POST /_group/polls/<m>/vote   {afterwrd:choices: [n…]}: the member answers a post's poll (none takes it back)
+//   POST /_group/polls/<m>/close  only whoever asked it
+// A poll is a post with an afterwrd:poll (a Question: polls.js), its words the question; it answers {id, afterwrd:poll:
+// true}, so the member's site knows it was kept. Everyone sees how many chose what; only the writer's site is told who.
 //   POST /_group/leave            (not the owner, who deletes the group instead)
 // The group's chat (members' sites keep the copies people read; messages.js): kept here 30 days, then gone.
 //   POST /_group/chat             a Create of a Note from the member's site (<origin>/messages/<uid>): passed on to the
@@ -47,6 +51,7 @@ import { actorId, CONTEXT, fileUrl, groupId, groupPostId, iso, tidy } from "../p
 import pkg from "../package.json";
 import { MAX_COMMENT } from "./archive/comments.js";
 import { ANSWERS, eventChanged, eventObject, FINISHED_SQL, finishedAt, parseEvent } from "./calendar.js";
+import { choicesMask, isOpen, OPEN_SQL, pollFromQuestion, pollObject, readPoll, tally } from "./polls.js";
 import { signedLink } from "./friends.js";
 import { mediaStore } from "./media.js";
 import { cleanMessage } from "./messages.js";
@@ -138,12 +143,12 @@ function eventWithAnswers(e, answers, member) {
  * all). Whoever wrote each is named with their own site. Comments are limited so a page always fits what members'
  * sites will read (2 MB).
  */
-async function groupNotes(env, site, group, posts, member, comments = PAGE_COMMENTS) {
+async function groupNotes(env, site, group, posts, member, comments = PAGE_COMMENTS, { names = false } = {}) {
   const db = env.DB;
   if (!posts.length) return [];
   const marks = posts.map(() => "?").join(",");
   const ids = posts.map((p) => p.id);
-  const [photos, newest, counts, events, answers] = await db.batch([
+  const [photos, newest, counts, events, answers, polls, votes] = await db.batch([
     db.prepare(`SELECT * FROM group_photos WHERE post_id IN (${marks}) ORDER BY id`).bind(...ids),
     db.prepare(`SELECT * FROM (SELECT c.*, ROW_NUMBER() OVER (PARTITION BY post_id ORDER BY created_at DESC, id DESC) AS n
       FROM group_comments c WHERE post_id IN (${marks})) WHERE n <= ? ORDER BY created_at, id`).bind(...ids, comments),
@@ -152,16 +157,24 @@ async function groupNotes(env, site, group, posts, member, comments = PAGE_COMME
     db.prepare(`SELECT a.post_id, a.origin, a.answer, m.name FROM group_answers a
       JOIN group_members m ON m.origin = a.origin AND m.approved_at IS NOT NULL
       WHERE a.post_id IN (${marks}) ORDER BY a.answered_at, m.name`).bind(...ids),
+    db.prepare(`SELECT * FROM group_polls WHERE post_id IN (${marks})`).bind(...ids),
+    db.prepare(`SELECT v.post_id, v.origin AS voter, v.choices, m.name FROM group_poll_votes v
+      JOIN group_members m ON m.origin = v.origin AND m.approved_at IS NOT NULL
+      WHERE v.post_id IN (${marks}) ORDER BY v.voted_at, m.name`).bind(...ids),
   ]);
   const author = (row) => ({ type: "Person", id: actorId(row.origin), name: row.author_name });
   return Promise.all(posts.map(async (p) => {
     const address = groupPostId(site, group.id, p.id);
     const thread = newest.results.filter((c) => c.post_id === p.id);
     const event = events.results.find((e) => e.post_id === p.id);
+    const poll = polls.results.find((q) => q.post_id === p.id);
     return {
       type: "Note", id: address, attributedTo: author(p), context: groupId(site, group.id), published: iso(p.created_at),
       mediaType: "text/plain", content: p.text ?? "",
       "afterwrd:event": event ? eventWithAnswers(event, answers.results, member) : undefined,
+      // Who chose what goes only to whoever asked, and only with the post on its own (so a page of posts stays small).
+      "afterwrd:poll": poll ? pollObject(tally(poll, votes.results.filter((v) => v.post_id === p.id),
+        { viewer: member.origin, names: names && p.origin === member.origin })) : undefined,
       attachment: await Promise.all(photos.results.filter((f) => f.post_id === p.id).map((f) => photoObject(env, site, f))),
       replies: {
         type: "Collection", totalItems: counts.results.find((c) => c.post_id === p.id)?.n ?? 0,
@@ -190,7 +203,7 @@ async function groupPage(env, site, group, member, page) {
 async function groupPost(env, site, group, member, id, comments = POST_COMMENTS) {
   const post = await env.DB.prepare("SELECT * FROM group_posts WHERE id = ? AND group_id = ?").bind(Number(id), group.id).first();
   if (!post) return null;
-  const [note] = await groupNotes(env, site, group, [post], member, comments);
+  const [note] = await groupNotes(env, site, group, [post], member, comments, { names: true });
   return tidy({ "@context": CONTEXT, ...note, context: await groupObject(env.DB, site, group, member) });
 }
 
@@ -290,9 +303,11 @@ async function copyPhotos(env, photos) {
  * (posts, photos a day) and the group's room for photos; then the photos are copied from the member's site, and if
  * that fails the post goes again, with any files it brought. Returns { id } or { error, status }.
  */
-async function createPost(env, group, member, { text, photos, event = null }) {
+async function createPost(env, group, member, { text, photos, event = null, poll = null }) {
   const db = env.DB;
   if (text.length > MAX_GROUP_TEXT) return { error: `Posts can be up to ${MAX_GROUP_TEXT} characters.`, status: 400 };
+  if (poll && !text) return { error: "Write the question your poll asks.", status: 400 };
+  if (poll && event) return { error: "A post can be an event or a poll, not both.", status: 400 };
   if (!text && !photos.length && !event) return { error: "Write something or add a photo.", status: 400 };
   if (event && finishedAt(event) < now()) return { error: "That event would already be over.", status: 400 };
   const at = now();
@@ -315,6 +330,8 @@ async function createPost(env, group, member, { text, photos, event = null }) {
         VALUES (?, ?, ?, ?, ?, ?)`).bind(id, f.hash, f.thumb_hash, f.width, f.height, f.size + THUMB_BYTES)),
       ...(event ? [db.prepare(`INSERT INTO group_events (post_id, title, starts_at, ends_at, all_day, time_zone, place)
         VALUES (?, ?, ?, ?, ?, ?, ?)`).bind(id, event.title, event.starts_at, event.ends_at, event.all_day, event.time_zone, event.place)] : []),
+      ...(poll ? [db.prepare("INSERT INTO group_polls (post_id, options, multiple, closes_at) VALUES (?, ?, ?, ?)")
+        .bind(id, JSON.stringify(poll.options), poll.multiple, poll.closes_at)] : []),
     ];
     if (rows.length) await db.batch(rows);
     await copyPhotos(env, photos);
@@ -343,6 +360,8 @@ async function deletePost(env, site, group, member, id) {
     db.prepare("DELETE FROM group_photos WHERE post_id = ?").bind(post.id),
     db.prepare("DELETE FROM group_answers WHERE post_id = ?").bind(post.id),
     db.prepare("DELETE FROM group_events WHERE post_id = ?").bind(post.id),
+    db.prepare("DELETE FROM group_poll_votes WHERE post_id = ?").bind(post.id),
+    db.prepare("DELETE FROM group_polls WHERE post_id = ?").bind(post.id),
     db.prepare("DELETE FROM group_posts WHERE id = ?").bind(post.id),
   ]);
   await removeUnusedFiles(env, photos.flatMap((f) => [f.hash, f.thumb_hash]));
@@ -477,9 +496,9 @@ async function answerEvent(db, group, member, id, answer) {
   if (!found) return "That event isn't there any more.";
   if (found.event.cancelled_at) return "That event has been called off.";
   if (finishedAt(found.event) < now()) return "That event is over.";
-  await db.prepare(`INSERT INTO group_answers (post_id, origin, answer, answered_at) VALUES (?, ?, ?, ?)
+  await db.prepare(`INSERT INTO group_answers (post_id, origin, answer, answered_at) SELECT ?1, ?3, ?4, ?2 WHERE ${STILL_MEMBER_SQL}
     ON CONFLICT (post_id, origin) DO UPDATE SET answer = excluded.answer, answered_at = excluded.answered_at`)
-    .bind(found.post.id, member.origin, answer, now()).run();
+    .bind(found.post.id, now(), member.origin, answer).run();
   return null;
 }
 
@@ -513,8 +532,47 @@ async function editEvent(env, site, group, member, id, { text, event }) {
   return null;
 }
 
-/** Someone who's left or been removed: their answers go too, so rejoining starts afresh. */
-const forgetAnswers = (db, origin) => db.prepare("DELETE FROM group_answers WHERE origin = ?").bind(origin);
+/** SQL: the member ?3 is still in the group, checked as an answer's kept, so one sent as they leave isn't left behind. */
+const STILL_MEMBER_SQL = "EXISTS (SELECT 1 FROM group_members WHERE origin = ?3 AND approved_at IS NOT NULL)";
+
+/** Someone who's left or been removed: their answers (to events and polls) go too, so rejoining starts afresh. */
+const forgetAnswers = (db, origin) => [
+  db.prepare("DELETE FROM group_answers WHERE origin = ?").bind(origin),
+  db.prepare("DELETE FROM group_poll_votes WHERE origin = ?").bind(origin),
+];
+
+// --- polls ---------------------------------------------------------------------------------------------------------------
+
+/** A member answers the poll in post `id` (`list`: the options' numbers; none takes it back). An error message, or null. */
+async function answerPoll(db, group, member, id, list) {
+  const poll = await db.prepare(`SELECT q.* FROM group_polls q JOIN group_posts p ON p.id = q.post_id
+    WHERE q.post_id = ? AND p.group_id = ?`).bind(Number(id), group.id).first();
+  if (!poll) return "That poll isn't there any more.";
+  if (!isOpen(poll)) return "That poll has closed.";
+  const mask = choicesMask(list, poll);
+  if (mask === null) return poll.multiple ? "Those aren't options in this poll." : "Pick one of the options.";
+  const binds = [poll.post_id, now(), member.origin, mask];
+  if (!mask) {
+    // Taking an answer back, too, only while it's open: an answer still there afterwards means it had closed.
+    await db.prepare(`DELETE FROM group_poll_votes WHERE post_id = ?1 AND origin = ?3 AND ${OPEN_SQL("group_polls")}`).bind(...binds).run();
+    const left = await db.prepare("SELECT 1 FROM group_poll_votes WHERE post_id = ? AND origin = ?").bind(poll.post_id, member.origin).first();
+    return left ? "That poll has closed." : null;
+  }
+  // Only while it's open, and while they're still a member (removed or left mid-request, nothing's left behind).
+  const done = await db.prepare(`INSERT INTO group_poll_votes (post_id, origin, choices, voted_at)
+    SELECT ?1, ?3, ?4, ?2 WHERE ${OPEN_SQL("group_polls")} AND ${STILL_MEMBER_SQL}
+    ON CONFLICT (post_id, origin) DO UPDATE SET choices = excluded.choices, voted_at = excluded.voted_at
+    RETURNING post_id`).bind(...binds).first();
+  return done ? null : "That poll has closed.";
+}
+
+/** Whoever asked a poll closes it. An error message, or null. */
+async function closePoll(db, group, member, id) {
+  const post = await db.prepare("SELECT * FROM group_posts WHERE id = ? AND group_id = ?").bind(Number(id), group.id).first();
+  if (!post || post.origin !== member.origin) return "Only whoever asked can close a poll.";
+  await db.prepare("UPDATE group_polls SET closed_at = ? WHERE post_id = ? AND closed_at IS NULL").bind(now(), post.id).run();
+  return null;
+}
 
 /** Calls an event off: whoever added it, or an admin (as for deleting it). Those going are told. */
 async function cancelEvent(env, site, group, member, id) {
@@ -558,7 +616,7 @@ async function decide(env, group, admin, id, action) {
   }
   // Decline a request, or remove someone. What they posted stays, as on Facebook; an admin can delete it.
   await tellRemoved(member);
-  await db.batch([db.prepare("DELETE FROM group_members WHERE id = ?").bind(member.id), forgetAnswers(db, member.origin)]);
+  await db.batch([db.prepare("DELETE FROM group_members WHERE id = ?").bind(member.id), ...forgetAnswers(db, member.origin)]);
   return null;
 }
 
@@ -568,7 +626,7 @@ async function close(env, group, owner) {
   const { results: members } = await db.prepare("SELECT * FROM group_members WHERE id != ?").bind(owner.id).all();
   const { results: photos } = await db.prepare("SELECT hash, thumb_hash FROM group_photos").all();
   await db.batch([
-    ...["group_chat", "group_comments", "group_photos", "group_answers", "group_events", "group_posts", "group_links", "group_members", "groups"]
+    ...["group_chat", "group_comments", "group_photos", "group_answers", "group_poll_votes", "group_polls", "group_events", "group_posts", "group_links", "group_members", "groups"]
       .map((table) => db.prepare(`DELETE FROM ${table}`)),
     // So it can't be claimed again, should its Worker outlast this (its owner's site deletes it next).
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('group_closed', '1')"),
@@ -683,7 +741,7 @@ export async function handleGroupApi(request, env, url) {
   if (!member || !group) return json({ error: "Not a member of this group." }, 401);
   if (route === "POST /_group/leave") {
     if (member.role === "owner") return json({ error: "You own this group: delete it instead." }, 400);
-    await db.batch([db.prepare("DELETE FROM group_members WHERE id = ?").bind(member.id), forgetAnswers(db, member.origin)]);
+    await db.batch([db.prepare("DELETE FROM group_members WHERE id = ?").bind(member.id), ...forgetAnswers(db, member.origin)]);
     return json({ ok: true });
   }
   if (!member.approved_at) return json({ error: `Waiting for ${(await ownerOf(db))?.name ?? "the group"} to let you in.` }, 403);
@@ -710,8 +768,11 @@ export async function handleGroupApi(request, env, url) {
     if (error) return json({ error }, 400);
     const event = note["afterwrd:event"] === undefined ? null : parseEvent(note["afterwrd:event"]);
     if (note["afterwrd:event"] !== undefined && (!event || event.cancelled_at)) return json({ error: "Unexpected event details." }, 400);
-    const made = await createPost(env, group, member, { text: cleanText(note.content), photos, event });
-    return made.error ? json({ error: made.error }, made.status) : json({ id: groupPostId(site, group.id, made.id) });
+    const asked = note["afterwrd:poll"] === undefined ? { poll: null } : readPoll(pollFromQuestion(note["afterwrd:poll"]));
+    if (asked.error) return json({ error: asked.error }, 400);
+    const made = await createPost(env, group, member, { text: cleanText(note.content), photos, event, poll: asked.poll });
+    return made.error ? json({ error: made.error }, made.status)
+      : json({ id: groupPostId(site, group.id, made.id), "afterwrd:poll": asked.poll ? true : undefined });
   }
   if (route === "GET /_group/events") return json(await groupEvents(env, site, group, member, url.searchParams.get("when") === "past"));
   if (route === "POST /_group/chat" || route === "POST /_group/chat/delete") {
@@ -719,6 +780,15 @@ export async function handleGroupApi(request, env, url) {
     const done = route === "POST /_group/chat" ? await chatMessage(env, site, group, member, body)
       : await deleteChatMessage(env, site, group, member, body?.object);
     return done.error ? json({ error: done.error }, done.status) : json({ ok: true }, done.status);
+  }
+  const polled = /^POST \/_group\/polls\/(\d{1,15})\/(vote|close)$/.exec(route);
+  if (polled) {
+    const body = await request.json().catch(() => ({}));
+    const trouble = polled[2] === "vote" ? await answerPoll(db, group, member, polled[1], body?.["afterwrd:choices"])
+      : await closePoll(db, group, member, polled[1]);
+    if (trouble) return json({ error: trouble }, 400);
+    // The post as it is now, so the member's site can show it.
+    return json(await groupPost(env, site, group, member, polled[1], 0));
   }
   const ev = /^POST \/_group\/events\/(\d{1,15})\/(answer|edit|cancel)$/.exec(route);
   if (ev) {

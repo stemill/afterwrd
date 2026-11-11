@@ -38,8 +38,9 @@ const STYLE = `
   .msg { max-width: min(85%, 34rem); padding: 0.55rem 0.85rem; border-radius: 18px; background: var(--surface); align-self: flex-start; }
   .msg.mine { align-self: flex-end; background: var(--accent-soft); }
   .msg .said { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .msg .who { margin: 0 0 0.15rem; font-size: 0.8rem; font-weight: 700; color: var(--accent-strong); }
-  .msg .who .site { font-weight: 400; color: var(--muted); }
+  /* not .who: that's the round pictures, and made this a big coloured oval */
+  .msg .sender { margin: 0 0 0.15rem; font-size: 0.8rem; font-weight: 700; color: var(--accent-strong); }
+  .msg .sender .site { font-weight: 400; color: var(--muted); }
   .msg .under { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; align-items: baseline; font-size: 0.8rem; color: var(--muted); margin-top: 0.25rem; }
   .msg .under form { display: inline; }
   .msg .under button.link { font-size: 0.8rem; color: var(--muted); }
@@ -121,7 +122,7 @@ ${canSend ? html`<form class="say" id="say" method="post" action="/_messages/${c
 function bubble(chat, m) {
   const base = `/_messages/${chat.id}/${m.id}`;
   return html`<li class="msg ${m.mine ? "mine" : "theirs"}" data-id="${m.id}" data-state="${m.state ?? ""}">
-  ${m.author && html`<p class="who">${m.author}${m.authorSite && html` <span class="site">${m.authorSite}</span>`}</p>`}<p class="said">${m.text}</p>
+  ${m.author && html`<p class="sender">${m.author}${m.authorSite && html` <span class="site">${m.authorSite}</span>`}</p>`}<p class="said">${m.text}</p>
   <div class="under"><time datetime="${iso(m.sent_at)}">${fmtDatetime(m.sent_at)}</time>${m.mine && html`<span class="state">${stateWords(m, chat.kind)}</span>`}${
     m.state === "failed" && html`<form method="post" action="${base}/retry"><button class="link">Try again</button></form>`}<form method="post" action="${base}/delete" data-confirm="Delete this message? It's only deleted here." data-confirm-ok="Delete"><button class="link">Delete</button></form>${
     m.everywhere && html`<form method="post" action="${base}/delete" data-confirm="Delete this message for everyone in the group?" data-confirm-ok="Delete"><input type="hidden" name="everywhere" value="1"><button class="link">Delete for everyone</button></form>`}</div>

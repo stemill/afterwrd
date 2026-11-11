@@ -7,6 +7,8 @@
 //   GET  /_peer/photos/<sha256>
 //   POST /_peer/comments                a Note inReplyTo a post or photo here: their owner comments on it
 //   POST /_peer/comments/<n>/delete     their owner deletes a comment they made
+//   POST /_peer/vote                    {inReplyTo: a post here, afterwrd:choices: [n…]}: their owner answers its poll
+//                                       (none takes it back); answers with the poll as they now see it (polls.js)
 //   POST /_peer/notify                  a note: something new on their site (notify.js)
 //   POST /_peer/message                 a message from their owner to the owner here (messages.js)
 //   POST /_peer/introduce               {origin, name, content?}: their owner introduces the owner here to someone
@@ -27,6 +29,7 @@ import { notifyComment, receiveNote } from "./notify.js";
 import { receiveIntroduction } from "./connect.js";
 import { receiveChecked, receiveCheckRequest } from "./checks.js";
 import { receiveMessage } from "./messages.js";
+import { answerHere, pollObject, sitePolls } from "./polls.js";
 
 const FEED_POSTS = 30;
 const TIMEOUT_MS = 8000;
@@ -132,9 +135,9 @@ export async function handlePeer(request, env, url, work) {
     return json({ error: `Waiting for ${await ownerName(db)} to approve the connection.` }, 403);
   }
 
-  if (route === "GET /_peer/feed") return json(await feed(env, url.origin));
+  if (route === "GET /_peer/feed") return json(await feed(env, url.origin, peer.origin));
   const page = Math.min(10_000, Math.max(1, Number.parseInt(url.searchParams.get("page"), 10) || 1));
-  if (route === "GET /_peer/posts") return json(await sharePosts(env, url.origin, page, await ownerName(db)));
+  if (route === "GET /_peer/posts") return json(await sharePosts(env, url.origin, page, await ownerName(db), peer.origin));
   if (route === "GET /_peer/albums") return json(await shareAlbums(env, url.origin));
   const shared = /^GET \/_peer\/(albums\/(\d+|other|videos)|photos\/([0-9a-f]{64}))$/.exec(route);
   if (shared) {
@@ -185,6 +188,19 @@ export async function handlePeer(request, env, url, work) {
     return json({ id: commentId(url.origin, target, row.id) });
   }
 
+  if (route === "POST /_peer/vote") {
+    const body = await request.json().catch(() => ({}));
+    const reply = typeof body?.inReplyTo === "string" ? body.inReplyTo : "";
+    const key = reply.startsWith(postId(url.origin, "")) ? reply.slice(postId(url.origin, "").length) : "";
+    // Polls are only ever in posts written here, which friends can always see.
+    const found = POST_KEY_RE.test(key) && (await findTarget(db, key));
+    const id = found?.post?.id >= SITE_ID ? found.post.id - SITE_ID : null;
+    if (!id) return json({ error: "That isn't there any more." }, 404);
+    const trouble = await answerHere(db, id, peer.origin, peer.name, body["afterwrd:choices"], Number(key.split("-")[1]));
+    if (trouble) return json({ error: trouble }, 400);
+    return json(tidy({ "@context": CONTEXT, "afterwrd:poll": pollObject((await sitePolls(db, [id], peer.origin)).get(id)) }));
+  }
+
   if (route === "POST /_peer/message") {
     const [body, status] = await receiveMessage(env, peer, await request.json().catch(() => ({})), { site: url.origin, work });
     return json(body, status);
@@ -203,9 +219,11 @@ export async function handlePeer(request, env, url, work) {
   return json({ error: "Not found." }, 404);
 }
 
-/** The owner's newest afterwrd posts as an OrderedCollection of Notes, each with its photos and replies. */
-/** The owner's newest afterwrd posts as an OrderedCollection of Notes, each with its photos and comments. */
-async function feed(env, site) {
+/**
+ * The owner's newest afterwrd posts as an OrderedCollection of Notes, each with its photos, comments and any poll (with
+ * `viewer`'s own answer: the friend's site asking).
+ */
+async function feed(env, site, viewer) {
   const { results: posts } = await env.DB.prepare("SELECT * FROM posts WHERE id >= ? ORDER BY timestamp DESC, id DESC LIMIT ?")
     .bind(SITE_ID, FEED_POSTS).all();
   return tidy({
@@ -213,6 +231,6 @@ async function feed(env, site) {
     type: "OrderedCollection",
     attributedTo: await ownerActor(env, site, await ownerName(env.DB)),
     totalItems: posts.length,
-    orderedItems: await notes(env, site, posts),
+    orderedItems: await notes(env, site, posts, { viewer }),
   });
 }

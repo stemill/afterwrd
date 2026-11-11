@@ -3,6 +3,7 @@
 // copy is kept here in comments_elsewhere.
 //   POST /_feed/comments                                       connection, target, text, back (a form)
 //   POST /_feed/comments/<connection>/<remote id>/delete       back (a form)
+//   POST /_feed/vote                                           connection, target, choice…, back: answering their poll
 import { actorId, commentId, targetId } from "../public/static/activity.js";
 import { MAX_COMMENT } from "./archive/comments.js";
 import { safeNext } from "./auth.js";
@@ -133,6 +134,13 @@ export async function handleFeed(request, env, url) {
       if (made) back.hash = `r${made.connection}-${made.id}`;
       return Response.redirect(back, 303);
     }
+    if (url.pathname === "/_feed/vote") {
+      const connection = String(form.get("connection") ?? "");
+      const target = String(form.get("target") ?? "");
+      await voteOnFriend(env, { connection, target, choices: form.getAll("choice").map(String) });
+      back.hash = `f${Number(connection) || 0}-${TARGET_RE.test(target) ? target : ""}`;
+      return Response.redirect(back, 303);
+    }
     const del = /^\/_feed\/comments\/(\d+)\/(\d+)\/delete$/.exec(url.pathname);
     if (del) {
       await deleteFriendComment(env, { connection: del[1], id: Number(del[2]) });
@@ -178,6 +186,25 @@ export async function commentOnFriend(env, origin, { connection: connectionId, t
     return { connection: connection.id, id };
   } catch (error) {
     throw new Refusal(`Couldn't send your comment: ${error.message}`);
+  }
+}
+
+/**
+ * The owner answers the poll in a friend's post (`target`, its key): `choices`, the options' numbers. Their site keeps
+ * it, and shows the owner's choice back to them; it isn't kept here.
+ */
+export async function voteOnFriend(env, { connection: connectionId, target, choices }) {
+  const connection = await connectionById(env.DB, connectionId);
+  if (!connection) throw new Refusal("You're no longer connected with them.");
+  if (!/^post-\d+-[0-9a-f]{8}$/.test(target)) throw new Refusal("That isn't a poll you can answer.");
+  const list = choices.slice(0, 20).map((c) => (/^\d{1,2}$/.test(c) ? Number(c) : -1));
+  try {
+    await callSite(connection.origin, "/_peer/vote", { key: connection.their_key, body: {
+      "@context": "https://www.w3.org/ns/activitystreams", type: "afterwrd:Vote", inReplyTo: targetId(connection.origin, target),
+      "afterwrd:choices": list,
+    } });
+  } catch (error) {
+    throw new Refusal(`Couldn't send your answer: ${error.message}`);
   }
 }
 

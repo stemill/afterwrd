@@ -12,6 +12,7 @@ import {
 import { loadThreads } from "./archive/comments.js";
 import { mediaSet } from "./archive/routes.js";
 import { profilePictures } from "./photos.js";
+import { pollObject, sitePolls } from "./polls.js";
 import { SITE_ID } from "./posts.js";
 import { fromBase64Url, now, randomToken, toBase64Url } from "./util.js";
 
@@ -81,8 +82,11 @@ async function threadOf(db, site, target) {
   return { type: "Collection", totalItems: comments.length, items: comments.map((c) => commentNote(site, c, commentAuthor(site, c))) };
 }
 
-/** Posts as Notes, with photos (signed links), tags, place and, unless asked not to, their comments. */
-export async function notes(env, site, posts, { replies = true } = {}) {
+/**
+ * Posts as Notes, with photos (signed links), tags, place, a poll if one asks something (with `viewer`'s own answer:
+ * the friend's site asking), and, unless asked not to, their comments.
+ */
+export async function notes(env, site, posts, { replies = true, viewer = null } = {}) {
   const db = env.DB;
   if (!posts.length) return [];
   const ids = posts.map((p) => p.id);
@@ -93,6 +97,7 @@ export async function notes(env, site, posts, { replies = true } = {}) {
   ]);
   const keys = posts.map(postKey);
   const threads = replies ? await loadThreads(db, keys) : new Map();
+  const polls = await sitePolls(db, ids.filter((id) => id >= SITE_ID).map((id) => id - SITE_ID), viewer);
   return Promise.all(posts.map(async (p, i) => ({
     type: "Note",
     id: postId(site, keys[i]),
@@ -109,6 +114,7 @@ export async function notes(env, site, posts, { replies = true } = {}) {
     location: p.place_name ? { type: "Place", name: p.place_name } : undefined,
     context: p.group_name ? { type: "Group", name: p.group_name } : undefined,
     "afterwrd:kind": p.kind,
+    "afterwrd:poll": polls.has(p.id - SITE_ID) ? pollObject(polls.get(p.id - SITE_ID)) : undefined,
     replies: replies ? {
       type: "Collection", totalItems: threads.get(keys[i]).length,
       items: threads.get(keys[i]).map((c) => commentNote(site, c, commentAuthor(site, c))),
@@ -116,7 +122,7 @@ export async function notes(env, site, posts, { replies = true } = {}) {
   })));
 }
 
-export async function sharePosts(env, site, page, name) {
+export async function sharePosts(env, site, page, name, viewer = null) {
   const db = env.DB;
   const own = (await chosen(db)).includes("posts") ? "" : `WHERE id >= ${SITE_ID}`;
   const [count, rows] = await db.batch([
@@ -126,7 +132,7 @@ export async function sharePosts(env, site, page, name) {
   const total = count.results[0].n;
   return {
     type: "OrderedCollectionPage", attributedTo: await ownerActor(env, site, name), totalItems: total, "afterwrd:page": page,
-    "afterwrd:hasNext": page * POSTS_PAGE < total, orderedItems: await notes(env, site, rows.results),
+    "afterwrd:hasNext": page * POSTS_PAGE < total, orderedItems: await notes(env, site, rows.results, { viewer }),
   };
 }
 
