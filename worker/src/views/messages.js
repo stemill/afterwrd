@@ -2,7 +2,7 @@
 // (forms post and come back here); public/static/messages.js sends without leaving the page and adds new messages as
 // they arrive while it's open. It builds each message the same way as bubble() here, so the two must match.
 import { iso } from "../../public/static/activity.js";
-import { page } from "./archive.js";
+import { menuDelete, moreMenu, page } from "./archive.js";
 import { fmtDatetime } from "./format.js";
 import { html, raw } from "./html.js";
 import { asset } from "./nav.js";
@@ -44,6 +44,8 @@ const STYLE = `
   .msg .under { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; align-items: baseline; font-size: 0.8rem; color: var(--muted); margin-top: 0.25rem; }
   .msg .under form { display: inline; }
   .msg .under button.link { font-size: 0.8rem; color: var(--muted); }
+  .msg .under .more { align-self: center; }
+  .msg.mine .more .menu { left: auto; right: 0; }
   .msg[data-state="failed"] .state { color: var(--danger); }
   .say { position: sticky; bottom: 0; display: flex; gap: 0.5rem; align-items: flex-end; padding: 0.75rem 0; background: var(--bg); }
   .say textarea { flex: 1; font: inherit; padding: 0.6rem 0.9rem; border: 1px solid var(--border); border-radius: 18px; background: var(--sunken); color: var(--text); resize: vertical; min-height: 2.75rem; }
@@ -123,7 +125,9 @@ function bubble(chat, m) {
   return html`<li class="msg ${m.mine ? "mine" : "theirs"}" data-id="${m.id}" data-state="${m.state ?? ""}">
   ${m.author && html`<p class="sender">${m.author}${m.authorSite && html` <span class="site">${m.authorSite}</span>`}</p>`}<p class="said">${m.text}</p>
   <div class="under"><time datetime="${iso(m.sent_at)}">${fmtDatetime(m.sent_at)}</time>${m.mine && html`<span class="state">${stateWords(m, chat.kind)}</span>`}${
-    m.state === "failed" && html`<form method="post" action="${base}/retry"><button class="link">Try again</button></form>`}<form method="post" action="${base}/delete" data-confirm="Delete this message? It's only deleted here." data-confirm-ok="Delete"><button class="link">Delete</button></form>${
-    m.everywhere && html`<form method="post" action="${base}/delete" data-confirm="Delete this message for everyone in the group?" data-confirm-ok="Delete"><input type="hidden" name="everywhere" value="1"><button class="link">Delete for everyone</button></form>`}</div>
+    m.state === "failed" && html`<form method="post" action="${base}/retry"><button class="link">Try again</button></form>`}${moreMenu([
+    menuDelete(`${base}/delete`, "Delete this message? It's only deleted here."),
+    m.everywhere && menuDelete(`${base}/delete`, "Delete this message for everyone in the group?", { label: "Delete for everyone", fields: { everywhere: 1 } }),
+  ])}</div>
 </li>`;
 }

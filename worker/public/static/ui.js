@@ -7,6 +7,8 @@
 //   - The home-screen app. The service worker (public/static/app/push-sw.js) lets afterwrd be installed as an app, and
 //     notify about messages. "Add to home screen" (the menu, /app, and a note on Home until it's installed or "Not
 //     now") uses the browser's own Install where it has one (Chrome), and shows how where it hasn't (Safari).
+//   - The small V menus (Edit, Delete) on posts, comments and messages: one open at a time, closed by a tap elsewhere,
+//     a choice, or Escape. Edit opens the words (the page's #target) with the cursor at the end, ready to change.
 //   - Drop-downs you can type into. A <select data-search> becomes a box that narrows its list as you type; the
 //     select itself stays (hidden) in the form, so what's sent, and any onchange, are as before.
 (() => {
@@ -42,6 +44,31 @@
     });
   }
   window.askFirst = askFirst;
+
+  // --- the small V menus ---------------------------------------------------------------------------------------
+  const openMenus = () => document.querySelectorAll("details.more[open]");
+  document.addEventListener("toggle", (e) => {
+    if (!e.target.matches?.("details.more") || !e.target.open) return;
+    openMenus().forEach((d) => { if (d !== e.target) d.open = false; });
+  }, true);
+  document.addEventListener("click", (e) => {
+    // After the click has done its work (a Delete's form is on its way to being asked about), so it isn't lost.
+    const choice = e.target.closest("details.more .menu a, details.more .menu button");
+    setTimeout(() => openMenus().forEach((d) => { if (choice ? d.contains(choice) : !d.contains(e.target)) d.open = false; }));
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    openMenus().forEach((d) => { d.open = false; d.querySelector("summary").focus(); });
+  });
+  function editing() {
+    const box = location.hash.length > 1 ? document.getElementById(decodeURIComponent(location.hash.slice(1))) : null;
+    const words = box?.matches("div.edit") ? box.querySelector("textarea") : null;
+    if (!words) return;
+    words.focus({ preventScroll: true });
+    words.setSelectionRange(words.value.length, words.value.length);
+  }
+  window.addEventListener("hashchange", editing);
+  editing();
 
   // Before any form is sent (in the capture phase, so ahead of the page's own handlers): ask, then send it again,
   // through the same button (which may have its own formaction), if they said yes.
@@ -184,4 +211,34 @@
     note.hidden = false;
   }
   showOffers();
+
+  // Add to home screen (/app): only the steps for this device, with the rest a tap away. On an iPhone or iPad it has
+  // to be Safari itself: other browsers, and apps that open links inside themselves, say so in their user agent
+  // (an app showing Safari's own view can't be told apart, so the Safari steps mention that too).
+  const cards = document.querySelectorAll("[data-device]");
+  if (cards.length) {
+    const ua = navigator.userAgent;
+    const apple = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    const notSafari = !/Safari\//.test(ua) || /CriOS|FxiOS|EdgiOS|OPiOS|GSA\/|FBAN|FBAV|Instagram|Line\//.test(ua);
+    const device = apple ? (notSafari ? "iphone-elsewhere" : "iphone") : /Android/.test(ua) ? "android" : "computer";
+    const mine = device === "iphone-elsewhere" ? ["iphone-elsewhere", "iphone"] : [device];
+    cards.forEach((c) => { c.hidden = !mine.includes(c.dataset.device); });
+    const others = document.querySelector("[data-device-others]");
+    if (others) others.hidden = false;
+    document.addEventListener("click", async (e) => {
+      if (e.target.closest("[data-show-devices]")) {
+        cards.forEach((c) => { if (c.dataset.device !== "iphone-elsewhere") c.hidden = false; });
+        if (others) others.hidden = true;
+      }
+      const copy = e.target.closest("[data-copy-address]");
+      if (copy) {
+        try {
+          await navigator.clipboard.writeText(location.href);
+          copy.textContent = "Copied";
+        } catch {
+          copy.replaceWith(Object.assign(document.createElement("strong"), { textContent: location.href }));
+        }
+      }
+    });
+  }
 })();

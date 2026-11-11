@@ -205,6 +205,7 @@ check("a poll closes by itself at its time", bobPoll.facts.includes("Closed") &&
 const rows = await ann.evaluate(() => fetch("/_admin/export/rows?table=poll_votes").then((r) => r.json()));
 check("Download everything includes polls and answers", rows.rows?.length === 4, JSON.stringify(rows).slice(0, 200));
 await ann.goto(`${A}/posts`);
+await ann.click("article.own header details.more summary");
 await Promise.all([ann.waitForNavigation(), ann.click("article.own header .delete")]);
 check("deleting a post deletes its poll and answers", n(stateA, `polls WHERE post_id = ${multiPost}`) === 0 && n(stateA, `poll_votes WHERE post_id = ${multiPost}`) === 0
   && n(stateA, "polls") === 1);

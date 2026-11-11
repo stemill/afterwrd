@@ -72,12 +72,30 @@ check("owner can delete it", first.canDelete);
 
 // Changing its words (edits.js): for 15 minutes, keeping what it said before.
 const firstCard = "main article.card:first-of-type";
+const shown = (selector) => owner.$eval(selector, (e) => e.checkVisibility()).catch(() => false);
 const editPost = async (words) => {
-  await owner.click(`${firstCard} > details.edit summary`);
-  await owner.$eval(`${firstCard} > details.edit textarea`, (t, w) => { t.value = w; }, words);
-  await Promise.all([owner.waitForNavigation(), owner.click(`${firstCard} > details.edit button`)]);
+  await owner.click(`${firstCard} > header details.more summary`);
+  await owner.click(`${firstCard} > header details.more a[href^="#edit"]`);
+  await owner.$eval(`${firstCard} > div.edit textarea`, (t, w) => { t.value = w; }, words);
+  await Promise.all([owner.waitForNavigation(), owner.click(`${firstCard} > div.edit button`)]);
 };
-check("a new post offers Edit", Boolean(await owner.$(`${firstCard} > details.edit`)));
+check("a new post offers Edit", Boolean(await owner.$(`${firstCard} > div.edit`)));
+// Edit and Delete wait behind the small V; Edit opens the words, ready to type, and Cancel puts them away.
+check("…behind the small V, with Delete", !(await shown(`${firstCard} > div.edit`)) && !(await shown(`${firstCard} > header .delete`))
+  && Boolean(await owner.$(`${firstCard} > header details.more .delete`)));
+await owner.click(`${firstCard} > header details.more summary`);
+check("the V opens a menu: Edit, Delete", (await owner.$eval(`${firstCard} > header details.more .menu`, (m) => m.innerText.replace(/\s+/g, " ").trim())) === "Edit Delete");
+await owner.click(`${firstCard} > header details.more a[href^="#edit"]`);
+check("Edit shows the words, ready to change, and closes the menu", await owner.waitForFunction((card) => {
+  const box = document.querySelector(`${card} > div.edit`);
+  return box.checkVisibility() && document.activeElement === box.querySelector("textarea") && !document.querySelector(`${card} > header details.more`).open;
+}, { timeout: 3000 }, firstCard).then(() => true, () => false));
+await owner.click(`${firstCard} > div.edit a.chip`);
+check("Cancel puts them away", !(await shown(`${firstCard} > div.edit`)));
+await owner.click(`${firstCard} > header details.more summary`);
+await owner.click("main h1");
+check("a tap elsewhere closes the menu", await owner.waitForFunction((card) => !document.querySelector(`${card} > header details.more`).open,
+  { timeout: 3000 }, firstCard).then(() => true, () => false));
 await editPost("First post written on the site\nwith two lines, now changed");
 check("the new words show", (await cards(owner))[0].text === "First post written on the site\nwith two lines, now changed");
 check("…marked Edited", (await owner.$eval(`${firstCard} > details.edited summary`, (s) => s.textContent).catch(() => "")) === "Edited");
@@ -104,7 +122,7 @@ await owner.goto(`${BASE}/posts`);
 const [textPost] = sql("SELECT id, key FROM posts WHERE source = 'afterwrd' ORDER BY id DESC LIMIT 1");
 sql(`UPDATE posts SET created_at = created_at - 901 WHERE id = ${textPost.id}`);
 await owner.goto(`${BASE}/posts`);
-check("after 15 minutes there's no Edit", !(await owner.$(`${firstCard} > details.edit`)) && Boolean(await owner.$(`${firstCard} > details.edited`)));
+check("after 15 minutes there's no Edit", !(await owner.$(`${firstCard} > div.edit`)) && Boolean(await owner.$(`${firstCard} > details.edited`)));
 const late = await owner.evaluate((id) => fetch(`/_admin/posts/${id}/edit`, { method: "POST", redirect: "manual",
   body: new URLSearchParams({ text: "too late", back: "/posts" }) }).then((r) => r.status), textPost.id);
 check("…and the site refuses it", late === 403 && sql(`SELECT text FROM posts WHERE id = ${textPost.id}`)[0].text.endsWith("now changed"));
@@ -167,6 +185,7 @@ check("only the two real posts exist", sql("SELECT COUNT(*) AS n FROM posts WHER
 
 // The owner deletes the photo post: post, photos, files, album and comments all go.
 await owner.goto(`${BASE}/posts`);
+await owner.click("main article.card:first-of-type header details.more summary");
 await Promise.all([owner.waitForNavigation(), owner.click("main article.card:first-of-type header .delete")]);
 const left = await cards(owner);
 check("photo post deleted", left[0].text?.startsWith("First post"), left[0].text);
@@ -198,6 +217,7 @@ check("deleting a post's only photo keeps the post, at the same address, with it
 // Ids are never used twice: a post written after the newest is deleted doesn't take its number.
 const newest = sql("SELECT MAX(id) AS id FROM posts")[0].id;
 await owner.goto(`${BASE}/posts`);
+await owner.click("main article.card:first-of-type header details.more summary");
 await Promise.all([owner.waitForNavigation(), owner.click("main article.card:first-of-type header .delete")]);
 await owner.type("#composer textarea", "After a delete");
 await Promise.all([owner.waitForNavigation(), owner.click("#composer button.post")]);

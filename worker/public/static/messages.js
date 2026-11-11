@@ -48,8 +48,20 @@ function openChat(list) {
     f.action = `/_messages/${chat}/${m.id}/${what}`;
     if (confirm) Object.assign(f.dataset, { confirm, confirmOk: "Delete" });
     if (everywhere) f.append(Object.assign(document.createElement("input"), { type: "hidden", name: "everywhere", value: "1" }));
-    f.append(Object.assign(document.createElement("button"), { className: "link", textContent: label }));
+    f.append(Object.assign(document.createElement("button"), { className: confirm ? "delete" : "link", textContent: label }));
     return f;
+  }
+
+  // The same as moreMenu() in src/views/archive.js: the small V, with the Deletes behind it.
+  const V = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+  function moreMenu(...items) {
+    const d = Object.assign(document.createElement("details"), { className: "more" });
+    const s = Object.assign(document.createElement("summary"), { title: "Edit or delete", innerHTML: V });
+    s.setAttribute("aria-label", "Edit or delete");
+    const menu = Object.assign(document.createElement("div"), { className: "menu" });
+    menu.append(...items);
+    d.append(s, menu);
+    return d;
   }
 
   // The same as bubble() in src/views/messages.js.
@@ -70,8 +82,8 @@ function openChat(list) {
     under.append(time);
     if (m.mine) under.append(Object.assign(document.createElement("span"), { className: "state", textContent: stateWords(m, kind) }));
     if (m.state === "failed") under.append(action(m, "retry", "Try again"));
-    under.append(action(m, "delete", "Delete", "Delete this message? It's only deleted here."));
-    if (m.everywhere) under.append(action(m, "delete", "Delete for everyone", "Delete this message for everyone in the group?", true));
+    under.append(moreMenu(action(m, "delete", "Delete", "Delete this message? It's only deleted here."),
+      ...(m.everywhere ? [action(m, "delete", "Delete for everyone", "Delete this message for everyone in the group?", true)] : [])));
     li.append(said, under);
     return li;
   }

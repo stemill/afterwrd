@@ -426,6 +426,24 @@ await sam.reload();
 check("\"Not now\" puts it away for good on this device", await sam.$eval("#install-note", (n) => n.hidden));
 await sam.goto(`${B}/app`);
 check("the Add to home screen page says how, for Android and iPhone", /Install app/.test(await mainText(sam)) && /Add to Home Screen/.test(await mainText(sam)));
+// What shows depends on the device: only its own steps, with the rest a tap away.
+const visible = (page) => page.$eval("main", (m) => m.innerText);
+let steps = await visible(sam);
+check("…a computer sees only a computer's steps", /right-hand end of the address bar/.test(steps) && !/Install app/.test(steps) && !/Add to Home Screen/.test(steps));
+await sam.$eval("[data-show-devices]", (b) => b.click());
+steps = await visible(sam);
+check("…and the others when asked", /Install app/.test(steps) && /Add to Home Screen/.test(steps) && !/open this page in Safari first/.test(steps));
+const desktop = await browser.userAgent();
+await sam.setUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1");
+await sam.goto(`${B}/app`);
+steps = await visible(sam);
+check("an iPhone in Safari sees Safari's steps: ⋯, Share, Add to Home Screen", /⋯/.test(steps) && /Add to Home Screen/.test(steps)
+  && /Open as Web App/.test(steps) && !/Install app/.test(steps) && !/open this page in Safari first/.test(steps));
+await sam.setUserAgent("Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/138.0.0.0 Mobile/15E148 Safari/604.1");
+await sam.goto(`${B}/app`);
+steps = await visible(sam);
+check("an iPhone in Chrome is told to open the page in Safari first", /open this page in Safari first/.test(steps) && /Add to Home Screen/.test(steps));
+await sam.setUserAgent(desktop);
 const manifest = await (await fetch(`${B}/static/app/manifest.webmanifest`)).json();
 check("the app opens on Home, full screen", manifest.start_url === "/" && manifest.display === "standalone");
 

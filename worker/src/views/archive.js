@@ -143,17 +143,41 @@ function edited(item) {
 </details>`;
 }
 
-/** A way to change words that can still be changed (src/edits.js): opens onto the words, ready to edit. */
-function editBox(action, text, back, max, { required = true, post = null } = {}) {
-  return html`<details class="edit"><summary>Edit</summary>
+/**
+ * The small V on something you wrote: Edit (while it can still be changed) and Delete, folded away until wanted, so a
+ * page of posts isn't a page of Delete buttons. It's a <details>, and Edit is a link to the edit box (editBox), which
+ * shows while it's the page's #target, so both work without scripts; ui.js closes the menu on a tap elsewhere.
+ * `items` are menuEdit / menuDelete entries (false ones left out); nothing at all if there are none.
+ */
+export function moreMenu(items) {
+  const shown = items.filter(Boolean);
+  if (!shown.length) return "";
+  return html`<details class="more"><summary aria-label="Edit or delete" title="Edit or delete">${raw(icon("more"))}</summary>
+  <div class="menu">${shown}</div></details>`;
+}
+export const menuEdit = (id) => html`<a href="#${id}">Edit</a>`;
+/** A Delete in the menu: asks first (ui.js). `fields` are extra hidden fields, `back` where to go afterwards. */
+export function menuDelete(action, confirm, { back = null, label = "Delete", fields = {} } = {}) {
+  return html`<form method="post" action="${action}" data-confirm="${confirm}" data-confirm-ok="Delete">
+    ${back !== null && html`<input type="hidden" name="back" value="${back}">`}
+    ${Object.entries(fields).map(([k, v]) => html`<input type="hidden" name="${k}" value="${v}">`)}
+    <button class="delete">${label}</button></form>`;
+}
+
+/**
+ * A way to change words that can still be changed (src/edits.js): the words, ready to edit. Hidden until the menu's
+ * Edit makes it the page's #target; Cancel goes back to `home`, the post or comment itself.
+ */
+function editBox(id, home, action, text, back, max, { required = true, post = null } = {}) {
+  return html`<div class="edit" id="${id}">
   <form method="post" action="${action}">
     <input type="hidden" name="back" value="${back}">
     ${post !== null && html`<input type="hidden" name="post" value="${post}">`}
     <textarea name="text" rows="3" maxlength="${max}" ${required && "required"} aria-label="New words">${text ?? ""}</textarea>
-    <button class="chip primary">Save</button>
+    <div class="edit-buttons"><button class="chip primary">Save</button><a class="chip" href="#${home}">Cancel</a></div>
     <span class="meta">Anyone who can see it can see what it said before.</span>
   </form>
-</details>`;
+</div>`;
 }
 
 /** The comments written here on a post or photo, then a box to add one. Forms work without JavaScript. */
@@ -167,12 +191,11 @@ function thread(ctx, key, comments) {
     <div class="bubble"><strong>${c.name}</strong>${c.origin !== "site" && notFriend(ctx, c.origin)}<span class="said">${linkify(c.text)}</span></div>
     <div class="under">
       <time title="${fmtDatetime(c.created_at)}">${fmtAgo(c.created_at)}</time>
-      ${html`<form method="post" action="/_comments/${c.id}/delete" data-confirm="Delete this comment?" data-confirm-ok="Delete">
-        <input type="hidden" name="back" value="${back}"><button>Delete</button>
-      </form>`}
+      ${moreMenu([c.author_is_owner && c.editable && menuEdit(`edit-c${c.id}`),
+        menuDelete(`/_comments/${c.id}/delete`, "Delete this comment?", { back })])}
     </div>
     ${edited(c)}
-    ${c.author_is_owner && c.editable && editBox(`/_comments/${c.id}/edit`, c.text, back, MAX_COMMENT)}
+    ${c.author_is_owner && c.editable && editBox(`edit-c${c.id}`, `c${c.id}`, `/_comments/${c.id}/edit`, c.text, back, MAX_COMMENT)}
   </div>`)}
   <form class="say" method="post" action="/_comments">
     <input type="hidden" name="target" value="${key}">
@@ -248,12 +271,12 @@ function postCard(ctx, p) {
     <span class="what"><strong>You</strong>${did && html`<span class="meta">${did}</span>`}</span>
     ${p.thread !== undefined ? html`<a class="when" href="/posts/${p.key}" title="${fmtDatetime(p.created_at)}"><time>${fmtAgo(p.created_at)}</time></a>`
       : html`<time title="${fmtDatetime(p.created_at)}">${fmtAgo(p.created_at)}</time>`}
-    ${p.thread !== undefined && html`<form method="post" action="/_admin/posts/${p.id}/delete"
-      data-confirm="Delete this post, its photos and its comments? This can’t be undone." data-confirm-ok="Delete"><button class="delete">Delete</button></form>`}
+    ${p.thread !== undefined && moreMenu([p.editable && menuEdit(`edit-p-${p.key}`),
+      menuDelete(`/_admin/posts/${p.id}/delete`, "Delete this post, its photos and its comments? This can’t be undone.")])}
   </header>
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
   ${edited(p)}
-  ${p.editable && p.thread !== undefined && editBox(`/_admin/posts/${p.id}/edit`, p.text, back, MAX_POST_TEXT,
+  ${p.editable && p.thread !== undefined && editBox(`edit-p-${p.key}`, `p-${p.key}`, `/_admin/posts/${p.id}/edit`, p.text, back, MAX_POST_TEXT,
     { required: Boolean(p.poll) || !p.media?.length })}
   ${p.poll && pollBlock(ctx, p.poll, { id: `poll-${p.id}`, action: `/_admin/posts/${p.id}/vote`, closeAction: `/_admin/posts/${p.id}/close` })}
   ${collage(p.media)}
@@ -818,12 +841,11 @@ function remoteThread(ctx, c, target, comments) {
     <div class="bubble"><strong>${r.mine ? ctx.user.name : r.name}</strong>${!r.mine && notFriend(ctx, r.from)}<span class="said">${linkify(r.text)}</span></div>
     <div class="under">
       <time title="${fmtDatetime(r.created_at)}">${fmtAgo(r.created_at)}</time>
-      ${r.mine && html`<form method="post" action="/_feed/comments/${c.id}/${r.id}/delete" data-confirm="Delete this comment?" data-confirm-ok="Delete">
-        <input type="hidden" name="back" value="${back}"><button>Delete</button>
-      </form>`}
+      ${r.mine && moreMenu([r.editable && menuEdit(`edit-r${c.id}-${r.id}`),
+        menuDelete(`/_feed/comments/${c.id}/${r.id}/delete`, "Delete this comment?", { back })])}
     </div>
     ${edited(r)}
-    ${r.mine && r.editable && editBox(`/_feed/comments/${c.id}/${r.id}/edit`, r.text, back, MAX_COMMENT)}
+    ${r.mine && r.editable && editBox(`edit-r${c.id}-${r.id}`, `r${c.id}-${r.id}`, `/_feed/comments/${c.id}/${r.id}/edit`, r.text, back, MAX_COMMENT)}
   </div>`)}
   <form class="say" method="post" action="/_feed/comments">
     <input type="hidden" name="connection" value="${c.id}">
@@ -1456,11 +1478,11 @@ function groupThread(ctx, g, p) {
     <div class="bubble"><strong>${c.mine ? ctx.user.name : c.name}</strong>${!c.mine && notFriend(ctx, c.from)}<span class="said">${linkify(c.text)}</span></div>
     <div class="under">
       <time title="${fmtDatetime(c.created_at)}">${fmtAgo(c.created_at)}</time>
-      ${mayDelete(g, c) && html`<form method="post" action="/_groups/${g.id}/comments/${c.id}/delete"
-        data-confirm="Delete this comment?" data-confirm-ok="Delete"><input type="hidden" name="back" value="${back}"><button>Delete</button></form>`}
+      ${moreMenu([c.mine && c.editable && menuEdit(`edit-g${p.id}-${c.id}`),
+        mayDelete(g, c) && menuDelete(`/_groups/${g.id}/comments/${c.id}/delete`, "Delete this comment?", { back })])}
     </div>
     ${edited(c)}
-    ${c.mine && c.editable && editBox(`/_groups/${g.id}/comments/${c.id}/edit`, c.text, back, MAX_COMMENT, { post: p.id })}
+    ${c.mine && c.editable && editBox(`edit-g${p.id}-${c.id}`, `g${p.id}-${c.id}`, `/_groups/${g.id}/comments/${c.id}/edit`, c.text, back, MAX_COMMENT, { post: p.id })}
   </div>`)}
   <form class="say" method="post" action="/_groups/${g.id}/comments" data-group="${g.id}" data-post="${p.id}">
     <input type="hidden" name="post" value="${p.id}">
@@ -1479,14 +1501,14 @@ function groupCard(ctx, g, p) {
     ${groupFace(ctx, p)}
     <span class="what"><strong>${p.mine ? "You" : p.name}</strong>${!p.mine && notFriend(ctx, p.from, "meta")}</span>
     <a class="when" href="${groupBase(g)}/posts/${p.id}" title="${fmtDatetime(p.created_at)}"><time>${fmtAgo(p.created_at)}</time></a>
-    ${mayDelete(g, p) && html`<form method="post" action="/_groups/${g.id}/posts/${p.id}/delete"
-      data-confirm="Delete this post, its photos and its comments? This can’t be undone." data-confirm-ok="Delete">
-      <input type="hidden" name="back" value="${groupBase(g)}"><button class="delete">Delete</button></form>`}
+    ${moreMenu([p.mine && p.editable && menuEdit(`edit-gp${p.id}`),
+      mayDelete(g, p) && menuDelete(`/_groups/${g.id}/posts/${p.id}/delete`,
+        "Delete this post, its photos and its comments? This can’t be undone.", { back: groupBase(g) })])}
   </header>
   ${p.event && eventBlock(ctx, g, p, { full: ctx.url.pathname.includes("/posts/") })}
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
   ${edited(p)}
-  ${p.mine && p.editable && editBox(`/_groups/${g.id}/posts/${p.id}/edit`, p.text, ctx.url.pathname + ctx.url.search, MAX_GROUP_TEXT,
+  ${p.mine && p.editable && editBox(`edit-gp${p.id}`, `gp${p.id}`, `/_groups/${g.id}/posts/${p.id}/edit`, p.text, ctx.url.pathname + ctx.url.search, MAX_GROUP_TEXT,
     { required: Boolean(p.poll) || !p.photos.length })}
   ${p.poll && pollBlock(ctx, p.poll, { id: `poll-g${p.id}`, action: `/_groups/${g.id}/polls/${p.id}/vote`,
     closeAction: p.mine ? `/_groups/${g.id}/polls/${p.id}/close` : null,
@@ -1913,14 +1935,43 @@ ${available.length ? html`<ul class="memory-tiles">
 ${onThisDayCard(ctx, onThisDay)}`);
 }
 
-/** Add to home screen: the browser's own Install where it has one (ui.js), and how to do it on each kind of device. */
+/**
+ * Add to home screen: the browser's own Install where it has one (ui.js), and how to do it on each kind of device.
+ * ui.js shows only the steps for the device it's looking at (data-device), with the rest a tap away; without
+ * scripts, all of them show.
+ */
 export function appPage(ctx) {
   return page(ctx, "Add to home screen", html`
 <h1>Add afterwrd to your home screen</h1>
 <p>Then it opens like an app: full screen, in one tap, and you don't need to remember your site's address. It can
 also tell you when a friend sends you a message: turn that on in <a href="/messages">Messages</a>.</p>
 <p><button class="chip primary" data-install hidden>Install afterwrd</button></p>
-<section class="card">
+<section class="card" data-device="iphone-elsewhere" hidden>
+  <h2>iPhone or iPad: open this page in Safari first</h2>
+  <p>On an iPhone or iPad, afterwrd goes on the home screen from <strong>Safari</strong>, and this page is open
+    somewhere else: another browser, or inside another app such as WhatsApp or an email app.</p>
+  <ol>
+    <li><button class="chip" data-copy-address>Copy this page's address</button></li>
+    <li>Open <strong>Safari</strong>, tap the address bar, paste it, and go.</li>
+    <li>Then follow the steps for Safari.</li>
+  </ol>
+</section>
+<section class="card" data-device="iphone">
+  <h2>iPhone or iPad (Safari)</h2>
+  <ol>
+    <li>Tap <strong>⋯</strong> (three dots), next to the address at the bottom of the screen, then tap
+      <strong>Share</strong>. If you can already see <strong>Share</strong> (a square with an arrow pointing up), just
+      tap that.</li>
+    <li>Scroll down the list and tap <strong>Add to Home Screen</strong>.</li>
+    <li>If you see <strong>Open as Web App</strong>, leave it switched on. Tap <strong>Add</strong>.</li>
+    <li>Open afterwrd from its new icon on your home screen, and sign in once more: the app keeps its own sign-in,
+      separate from Safari's.</li>
+  </ol>
+  <p class="meta">If a link to afterwrd opened inside another app (WhatsApp, or an email app), there's no
+    <strong>Add to Home Screen</strong> there: open the page in Safari first.</p>
+  <p class="meta">On an iPhone or iPad, notifications about messages only work in the app on the home screen.</p>
+</section>
+<section class="card" data-device="android">
   <h2>Android (Chrome)</h2>
   <ol>
     <li>Tap <strong>⋮</strong>, at the top right.</li>
@@ -1931,18 +1982,9 @@ also tell you when a friend sends you a message: turn that on in <a href="/messa
   set Chrome's battery use to <strong>Unrestricted</strong> (Settings → Apps → Chrome → Battery). afterwrd's
   notifications come through Chrome.</p>
 </section>
-<section class="card">
-  <h2>iPhone or iPad (Safari)</h2>
-  <ol>
-    <li>Tap <strong>Share</strong> (the square with an arrow).</li>
-    <li>Tap <strong>Add to Home Screen</strong>. Scroll down the list if you can't see it.</li>
-    <li>Tap <strong>Add</strong>, then open afterwrd from its new icon. It may ask you to sign in once more: the app
-      keeps its own sign-in, separate from Safari's.</li>
-  </ol>
-  <p class="meta">On an iPhone or iPad, notifications about messages only work in the app on the home screen.</p>
-</section>
-<section class="card">
+<section class="card" data-device="computer">
   <h2>A computer (Chrome or Edge)</h2>
   <p>Look for <strong>Install</strong> at the right-hand end of the address bar, or in the browser's menu.</p>
-</section>`);
+</section>
+<p data-device-others hidden><button class="chip" data-show-devices>Steps for another phone or computer</button></p>`);
 }

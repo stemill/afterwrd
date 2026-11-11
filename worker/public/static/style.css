@@ -149,6 +149,7 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent-stron
 
 /* cards */
 .card { background: var(--surface); border-radius: var(--radius); padding: 1.1rem 1.25rem; }
+.card[id] { scroll-margin-top: 5.5rem; } /* a link to a post shows its top, V and all, below the site's header */
 .feed { display: flex; flex-direction: column; gap: 1rem; }
 .card header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.6rem; }
 .card header .what { flex: 1 1 auto; color: var(--muted); font-size: 0.9rem; }
@@ -158,8 +159,6 @@ button.link { padding: 0; border: 0; background: none; color: var(--accent-stron
 .card header .when:hover { text-decoration: none; }
 .card header .when:hover time { color: var(--accent-strong); }
 .card header form { display: contents; }
-.card header .delete { padding: 0; border: 0; background: none; font: 600 0.8rem var(--sans); color: var(--muted); cursor: pointer; }
-.card header .delete:hover { color: var(--danger); text-decoration: underline; }
 
 .badge {
   display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px;
@@ -218,9 +217,6 @@ img.who { object-fit: cover; padding: 0; }
 .comment:target .bubble { box-shadow: 0 0 0 2px var(--accent); }
 .comment .under { display: flex; align-items: center; gap: 0.8rem; padding: 0.15rem 0.95rem 0; }
 .comment .under time { font-size: 0.78rem; }
-.comment .under form { display: contents; }
-.comment .under button { padding: 0; border: 0; background: none; font: 700 0.78rem var(--sans); color: var(--muted); cursor: pointer; }
-.comment .under button:hover { color: var(--danger); text-decoration: underline; }
 .say { display: flex; align-items: flex-end; gap: 0.5rem; }
 .say textarea {
   flex: 1; min-width: 0; min-height: 2.6rem; max-height: 12rem; field-sizing: content; resize: none;
@@ -678,16 +674,44 @@ form.stack .together-friend input { width: 1.15rem; height: 1.15rem; padding: 0;
 /* The home-screen app: offers that show only when they apply (ui.js). */
 [data-install][hidden], [data-install-how][hidden], .install-note[hidden], #app-installed[hidden] { display: none; }
 
-/* Editing (src/edits.js): "Edited" opens onto what it said before; "Edit" onto the words, while they can change. */
-details.edited, span.edited, details.edit { font-size: 0.78rem; color: var(--muted); }
-.comment details.edited, .comment span.edited, .comment details.edit { grid-column: 2; padding: 0.1rem 0.95rem 0; }
-.card > details.edited, .card > span.edited, .card > details.edit { margin: 0.3rem 0 0.5rem; }
-details.edited summary, details.edit summary { display: inline; cursor: pointer; font-weight: 700; list-style: none; }
-details.edited summary::-webkit-details-marker, details.edit summary::-webkit-details-marker { display: none; }
-details.edited summary:hover, details.edit summary:hover { text-decoration: underline; }
+/* Editing (src/edits.js): "Edited" opens onto what it said before. The words to change show while the menu's Edit
+   has made them the page's #target. */
+details.edited, span.edited, div.edit { font-size: 0.78rem; color: var(--muted); }
+.comment details.edited, .comment span.edited, .comment div.edit { grid-column: 2; padding: 0.1rem 0.95rem 0; }
+.card > details.edited, .card > span.edited, .card > div.edit { margin: 0.3rem 0 0.5rem; }
+details.edited summary { display: inline; cursor: pointer; font-weight: 700; list-style: none; }
+details.edited summary::-webkit-details-marker { display: none; }
+details.edited summary:hover { text-decoration: underline; }
 .versions { margin: 0.4rem 0 0; padding-left: 1.2rem; }
 .versions li { margin-bottom: 0.35rem; }
 .versions .was { display: block; color: var(--text); font-size: 0.9rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-details.edit form { display: grid; gap: 0.4rem; margin-top: 0.4rem; }
-details.edit textarea { width: 100%; font: inherit; font-size: 0.95rem; color: var(--text); }
-details.edit button { justify-self: start; }
+div.edit { scroll-margin-top: 6rem; }
+div.edit:not(:target) { display: none; }
+div.edit form { display: grid; gap: 0.4rem; margin-top: 0.4rem; }
+div.edit textarea { width: 100%; font: inherit; font-size: 0.95rem; color: var(--text); }
+div.edit .edit-buttons { display: flex; gap: 0.5rem; }
+
+/* The small V on something you wrote, and its menu: Edit, Delete. */
+details.more { position: relative; display: inline-block; line-height: 0; }
+details.more summary {
+  list-style: none; cursor: pointer; display: grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%;
+  color: var(--muted);
+}
+details.more summary::-webkit-details-marker { display: none; }
+details.more summary .icon { width: 1.05rem; height: 1.05rem; }
+details.more summary:hover, details.more[open] summary { background: var(--raised); color: var(--text); }
+.comment .under details.more summary { width: 1.35rem; height: 1.35rem; }
+.comment .under details.more summary .icon { width: 0.9rem; height: 0.9rem; }
+details.more .menu {
+  position: absolute; z-index: 5; right: 0; top: calc(100% + 0.3rem); min-width: 10rem; padding: 0.3rem;
+  background: var(--raised); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; line-height: 1.4;
+}
+.comment .under details.more .menu, .msg.theirs details.more .menu { left: 0; right: auto; }
+details.more .menu form { display: contents; }
+details.more .menu a, details.more .menu button {
+  display: block; width: 100%; padding: 0.5rem 0.75rem; border: 0; border-radius: 10px; background: none; text-align: left;
+  color: var(--text); font: 700 0.9rem var(--sans); cursor: pointer; text-decoration: none;
+}
+details.more .menu .delete { color: var(--danger); }
+details.more .menu a:hover, details.more .menu button:hover { background: var(--surface); text-decoration: none; }

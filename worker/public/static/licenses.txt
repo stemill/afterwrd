@@ -1,4 +1,4 @@
-afterwrd 0.42.0
+afterwrd 0.42.1
 Copyright (C) 2026 Ste Millington
 
 afterwrd is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General

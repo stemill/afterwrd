@@ -64,7 +64,7 @@ const feedCards = (page) => page.$$eval("article.from-friend", (l) => l.map((a) 
   who: a.querySelector("header strong").textContent, text: a.querySelector(".text")?.textContent ?? "",
   photos: a.querySelectorAll(".collage img").length,
   comments: [...a.querySelectorAll(".comment")].map((c) => ({ name: c.querySelector("strong").textContent,
-    from: c.querySelector(".from")?.textContent ?? "", text: c.querySelector(".said").textContent, canDelete: Boolean(c.querySelector(".under button")) })),
+    from: c.querySelector(".from")?.textContent ?? "", text: c.querySelector(".said").textContent, canDelete: Boolean(c.querySelector(".under .delete")) })),
 })));
 
 const ann = await owner(A, "Ann Example");
@@ -164,14 +164,15 @@ check("Bob sees it under his post, without Ann's site address (she's his friend:
 check("Bob's Activity counts it as new", (await bob.$eval('header.site a[href="/activity"] .count', (c) => c.firstChild.textContent)) === "1");
 
 // Ann's comment on Bob's post locks it: Bob can't change his words under her reply (edits.js).
-check("Bob can't change a post Ann has commented on", !(await bob.$("main article.card:first-of-type > details.edit")));
+check("Bob can't change a post Ann has commented on", !(await bob.$("main article.card:first-of-type > div.edit")));
 // Ann changes her comment from her Feed; Bob's site decides, and keeps what it said before.
 await ann.goto(`${A}/`);
 const annComment = "article.from-friend .comment:first-of-type";
-check("Ann's own comment offers Edit", Boolean(await ann.$(`${annComment} details.edit`)));
-await ann.click(`${annComment} details.edit summary`);
-await ann.$eval(`${annComment} details.edit textarea`, (t) => { t.value = "Looks great, Bob! Where was it?"; });
-await Promise.all([ann.waitForNavigation(), ann.click(`${annComment} details.edit button`)]);
+check("Ann's own comment offers Edit", Boolean(await ann.$(`${annComment} div.edit`)));
+await ann.click(`${annComment} .under details.more summary`);
+await ann.click(`${annComment} .under details.more a[href^="#edit"]`);
+await ann.$eval(`${annComment} div.edit textarea`, (t) => { t.value = "Looks great, Bob! Where was it?"; });
+await Promise.all([ann.waitForNavigation(), ann.click(`${annComment} div.edit button`)]);
 check("…changed on Bob's site, keeping what it said before", sql(stateB, "SELECT text, edited_at FROM comments WHERE origin != 'site'")
   .some((c) => c.text === "Looks great, Bob! Where was it?" && c.edited_at)
   && sql(stateB, "SELECT text FROM comment_versions").map((v) => v.text).join() === "Looks great, Bob!");
@@ -192,7 +193,7 @@ check("Ann sees Bob's reply, not deletable by her", annFeed[0].comments.map((c) 
   && !annFeed[0].comments[1].canDelete);
 
 // Bob's reply locks Ann's comment: her site no longer offers Edit, and Bob's refuses it.
-check("once Bob has replied, Ann can't change her comment", !(await ann.$(`${annComment} details.edit`)));
+check("once Bob has replied, Ann can't change her comment", !(await ann.$(`${annComment} div.edit`)));
 const annRemoteId = sql(stateA, "SELECT remote_id FROM comments_elsewhere")[0].remote_id;
 const lateEdit = await fetch(`${B}/_peer/comments/${annRemoteId}/edit`, { method: "POST",
   headers: { Authorization: `Bearer ${sql(stateA, "SELECT their_key FROM connections")[0].their_key}`, "Content-Type": "application/json" },
@@ -221,7 +222,8 @@ await ann.goto(`${A}/`);
 check("friends see the whole thread, visitors' comments included (as when visiting)", (await feedCards(ann))[0].comments.some((c) => c.text === "For Bob's eyes"));
 
 // Ann deletes her comment from her Feed.
-await Promise.all([ann.waitForNavigation(), ann.click("article.from-friend .comment .under button")]);
+await ann.click("article.from-friend .comment .under details.more summary");
+await Promise.all([ann.waitForNavigation(), ann.click("article.from-friend .comment .under .delete")]);
 check("Ann's comment deleted on Bob's site", sql(stateB, "SELECT COUNT(*) AS n FROM comments WHERE origin != 'site'")[0].n === 0
   && sql(stateA, "SELECT COUNT(*) AS n FROM comments_elsewhere")[0].n === 0);
 
@@ -339,7 +341,7 @@ await ann.goto(A + ownTile);
 await ann.type(".info .say textarea", "What a view");
 await Promise.all([ann.waitForNavigation(), ann.click(".info .say button")]);
 check("Ann comments on a photo Bob posted, from her site", new URL(ann.url()).pathname === ownTile
-  && (await ann.$$eval(".info .comment", (l) => l.map((c) => ({ t: c.querySelector(".said").textContent, d: Boolean(c.querySelector(".under button")) })))).some((c) => c.t === "What a view" && c.d));
+  && (await ann.$$eval(".info .comment", (l) => l.map((c) => ({ t: c.querySelector(".said").textContent, d: Boolean(c.querySelector(".under .delete")) })))).some((c) => c.t === "What a view" && c.d));
 check("…stored on Bob's site against that photo", sql(stateB, "SELECT target, origin FROM comments WHERE text = 'What a view'")
   .some((c) => c.target === `photo-${ownTile.split("/").pop()}` && c.origin === A));
 await ann.screenshot({ path: `${OUT}/friend-photo.png` });
@@ -464,9 +466,10 @@ check("Ann's connections list Bob by address", annZip.json("connections.json").o
 // Bob changes a new post's words; Ann's Home shows it Edited, with what it said before.
 await compose(bob, B, "Off to the coast");
 await bob.goto(`${B}/posts`);
-await bob.click("main article.card:first-of-type > details.edit summary");
-await bob.$eval("main article.card:first-of-type > details.edit textarea", (t) => { t.value = "Off to the coast tomorrow"; });
-await Promise.all([bob.waitForNavigation(), bob.click("main article.card:first-of-type > details.edit button")]);
+await bob.click("main article.card:first-of-type > header details.more summary");
+await bob.click("main article.card:first-of-type > header details.more a[href^='#edit']");
+await bob.$eval("main article.card:first-of-type > div.edit textarea", (t) => { t.value = "Off to the coast tomorrow"; });
+await Promise.all([bob.waitForNavigation(), bob.click("main article.card:first-of-type > div.edit button")]);
 await ann.goto(`${A}/`);
 const edited = await ann.$$eval("article.from-friend", (l) => l.map((a) => ({ text: a.querySelector(".text")?.textContent,
   was: a.querySelector(":scope > details.edited")?.textContent ?? "" })).find((p) => p.text === "Off to the coast tomorrow"));

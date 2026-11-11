@@ -132,9 +132,10 @@ if (stage === "before") {
   check("new posts work too", (await page.$eval(`${own}:first-of-type .text`, (t) => t.textContent)) === "After the upgrade");
   // Comments made before the upgrade can be changed like any other (still within their 15 minutes here).
   await page.goto(BASE + was.address);
-  await page.click("main article.card .comment details.edit summary");
-  await page.$eval("main article.card .comment details.edit textarea", (t) => { t.value = "Still here, after the upgrade"; });
-  await Promise.all([page.waitForNavigation(), page.click("main article.card .comment details.edit button")]);
+  await page.click("main article.card .comment .under details.more summary");
+  await page.click("main article.card .comment .under details.more a[href^='#edit']");
+  await page.$eval("main article.card .comment div.edit textarea", (t) => { t.value = "Still here, after the upgrade"; });
+  await Promise.all([page.waitForNavigation(), page.click("main article.card .comment div.edit button")]);
   check("a comment from before the upgrade can be changed", (await said("main article.card")).join() === "Still here, after the upgrade"
     && (await page.$eval("main article.card .comment details.edited", (d) => d.textContent).catch(() => "")).includes("Still here?"));
 }

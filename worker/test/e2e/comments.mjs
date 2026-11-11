@@ -53,7 +53,7 @@ async function say(page, scope, text) {
 }
 const bubbles = (page, scope) => page.$$eval(`${scope} .comment`, (l) => l.map((c) => ({
   id: c.id, name: c.querySelector(".bubble strong").textContent, text: c.querySelector(".said").textContent,
-  canDelete: Boolean(c.querySelector(".under button")),
+  canDelete: Boolean(c.querySelector(".under .delete")),
 })));
 const badge = (page) => page.$eval('header.site a[href="/activity"]', (a) => a.querySelector(".count")?.firstChild.textContent ?? "");
 
@@ -146,27 +146,28 @@ sql("DELETE FROM comments WHERE text LIKE 'burst %' OR text = 'redirect test'");
 await owner.goto(`${BASE}/posts`);
 const firstComment = `${firstCard} .comment:first-of-type`;
 const editComment = async (scope, words) => {
-  await owner.click(`${scope} details.edit summary`);
-  await owner.$eval(`${scope} details.edit textarea`, (t, w) => { t.value = w; }, words);
-  await Promise.all([owner.waitForNavigation(), owner.click(`${scope} details.edit button`)]);
+  await owner.click(`${scope} .under details.more summary`);
+  await owner.click(`${scope} .under details.more a[href^="#edit"]`);
+  await owner.$eval(`${scope} div.edit textarea`, (t, w) => { t.value = w; }, words);
+  await Promise.all([owner.waitForNavigation(), owner.click(`${scope} div.edit button`)]);
 };
-check("the owner's comment offers Edit", Boolean(await owner.$(`${firstComment} details.edit`)));
+check("the owner's comment offers Edit", Boolean(await owner.$(`${firstComment} div.edit`)));
 await editComment(firstComment, "Lovely, changed");
 check("the new words show, marked Edited, with what it said before", (await bubbles(owner, firstCard))[0].text === "Lovely, changed"
   && (await owner.$eval(`${firstComment} details.edited .versions`, (l) => l.textContent)).includes("Lovely <script>alert(1)</script>"));
 await say(owner, firstCard, "Another thought");
-check("the owner's own next comment doesn't stop them changing the first", Boolean(await owner.$(`${firstComment} details.edit`)));
+check("the owner's own next comment doesn't stop them changing the first", Boolean(await owner.$(`${firstComment} div.edit`)));
 const [mineFirst] = sql("SELECT id, target FROM comments WHERE text = 'Lovely, changed'");
-check("…and the owner's own comments don't stop the post being changed", Boolean(await owner.$(`${firstCard} > details.edit`)));
+check("…and the owner's own comments don't stop the post being changed", Boolean(await owner.$(`${firstCard} > div.edit`)));
 sql(`INSERT INTO comments (target, author_id, author_name, text, created_at, origin)
   VALUES ('${mineFirst.target}', NULL, 'Sam Taylor', 'From a friend', strftime('%s','now'), 'https://friend.example')`);
 await owner.goto(`${BASE}/posts`);
-check("once someone else has commented after it, it can't be changed", !(await owner.$(`${firstComment} details.edit`)));
+check("once someone else has commented after it, it can't be changed", !(await owner.$(`${firstComment} div.edit`)));
 const tooLate = await fetch(`${BASE}/_comments/${mineFirst.id}/edit`, { method: "POST", redirect: "manual",
   headers: { Cookie: `__Host-session=${cookie}`, Origin: BASE, "Content-Type": "application/x-www-form-urlencoded" },
   body: new URLSearchParams({ text: "sneaky change", back: "/posts" }) });
 check("…and the site refuses it", tooLate.status === 403 && sql(`SELECT text FROM comments WHERE id = ${mineFirst.id}`)[0].text === "Lovely, changed");
-check("someone else's comment on a post stops the post being changed", !(await owner.$(`${firstCard} > details.edit`)));
+check("someone else's comment on a post stops the post being changed", !(await owner.$(`${firstCard} > div.edit`)));
 const notTheirs = await fetch(`${BASE}/_comments/${sql("SELECT id FROM comments WHERE text = 'From a friend'")[0].id}/edit`, { method: "POST",
   redirect: "manual", headers: { Cookie: `__Host-session=${cookie}`, Origin: BASE, "Content-Type": "application/x-www-form-urlencoded" },
   body: new URLSearchParams({ text: "words they never wrote", back: "/posts" }) });
@@ -178,7 +179,8 @@ await owner.goto(`${BASE}/posts`);
 await say(owner, firstCard, "Thanks!");
 const before = (await bubbles(owner, firstCard)).length;
 const last = (await bubbles(owner, firstCard)).at(-1).id;
-await Promise.all([owner.waitForNavigation(), owner.click(`#${last} .under button`)]);
+await owner.click(`#${last} .under details.more summary`);
+await Promise.all([owner.waitForNavigation(), owner.click(`#${last} .under .delete`)]);
 check("owner deletes a comment", (await bubbles(owner, firstCard)).length === before - 1);
 const beforeImport = (await bubbles(owner, firstCard)).length;
 check("re-import finishes", !(await importZip(owner)));
