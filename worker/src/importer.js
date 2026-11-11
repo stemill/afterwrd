@@ -157,8 +157,16 @@ async function finish(env, { sections }) {
       ...Object.entries(indexes).map(([name, column]) => `CREATE INDEX ${name} ON ${table}(${column})`),
     ];
   });
+  // Then no link to a row this import didn't bring (a section left out) or didn't keep: unlinked, so a row made later
+  // and given that number (an album of the owner's, say) can't pick up Facebook's photos, or share them.
+  const kept = (target) => (ARCHIVE[target].merged ? `(SELECT id FROM ${target} WHERE source = 'facebook')` : `(SELECT id FROM ${target})`);
+  const unlinked = Object.entries(ARCHIVE).flatMap(([table, { columns, merged, refs = {} }]) => Object.entries(refs).map(([column, target]) =>
+    (columns[column].includes("NOT NULL") ? `DELETE FROM ${table} WHERE ${column} NOT IN ${kept(target)}`
+      : `UPDATE ${table} SET ${column} = NULL WHERE ${merged ? "source = 'facebook' AND " : ""}${column} IS NOT NULL
+        AND ${column} NOT IN ${kept(target)}`)));
   await db.batch([
     ...statements.map((s) => db.prepare(s)),
+    ...unlinked.map((s) => db.prepare(s)),
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('sections', ?)").bind(JSON.stringify(sections)),
   ]);
 

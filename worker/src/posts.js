@@ -3,6 +3,7 @@
 //   POST /_admin/posts                {text, photos: [{hash, thumb_hash, width, height, size}], poll?: {options, multiple,
 //                                     closes_at}}: a poll asks the post's words (polls.js)
 //   POST /_admin/posts/<id>/delete    a form on the post itself
+//   POST /_admin/posts/<id>/edit      text, back: new words, for 15 minutes and until someone else comments (edits.js)
 //   POST /_admin/posts/<id>/vote      choice (one, or several if the poll takes more), back: the owner answers their poll
 //   POST /_admin/posts/<id>/close     back: the owner closes their poll
 // They're kept in `posts`, with their photos in `media` and albums in `albums` (photos.js), beside Facebook's, as
@@ -14,9 +15,10 @@ import { html, json, now, Refusal } from "./util.js";
 import { notifyNewPost } from "./notify.js";
 import { safeNext } from "./auth.js";
 import { answerHere, readPoll } from "./polls.js";
+import { editPost, MAX_POST_TEXT, versionsGone } from "./edits.js";
 import { messagePage } from "./views/pages.js";
 
-const MAX_TEXT = 5000;
+const MAX_TEXT = MAX_POST_TEXT;
 const MAX_PHOTOS = 20;
 const MAX_SIDE = 20_000;
 
@@ -104,11 +106,16 @@ export async function handlePosts(request, env, url) {
     await deletePost(env, Number(del[1]));
     return Response.redirect(`${url.origin}/posts`, 303);
   }
-  const poll = /^\/_admin\/posts\/(\d+)\/(vote|close)$/.exec(url.pathname);
+  const poll = /^\/_admin\/posts\/(\d+)\/(vote|close|edit)$/.exec(url.pathname);
   if (poll) {
     const form = await request.formData().catch(() => new FormData());
     const back = new URL(safeNext(String(form.get("back") ?? "/"), url), url.origin);
     try {
+      if (poll[2] === "edit") {
+        const { key } = await editPost(env, Number(poll[1]), String(form.get("text") ?? ""));
+        back.hash = `p-${key}`;
+        return Response.redirect(back, 303);
+      }
       if (poll[2] === "vote") await answerPoll(env, Number(poll[1]), form.getAll("choice").map(String));
       else await closePoll(env, Number(poll[1]));
     } catch (error) {
@@ -169,6 +176,7 @@ export async function deletePost(env, postId) {
     db.prepare("DELETE FROM poll_votes WHERE post_id = ?").bind(post.id),
     db.prepare("DELETE FROM posts WHERE id = ?").bind(post.id),
     ...photoCommentsGone(db, going),
+    ...versionsGone(db),
   ]);
   await removeUnusedFiles(env, going.flatMap((f) => [f.hash, f.thumb_hash]));
 }

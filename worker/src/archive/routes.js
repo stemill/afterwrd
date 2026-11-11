@@ -6,6 +6,7 @@ import { FINISHED_SQL, icsFile } from "../calendar.js";
 import { connectedToken } from "../cloudflare.js";
 import { commentable, findTarget, latestComments, loadThreads, newCount, photoKey } from "./comments.js";
 import { sitePolls } from "../polls.js";
+import { editablePosts, postVersions } from "../edits.js";
 import { connectionById, loadFeed, markMine, noteAnswer, rememberPicture } from "../feed.js";
 import * as friend from "../friends.js";
 import { MAX_GROUP_PHOTOS, MAX_MEMBERS } from "../groups.js";
@@ -229,9 +230,12 @@ async function loadPosts(db, rows, { threads = true } = {}) {
   const comments = threads ? await loadThreads(db, own.map((p) => p.key)) : null;
   // Polls in posts written here, with who chose what: this is the owner's own site.
   const polls = await sitePolls(db, own.map((p) => p.id), "site");
+  // Edits (edits.js): what posts written here said before, and which can still be changed.
+  const earlier = await postVersions(db, own.filter((p) => p.edited_at).map((p) => p.id));
+  const editable = await editablePosts(db, own.map((p) => p.id));
   return posts.map((p) => ({
     ...p, tags: tags.filter((t) => t.post_id === p.id), thread: comments ? comments.get(p.key) ?? null : undefined,
-    poll: polls.get(p.id) ?? null,
+    poll: polls.get(p.id) ?? null, earlier: earlier.get(p.id) ?? [], editable: editable.has(p.id),
   }));
 }
 

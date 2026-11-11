@@ -41,6 +41,9 @@ export default async function oneSetOfTables(db) {
     "CREATE TABLE post_keys (id INTEGER PRIMARY KEY, key TEXT NOT NULL)",
     ...chunks(rows, KEYS_PER_STATEMENT).map((list) =>
       `INSERT INTO post_keys (id, key) VALUES ${list.map(([id, key]) => `(${id}, '${key}')`).join(", ")}`),
+    // A post written since they were read (an older version still answering, mid-update) has no address yet: this
+    // fails (key can't be NULL), so nothing happens, and the migration runs again, from the start, on the next request.
+    "INSERT INTO post_keys (id, key) SELECT id, NULL FROM site_posts WHERE id NOT IN (SELECT id FROM post_keys)",
 
     // --- posts, photos and albums, from both sources ------------------------------------------------------------------
     `CREATE TABLE posts_new (

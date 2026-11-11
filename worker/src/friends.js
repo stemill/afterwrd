@@ -5,6 +5,7 @@
 // straight from there.
 import { actorId, POST_KEY_RE, seconds } from "../public/static/activity.js";
 import { MAX_COMMENT } from "./archive/comments.js";
+import { MAX_POST_TEXT } from "./edits.js";
 import { HASH_RE } from "./media.js";
 import { callSite, siteOrigin } from "./peers.js";
 import { parsePoll } from "./polls.js";
@@ -33,6 +34,23 @@ export function parseMedia(m, site) {
 }
 
 /**
+ * Whether, and how, something was edited: { edited_at, earlier: [{text, replaced_at}] } (both empty if not). At most
+ * 20 earlier versions, each no longer than `max`, oldest first, none replaced before it was written or after it was
+ * last changed.
+ */
+export function parseEdits(item, created, max) {
+  const editedAt = seconds(item?.updated);
+  if (editedAt === null || editedAt < created) return { edited_at: null, earlier: [] };
+  const list = Array.isArray(item["afterwrd:earlier"]) ? item["afterwrd:earlier"].slice(-20) : [];
+  const earlier = list.flatMap((v) => {
+    const at = seconds(v?.["afterwrd:replaced"]);
+    const words = typeof v?.content === "string" && v.content.length <= max ? v.content : null;
+    return words !== null && at !== null && at >= created && at <= editedAt ? [{ text: words, replaced_at: at }] : [];
+  });
+  return { edited_at: editedAt, earlier };
+}
+
+/**
  * Comments on something with address `base` (a post's or a photo's), as their site lists them; null if it doesn't
  * take comments (their site sent no `replies`: something from their Facebook download).
  */
@@ -46,7 +64,7 @@ function parseThread(collection, base, site, friendName) {
     const from = typeof author?.id === "string" && author.id !== actorId(site) ? siteOrigin(author.id.replace(/\/$/, "")) : null;
     const at = seconds(c?.published);
     return c?.type === "Note" && n && name && text(c.content, MAX_COMMENT) && at !== null
-      ? [{ id: Number(n[1]), name, text: c.content, created_at: at, from }] : [];
+      ? [{ id: Number(n[1]), name, text: c.content, created_at: at, from, ...parseEdits(c, at, MAX_COMMENT) }] : [];
   });
 }
 
@@ -68,6 +86,7 @@ export function parseNote(note, site, friendName, env = null) {
     tags: (Array.isArray(note.tag) ? note.tag.slice(0, 50) : []).map((t) => text(t?.name, 100)).filter(Boolean),
     photos: attachments.map((m) => parseMedia(m, site)).filter(Boolean),
     comments: parseThread(note.replies, note.id, site, friendName),
+    ...parseEdits(note, created, MAX_POST_TEXT), // earlier words of a post written on afterwrd: no longer than it allows
     // Their poll, if the post asks one: how many chose what, and what the owner here chose. Never who.
     poll: note["afterwrd:poll"] === undefined ? null : parsePoll(note["afterwrd:poll"], env),
   };

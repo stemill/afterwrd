@@ -3,12 +3,14 @@
 // here and land back on the page they came from:
 //   POST /_comments                 target, text, back
 //   POST /_comments/<id>/delete     back
+//   POST /_comments/<id>/edit       text, back: the owner changes their own comment (edits.js)
 // A comment's `target` is the post's address (posts.key) or the picture's (photo-<sha256>). Only posts and photos made
 // on afterwrd take comments, for now: a Facebook post's address may not survive a new download (docs/tables-plan.md).
 import { safeNext } from "../auth.js";
 import { messagePage } from "../views/pages.js";
 import { html, now, Refusal } from "../util.js";
 import { INBOX_JOIN, notifyComment } from "../notify.js";
+import { commentVersions, EDIT_SECONDS, editableComments, editComment, versionsGone } from "../edits.js";
 
 export const MAX_COMMENT = 2000;
 // Plenty for a conversation, too few for a runaway script.
@@ -22,14 +24,20 @@ const COMMENT_SQL = `
   SELECT c.*, COALESCE(u.name, c.author_name) AS name, (c.author_id IS NOT NULL) AS author_is_owner FROM comments c
   LEFT JOIN users u ON u.id = c.author_id`;
 
-/** Map of target -> its comments, oldest first. */
+/**
+ * Map of target -> its comments, oldest first, each with `earlier` (its earlier versions, if edited) and `editable`
+ * (whoever wrote it can still change it: edits.js).
+ */
 export async function loadThreads(db, keys) {
   const wanted = [...new Set(keys.filter(Boolean))];
   const threads = new Map(wanted.map((k) => [k, []]));
   if (!wanted.length) return threads;
   const { results } = await db.prepare(`${COMMENT_SQL} WHERE c.target IN (${wanted.map(() => "?").join(",")})
-    ORDER BY c.created_at, c.id`).bind(...wanted).all();
-  for (const c of results) threads.get(c.target).push(c);
+    ORDER BY c.id`).bind(...wanted).all();
+  // Only comments from the last few minutes can still be changed: ask about those alone.
+  const recent = results.filter((c) => c.created_at > now() - EDIT_SECONDS).map((c) => c.id);
+  const [earlier, editable] = [await commentVersions(db, results.filter((c) => c.edited_at).map((c) => c.id)), await editableComments(db, recent)];
+  for (const c of results) threads.get(c.target).push({ ...c, earlier: earlier.get(c.id) ?? [], editable: editable.has(c.id) });
   return threads;
 }
 
@@ -103,6 +111,12 @@ export async function handleComments(request, env, url, user) {
       if (made) back.hash = `c${made.id}`;
       return Response.redirect(back, 303);
     }
+    const change = /^\/_comments\/(\d+)\/edit$/.exec(url.pathname);
+    if (change) {
+      await editComment(env, Number(change[1]), { owner: true }, String(form.get("text") ?? ""), MAX_COMMENT);
+      back.hash = `c${change[1]}`;
+      return Response.redirect(back, 303);
+    }
     const del = /^\/_comments\/(\d+)\/delete$/.exec(url.pathname);
     if (del) {
       const gone = await deleteComment(env, Number(del[1]));
@@ -143,7 +157,7 @@ export async function deleteComment(env, id) {
   const db = env.DB;
   const comment = await db.prepare("SELECT * FROM comments WHERE id = ?").bind(id).first();
   if (!comment) return null;
-  await db.prepare("DELETE FROM comments WHERE id = ?").bind(comment.id).run();
+  await db.batch([db.prepare("DELETE FROM comments WHERE id = ?").bind(comment.id), ...versionsGone(db)]);
   return { target: comment.target };
 }
 

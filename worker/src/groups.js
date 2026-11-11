@@ -24,6 +24,8 @@
 //   POST /_group/posts/<m>/delete       their own (an admin: anyone's)
 //   POST /_group/comments         a Note inReplyTo a post here
 //   POST /_group/comments/<n>/delete    their own (an admin: anyone's)
+//   POST /_group/(posts|comments)/<n>/edit    a Note: their own words, for 15 minutes and until someone else comments
+//                                 after it or answers it (edits.js); not an event (that's /_group/events/<m>/edit)
 //   GET  /_group/events?when=past  events still to come (or, past, the most recent), as posts with their event
 //   POST /_group/events/<m>/answer {answer}: going, maybe or no (it answers with the event's post)
 //   POST /_group/events/<m>/edit   {content, afterwrd:event}: only the member who added it
@@ -47,7 +49,7 @@
 // The owner:
 //   POST /_group/admin/close      tells every member's site the group's gone, and empties it (the owner's site then
 //                                 deletes this Worker)
-import { actorId, CONTEXT, fileUrl, groupId, groupPostId, iso, tidy } from "../public/static/activity.js";
+import { actorId, CONTEXT, editedFields, fileUrl, groupId, groupPostId, iso, tidy } from "../public/static/activity.js";
 import pkg from "../package.json";
 import { MAX_COMMENT } from "./archive/comments.js";
 import { ANSWERS, eventChanged, eventObject, FINISHED_SQL, finishedAt, parseEvent } from "./calendar.js";
@@ -61,7 +63,8 @@ import { groupLinkPage, messagePage } from "./views/pages.js";
 import { callSite, KEY_RE, PROTOCOL, siteOrigin } from "./peers.js";
 import { removeUnusedFiles } from "./posts.js";
 import { signedFile } from "./share.js";
-import { html, json, now, randomToken, sha256 } from "./util.js";
+import { html, json, now, randomToken, Refusal, sha256 } from "./util.js";
+import { editGroupComment, editGroupPost, groupCommentVersions, groupPostVersions, groupVersionsGone } from "./edits.js";
 
 export const MAX_MEMBERS = 40; // with the requests waiting, few enough that all can be told when the group closes
 const MAX_WAITING = 10;
@@ -163,6 +166,9 @@ async function groupNotes(env, site, group, posts, member, comments = PAGE_COMME
       WHERE v.post_id IN (${marks}) ORDER BY v.voted_at, m.name`).bind(...ids),
   ]);
   const author = (row) => ({ type: "Person", id: actorId(row.origin), name: row.author_name });
+  // What edited posts and comments said before (edits.js).
+  const postsEarlier = await groupPostVersions(db, posts.filter((p) => p.edited_at).map((p) => p.id));
+  const commentsEarlier = await groupCommentVersions(db, newest.results.filter((c) => c.edited_at).map((c) => c.id));
   return Promise.all(posts.map(async (p) => {
     const address = groupPostId(site, group.id, p.id);
     const thread = newest.results.filter((c) => c.post_id === p.id);
@@ -170,7 +176,7 @@ async function groupNotes(env, site, group, posts, member, comments = PAGE_COMME
     const poll = polls.results.find((q) => q.post_id === p.id);
     return {
       type: "Note", id: address, attributedTo: author(p), context: groupId(site, group.id), published: iso(p.created_at),
-      mediaType: "text/plain", content: p.text ?? "",
+      mediaType: "text/plain", content: p.text ?? "", ...editedFields({ ...p, earlier: postsEarlier.get(p.id) }),
       "afterwrd:event": event ? eventWithAnswers(event, answers.results, member) : undefined,
       // Who chose what goes only to whoever asked, and only with the post on its own (so a page of posts stays small).
       "afterwrd:poll": poll ? pollObject(tally(poll, votes.results.filter((v) => v.post_id === p.id),
@@ -179,7 +185,8 @@ async function groupNotes(env, site, group, posts, member, comments = PAGE_COMME
       replies: {
         type: "Collection", totalItems: counts.results.find((c) => c.post_id === p.id)?.n ?? 0,
         items: thread.map((c) => ({ type: "Note", id: `${address}#c${c.id}`, attributedTo: author(c), inReplyTo: address,
-          published: iso(c.created_at), mediaType: "text/plain", content: c.text })),
+          published: iso(c.created_at), mediaType: "text/plain", content: c.text,
+          ...editedFields({ ...c, earlier: commentsEarlier.get(c.id) }) })),
       },
     };
   }));
@@ -363,6 +370,7 @@ async function deletePost(env, site, group, member, id) {
     db.prepare("DELETE FROM group_poll_votes WHERE post_id = ?").bind(post.id),
     db.prepare("DELETE FROM group_polls WHERE post_id = ?").bind(post.id),
     db.prepare("DELETE FROM group_posts WHERE id = ?").bind(post.id),
+    ...groupVersionsGone(db),
   ]);
   await removeUnusedFiles(env, photos.flatMap((f) => [f.hash, f.thumb_hash]));
   return true;
@@ -396,7 +404,7 @@ async function deleteComment(db, group, member, id) {
   const comment = await db.prepare(`SELECT c.* FROM group_comments c JOIN group_posts p ON p.id = c.post_id
     WHERE c.id = ? AND p.group_id = ?`).bind(Number(id), group.id).first();
   if (!comment || !(await mayDelete(db, member, comment.origin))) return false;
-  await db.prepare("DELETE FROM group_comments WHERE id = ?").bind(comment.id).run();
+  await db.batch([db.prepare("DELETE FROM group_comments WHERE id = ?").bind(comment.id), ...groupVersionsGone(db)]);
   return true;
 }
 
@@ -626,7 +634,8 @@ async function close(env, group, owner) {
   const { results: members } = await db.prepare("SELECT * FROM group_members WHERE id != ?").bind(owner.id).all();
   const { results: photos } = await db.prepare("SELECT hash, thumb_hash FROM group_photos").all();
   await db.batch([
-    ...["group_chat", "group_comments", "group_photos", "group_answers", "group_poll_votes", "group_polls", "group_events", "group_posts", "group_links", "group_members", "groups"]
+    ...["group_chat", "group_comments", "group_comment_versions", "group_photos", "group_answers", "group_poll_votes", "group_polls",
+      "group_events", "group_posts", "group_post_versions", "group_links", "group_members", "groups"]
       .map((table) => db.prepare(`DELETE FROM ${table}`)),
     // So it can't be claimed again, should its Worker outlast this (its owner's site deletes it next).
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('group_closed', '1')"),
@@ -747,7 +756,7 @@ export async function handleGroupApi(request, env, url) {
   if (!member.approved_at) return json({ error: `Waiting for ${(await ownerOf(db))?.name ?? "the group"} to let you in.` }, 403);
 
   const site = url.origin;
-  const one = /^(GET|POST) \/_group\/(posts|comments)\/(\d{1,15})(\/delete)?$/.exec(route);
+  const one = /^(GET|POST) \/_group\/(posts|comments)\/(\d{1,15})(\/delete|\/edit)?$/.exec(route);
   if (route === "GET /_group/posts") {
     const page = Math.min(10_000, Math.max(1, Number.parseInt(url.searchParams.get("page"), 10) || 1));
     return json(await groupPage(env, site, group, member, page));
@@ -756,6 +765,18 @@ export async function handleGroupApi(request, env, url) {
   if (one?.[1] === "GET" && one[2] === "posts" && !one[4]) {
     const post = await groupPost(env, site, group, member, one[3]);
     return post ? json(post) : json({ error: "That post isn't there any more." }, 404);
+  }
+  if (one?.[1] === "POST" && one[4] === "/edit") {
+    const note = await request.json().catch(() => ({}));
+    try {
+      if (note?.type !== "Note") throw new Refusal("Expected a Note.", 400);
+      if (one[2] === "posts") await editGroupPost(db, group.id, member.origin, one[3], note.content, MAX_GROUP_TEXT);
+      else await editGroupComment(db, group.id, member.origin, one[3], note.content, MAX_COMMENT);
+    } catch (error) {
+      if (error instanceof Refusal) return json({ error: error.message }, error.status);
+      throw error;
+    }
+    return json({ ok: true });
   }
   if (one?.[1] === "POST" && one[4]) {
     const done = one[2] === "posts" ? await deletePost(env, site, group, member, one[3]) : await deleteComment(db, group, member, one[3]);

@@ -70,6 +70,47 @@ check("text post appears first, as yours", first.text === "First post written on
   && first.what === "You", JSON.stringify(first));
 check("owner can delete it", first.canDelete);
 
+// Changing its words (edits.js): for 15 minutes, keeping what it said before.
+const firstCard = "main article.card:first-of-type";
+const editPost = async (words) => {
+  await owner.click(`${firstCard} > details.edit summary`);
+  await owner.$eval(`${firstCard} > details.edit textarea`, (t, w) => { t.value = w; }, words);
+  await Promise.all([owner.waitForNavigation(), owner.click(`${firstCard} > details.edit button`)]);
+};
+check("a new post offers Edit", Boolean(await owner.$(`${firstCard} > details.edit`)));
+await editPost("First post written on the site\nwith two lines, now changed");
+check("the new words show", (await cards(owner))[0].text === "First post written on the site\nwith two lines, now changed");
+check("…marked Edited", (await owner.$eval(`${firstCard} > details.edited summary`, (s) => s.textContent).catch(() => "")) === "Edited");
+check("…with what it said before", (await owner.$eval(`${firstCard} .versions`, (l) => l.textContent)).includes("First post written on the site\nwith two lines"));
+check("…and it keeps its address", new URL(owner.url()).hash.startsWith("#p-post-"));
+await editPost("   ");
+check("a post with no photos can't lose all its words", (await owner.$eval("body", (m) => m.textContent)).includes("needs words"));
+// At most 10 changes to any one post: a limit on what anyone can make the site keep.
+await owner.evaluate(() => fetch("/_admin/posts", { method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ text: "Change number 1" }) }));
+const [capped] = sql("SELECT id FROM posts WHERE text = 'Change number 1'");
+const tries = [];
+for (let i = 2; i <= 11; i++) {
+  tries.push(await owner.evaluate((id, w) => fetch(`/_admin/posts/${id}/edit`, { method: "POST", redirect: "manual",
+    body: new URLSearchParams({ text: w, back: "/posts" }) }).then((r) => (r.type === "opaqueredirect" ? 303 : r.status)), capped.id, `Change number ${i}`));
+}
+check("a post can be changed 10 times, and no more", tries.slice(0, 9).every((st) => st === 303) && tries[9] === 403
+  && sql(`SELECT COUNT(*) AS n FROM post_versions WHERE post_id = ${capped.id}`)[0].n === 10, tries.join(","));
+await owner.evaluate((id) => fetch(`/_admin/posts/${id}/delete`, { method: "POST" }), capped.id);
+check("…and deleting it deletes its versions", sql(`SELECT COUNT(*) AS n FROM post_versions WHERE post_id = ${capped.id}`)[0].n === 0);
+await owner.goto(`${BASE}/posts`);
+
+// Fifteen minutes on, it can't be changed.
+const [textPost] = sql("SELECT id, key FROM posts WHERE source = 'afterwrd' ORDER BY id DESC LIMIT 1");
+sql(`UPDATE posts SET created_at = created_at - 901 WHERE id = ${textPost.id}`);
+await owner.goto(`${BASE}/posts`);
+check("after 15 minutes there's no Edit", !(await owner.$(`${firstCard} > details.edit`)) && Boolean(await owner.$(`${firstCard} > details.edited`)));
+const late = await owner.evaluate((id) => fetch(`/_admin/posts/${id}/edit`, { method: "POST", redirect: "manual",
+  body: new URLSearchParams({ text: "too late", back: "/posts" }) }).then((r) => r.status), textPost.id);
+check("…and the site refuses it", late === 403 && sql(`SELECT text FROM posts WHERE id = ${textPost.id}`)[0].text.endsWith("now changed"));
+sql(`UPDATE posts SET created_at = created_at + 901 WHERE id = ${textPost.id}`);
+await owner.goto(`${BASE}/posts`);
+
 // A photo post: one 4000×3000 photo with a hidden location, one small one.
 await owner.type("#composer textarea", "Two photos");
 await (await owner.$("#composer input[type=file]")).uploadFile(`${fixtures}/big-secret.jpg`, `${fixtures}/photo1.jpg`);

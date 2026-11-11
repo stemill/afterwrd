@@ -189,16 +189,49 @@ await bob.setViewport({ width: 1280, height: 800 });
 const bobPost = sql(stateG, `SELECT id FROM group_posts WHERE origin = '${B}'`)[0].id;
 const annPost = sql(stateG, `SELECT id FROM group_posts WHERE origin = '${A}'`)[0].id;
 
+// Changing words in a group (edits.js, on the group's Worker): only the writer, for 15 minutes, and until someone else
+// comments. The writer's site keeps its own record.
+const annKey = sql(stateA, "SELECT their_key FROM groups")[0].their_key;
+const edit = async (page, scope, words) => {
+  await page.click(`${scope} details.edit summary`);
+  await page.$eval(`${scope} details.edit textarea`, (t, w) => { t.value = w; }, words);
+  await Promise.all([page.waitForNavigation(), page.click(`${scope} details.edit button`)]);
+};
+await bob.goto(`${B}/groups/${bobGroup}`);
+check("Bob's new post offers Edit", Boolean(await bob.$(`#gp${bobPost} > details.edit`)));
+await edit(bob, `#gp${bobPost} >`, "Started the first book: The Hobbit");
+check("…changed on the group's Worker, keeping what it said before", sql(stateG, `SELECT text, edited_at FROM group_posts WHERE id = ${bobPost}`)
+  .some((p) => p.text === "Started the first book: The Hobbit" && p.edited_at)
+  && sql(stateG, "SELECT text FROM group_post_versions").map((v) => v.text).join() === "Started the first book");
+check("…and in Bob's own copy", sql(stateB, "SELECT text FROM group_mine WHERE kind = 'post'")[0]?.text === "Started the first book: The Hobbit"
+  && n(stateB, "group_mine_versions") === 1);
+await ann.goto(`${A}/groups/${annGroup}`);
+check("Ann sees it Edited, with what it said before", (await ann.$eval(`#gp${bobPost} > details.edited`, (d) => d.textContent).catch(() => ""))
+  .includes("Started the first book"));
+check("Ann can't change Bob's post", (await call(G, `/_group/posts/${bobPost}/edit`, annKey, { type: "Note", content: "Ann's words" })).status === 404
+  && !sql(stateG, "SELECT text FROM group_posts").some((p) => p.text === "Ann's words"));
+
 // Comments go only to those who wrote or commented on the post.
 const catGroup = sql(stateC, "SELECT id FROM groups")[0].id;
 await cat.goto(`${C}/groups/${catGroup}`);
 check("Cat sees both posts, and can only delete her own", (await cards(cat)).length === 2 && (await cards(cat)).every((c) => !c.canDelete));
 await comment(cat, `gp${bobPost}`, "Which book?");
+const catComment = sql(stateG, "SELECT id FROM group_comments WHERE text = 'Which book?'")[0].id;
+check("Cat's comment locks Bob's post", (await call(G, `/_group/posts/${bobPost}/edit`, bobKey, { type: "Note", content: "too late" })).status === 403);
+await cat.goto(`${C}/groups/${catGroup}`);
+await edit(cat, `#g${bobPost}-${catComment}`, "Which book was it?");
+check("Cat changes her comment", sql(stateG, `SELECT text FROM group_comments WHERE id = ${catComment}`)[0]?.text === "Which book was it?"
+  && sql(stateC, "SELECT text FROM group_mine WHERE kind = 'comment'")[0]?.text === "Which book was it?");
+check("Bob, an admin, still can't change Cat's words", (await call(G, `/_group/comments/${catComment}/edit`, bobKey, { type: "Note", content: "Bob's words" })).status === 404);
 check("Bob is told about Cat's comment on his post", await waitFor(() => n(stateB, "group_inbox") === 1));
 check("Ann isn't: it's not her post and she hasn't commented", n(stateA, "group_inbox") === 0);
 await ann.goto(`${A}/groups/${annGroup}`);
 await comment(ann, `gp${bobPost}`, "The one we picked!");
 check("Bob and Cat are told about Ann's comment", await waitFor(() => n(stateB, "group_inbox") === 2 && n(stateC, "group_inbox") === 1));
+check("Ann's comment after Cat's locks Cat's", (await call(G, `/_group/comments/${catComment}/edit`, catKey, { type: "Note", content: "changed later" })).status === 403);
+await cat.goto(`${C}/groups/${catGroup}`);
+check("…and Cat's site stops offering Edit, showing it Edited", !(await cat.$(`#g${bobPost}-${catComment} details.edit`))
+  && (await cat.$eval(`#g${bobPost}-${catComment} details.edited`, (d) => d.textContent).catch(() => "")).includes("Which book?"));
 await bob.goto(`${B}/groups/${bobGroup}`);
 await comment(bob, `gp${bobPost}`, "Ah, of course");
 check("Ann and Cat are told about Bob's", await waitFor(() => n(stateA, "group_inbox") === 1 && n(stateC, "group_inbox") === 2));
@@ -281,7 +314,8 @@ await ann.goto(`${A}/groups/${annGroup}`);
 annCards = await cards(ann);
 check("Ann, its owner, can delete anything in the group", annCards.every((c) => c.canDelete && c.comments.every((x) => x.canDelete)));
 await Promise.all([ann.waitForNavigation(), ann.click(`#gp${bobPost} .comment .under button`)]);
-check("…and does: Cat's first comment", !sql(stateG, "SELECT text FROM group_comments").some((c) => c.text === "Which book?"));
+check("…and does: Cat's first comment", !sql(stateG, "SELECT text FROM group_comments").some((c) => c.text === "Which book was it?")
+  && n(stateG, "group_comment_versions") === 0);
 await ann.goto(`${A}/groups/${annGroup}/members`);
 await ann.$eval('form[action$="/about"] input[name=name]', (i) => { i.value = "Book club (2026)"; });
 await Promise.all([ann.waitForNavigation(), ann.click('form[action$="/about"] button')]);

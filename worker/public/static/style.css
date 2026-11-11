@@ -677,3 +677,17 @@ form.stack .together-friend input { width: 1.15rem; height: 1.15rem; padding: 0;
 
 /* The home-screen app: offers that show only when they apply (ui.js). */
 [data-install][hidden], [data-install-how][hidden], .install-note[hidden], #app-installed[hidden] { display: none; }
+
+/* Editing (src/edits.js): "Edited" opens onto what it said before; "Edit" onto the words, while they can change. */
+details.edited, span.edited, details.edit { font-size: 0.78rem; color: var(--muted); }
+.comment details.edited, .comment span.edited, .comment details.edit { grid-column: 2; padding: 0.1rem 0.95rem 0; }
+.card > details.edited, .card > span.edited, .card > details.edit { margin: 0.3rem 0 0.5rem; }
+details.edited summary, details.edit summary { display: inline; cursor: pointer; font-weight: 700; list-style: none; }
+details.edited summary::-webkit-details-marker, details.edit summary::-webkit-details-marker { display: none; }
+details.edited summary:hover, details.edit summary:hover { text-decoration: underline; }
+.versions { margin: 0.4rem 0 0; padding-left: 1.2rem; }
+.versions li { margin-bottom: 0.35rem; }
+.versions .was { display: block; color: var(--text); font-size: 0.9rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+details.edit form { display: grid; gap: 0.4rem; margin-top: 0.4rem; }
+details.edit textarea { width: 100%; font: inherit; font-size: 0.95rem; color: var(--text); }
+details.edit button { justify-self: start; }

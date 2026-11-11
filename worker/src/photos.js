@@ -9,6 +9,7 @@
 // photos posted without an album go) is neither renamed nor deleted.
 import { safeNext } from "./auth.js";
 import { addPhotos, checkPhotos, newPost, photoCommentsGone, removeUnusedFiles, roleAlbum, ROLE_ALBUMS } from "./posts.js";
+import { versionsGone } from "./edits.js";
 import { html, json, now, pageData, Refusal } from "./util.js";
 import { addPage } from "./views/photos.js";
 import { notifyNewPost } from "./notify.js";
@@ -118,6 +119,7 @@ export async function deleteAlbum(env, albumId) {
     db.prepare("UPDATE media SET album_id = (SELECT id FROM albums WHERE role = 'posts') WHERE album_id = ?").bind(albumId),
     db.prepare("DELETE FROM albums WHERE id = ?").bind(albumId),
     ...photoCommentsGone(db, going),
+    ...versionsGone(db),
   ]);
   await removeUnusedFiles(env, going.flatMap((f) => [f.hash, f.thumb_hash]));
   return true;
@@ -138,6 +140,7 @@ export async function deletePhoto(env, photoId) {
     db.prepare(`DELETE FROM comments WHERE target IN (${EMPTY_POST})`).bind(f.post_id),
     db.prepare(`DELETE FROM posts WHERE key IN (${EMPTY_POST})`).bind(f.post_id),
     ...photoCommentsGone(db, [f]),
+    ...versionsGone(db),
   ]);
   await removeUnusedFiles(env, [f.hash, f.thumb_hash]);
   return { album: f.album_id, inPost: f.post_id !== null };

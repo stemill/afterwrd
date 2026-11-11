@@ -5,6 +5,8 @@ import { verdict } from "../checks.js";
 import { resultHtml } from "./checks.js";
 import { connectLink } from "../cloudflare.js";
 import { MAX_COMMENT } from "../archive/comments.js";
+import { MAX_POST_TEXT } from "../edits.js";
+import { MAX_GROUP_TEXT } from "../groups.js";
 import { MAX_OPTION } from "../polls.js";
 import {
   aspect, dateRange, EMOJI, fmtAgo, fmtDate, fmtDatetime, linkify, mediaUrl, number, safeUrl, summary, thumbUrl,
@@ -127,6 +129,33 @@ function collage(items) {
 
 const initial = (name) => [...String(name).trim()][0]?.toUpperCase() ?? "?";
 
+/**
+ * "Edited", opening onto what a post or comment said before (oldest first), each with when it was replaced
+ * (src/edits.js). `item` has edited_at and earlier: [{text, replaced_at}]. Nothing if it was never edited.
+ */
+function edited(item) {
+  if (!item?.edited_at) return "";
+  const earlier = item.earlier ?? [];
+  if (!earlier.length) return html`<span class="edited" title="${fmtDatetime(item.edited_at)}">Edited</span>`;
+  return html`<details class="edited"><summary title="${fmtDatetime(item.edited_at)}">Edited</summary>
+  <ol class="versions">${earlier.map((v) => html`<li><span class="meta">Until ${fmtDatetime(v.replaced_at)}</span>
+    <span class="was">${v.text ? linkify(v.text) : html`<em>(no words)</em>`}</span></li>`)}</ol>
+</details>`;
+}
+
+/** A way to change words that can still be changed (src/edits.js): opens onto the words, ready to edit. */
+function editBox(action, text, back, max, { required = true, post = null } = {}) {
+  return html`<details class="edit"><summary>Edit</summary>
+  <form method="post" action="${action}">
+    <input type="hidden" name="back" value="${back}">
+    ${post !== null && html`<input type="hidden" name="post" value="${post}">`}
+    <textarea name="text" rows="3" maxlength="${max}" ${required && "required"} aria-label="New words">${text ?? ""}</textarea>
+    <button class="chip primary">Save</button>
+    <span class="meta">Anyone who can see it can see what it said before.</span>
+  </form>
+</details>`;
+}
+
 /** The comments written here on a post or photo, then a box to add one. Forms work without JavaScript. */
 function thread(ctx, key, comments) {
   const back = ctx.url.pathname + ctx.url.search;
@@ -142,6 +171,8 @@ function thread(ctx, key, comments) {
         <input type="hidden" name="back" value="${back}"><button>Delete</button>
       </form>`}
     </div>
+    ${edited(c)}
+    ${c.author_is_owner && c.editable && editBox(`/_comments/${c.id}/edit`, c.text, back, MAX_COMMENT)}
   </div>`)}
   <form class="say" method="post" action="/_comments">
     <input type="hidden" name="target" value="${key}">
@@ -210,7 +241,8 @@ function postCard(ctx, p) {
   // undefined where comments weren't loaded (no link, no box), null where the post takes none (Facebook's, for now).
   if (p.source === "afterwrd") {
     const did = p.title && p.title !== "Posted on afterwrd." ? p.title : "";
-    return html`<article class="card social own">
+    const back = ctx.url.pathname + ctx.url.search;
+    return html`<article class="card social own" id="p-${p.key}">
   <header>
     ${ownerFace(ctx)}
     <span class="what"><strong>You</strong>${did && html`<span class="meta">${did}</span>`}</span>
@@ -220,6 +252,9 @@ function postCard(ctx, p) {
       data-confirm="Delete this post, its photos and its comments? This can’t be undone." data-confirm-ok="Delete"><button class="delete">Delete</button></form>`}
   </header>
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
+  ${edited(p)}
+  ${p.editable && p.thread !== undefined && editBox(`/_admin/posts/${p.id}/edit`, p.text, back, MAX_POST_TEXT,
+    { required: Boolean(p.poll) || !p.media?.length })}
   ${p.poll && pollBlock(ctx, p.poll, { id: `poll-${p.id}`, action: `/_admin/posts/${p.id}/vote`, closeAction: `/_admin/posts/${p.id}/close` })}
   ${collage(p.media)}
   ${p.thread && thread(ctx, p.key, p.thread)}
@@ -787,6 +822,8 @@ function remoteThread(ctx, c, target, comments) {
         <input type="hidden" name="back" value="${back}"><button>Delete</button>
       </form>`}
     </div>
+    ${edited(r)}
+    ${r.mine && r.editable && editBox(`/_feed/comments/${c.id}/${r.id}/edit`, r.text, back, MAX_COMMENT)}
   </div>`)}
   <form class="say" method="post" action="/_feed/comments">
     <input type="hidden" name="connection" value="${c.id}">
@@ -828,6 +865,7 @@ function remoteCard(ctx, c, p, { thread = true } = {}) {
     <time title="${fmtDatetime(p.created_at)}">${fmtAgo(p.created_at)}</time>
   </header>
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
+  ${edited(p)}
   ${p.poll && pollBlock(ctx, p.poll, { id: `poll-f${c.id}-${p.key}`, action: "/_feed/vote", hidden: { connection: c.id, target: p.key } })}
   ${n > 0 && html`<div class="collage collage-${Math.min(n, 4)}">
     ${p.photos.slice(0, 4).map((m, i) => html`
@@ -1421,6 +1459,8 @@ function groupThread(ctx, g, p) {
       ${mayDelete(g, c) && html`<form method="post" action="/_groups/${g.id}/comments/${c.id}/delete"
         data-confirm="Delete this comment?" data-confirm-ok="Delete"><input type="hidden" name="back" value="${back}"><button>Delete</button></form>`}
     </div>
+    ${edited(c)}
+    ${c.mine && c.editable && editBox(`/_groups/${g.id}/comments/${c.id}/edit`, c.text, back, MAX_COMMENT, { post: p.id })}
   </div>`)}
   <form class="say" method="post" action="/_groups/${g.id}/comments" data-group="${g.id}" data-post="${p.id}">
     <input type="hidden" name="post" value="${p.id}">
@@ -1445,6 +1485,9 @@ function groupCard(ctx, g, p) {
   </header>
   ${p.event && eventBlock(ctx, g, p, { full: ctx.url.pathname.includes("/posts/") })}
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
+  ${edited(p)}
+  ${p.mine && p.editable && editBox(`/_groups/${g.id}/posts/${p.id}/edit`, p.text, ctx.url.pathname + ctx.url.search, MAX_GROUP_TEXT,
+    { required: Boolean(p.poll) || !p.photos.length })}
   ${p.poll && pollBlock(ctx, p.poll, { id: `poll-g${p.id}`, action: `/_groups/${g.id}/polls/${p.id}/vote`,
     closeAction: p.mine ? `/_groups/${g.id}/polls/${p.id}/close` : null,
     whoNote: "Only you're shown this. Whoever hosts the group could still look it up.",

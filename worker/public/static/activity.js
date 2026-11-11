@@ -68,6 +68,19 @@ export function mediaObject(site, m, extra = {}) {
 }
 
 /**
+ * A post's or comment's edits (edited_at, and `earlier`: [{text, replaced_at}], oldest first; src/edits.js) as
+ * ActivityStreams: `updated`, and `afterwrd:earlier`, the words it had before, each with when they were replaced.
+ */
+export function editedFields(row) {
+  if (!row.edited_at) return {};
+  return {
+    updated: iso(row.edited_at),
+    "afterwrd:earlier": (row.earlier ?? []).map((v) => ({ type: "Note", mediaType: "text/plain", content: v.text ?? "",
+      "afterwrd:replaced": iso(v.replaced_at) })),
+  };
+}
+
+/**
  * A comment written on a site (a comments row) as a Note. `author` is who wrote it: the owner's address, a
  * connected friend's site, or just a name for someone invited to look.
  */
@@ -80,6 +93,7 @@ export function commentNote(site, c, author) {
     published: iso(c.created_at),
     mediaType: "text/plain",
     content: c.text,
+    ...editedFields(c),
   };
 }
 

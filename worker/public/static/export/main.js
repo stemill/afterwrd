@@ -3,7 +3,7 @@
 // the browser allows it (Chrome, Edge) and in memory otherwise.
 /* global zip */
 import {
-  actorId, commentAuthor, commentId, commentNote, CONTEXT, groupId, groupPostId, iso, mediaObject, postId, targetId, tidy,
+  actorId, commentAuthor, commentId, commentNote, CONTEXT, editedFields, groupId, groupPostId, iso, mediaObject, postId, targetId, tidy,
 } from "../activity.js";
 
 const EXTENSIONS = {
@@ -12,7 +12,8 @@ const EXTENSIONS = {
 };
 const TABLES = ["settings", "facebook_people", "albums", "posts", "facebook_post_tags", "facebook_comments",
   "facebook_reactions", "media", "facebook_tagged_photos", "comments", "comments_elsewhere", "polls", "poll_votes",
-  "connections", "friend_links", "users", "groups", "group_mine", "chats", "messages"];
+  "connections", "friend_links", "users", "groups", "group_mine", "chats", "messages", "post_versions", "comment_versions",
+  "comments_elsewhere_versions"];
 
 const form = document.getElementById("export");
 const status = document.getElementById("status");
@@ -64,11 +65,24 @@ function documents(t) {
     return m ? media(m) : undefined;
   };
 
+  // What edited posts and comments said before (src/edits.js), oldest first, by what they belong to.
+  const earlierOf = (rows, column) => {
+    const map = new Map();
+    for (const v of [...rows].sort((a, b) => a.id - b.id)) {
+      if (!map.has(v[column])) map.set(v[column], []);
+      map.get(v[column]).push(v);
+    }
+    return (id) => map.get(id) ?? [];
+  };
+  const postEarlier = earlierOf(t.post_versions, "post_id");
+  const commentEarlier = earlierOf(t.comment_versions, "comment_id");
+  const elsewhereEarlier = earlierOf(t.comments_elsewhere_versions, "comment_id");
+
   // Comments written on this site, by what they're on.
   const threads = new Map();
   for (const c of t.comments) {
     const user = users.get(c.author_id);
-    const row = { ...c, name: user?.name ?? c.author_name, author_is_owner: Boolean(c.author_id) };
+    const row = { ...c, name: user?.name ?? c.author_name, author_is_owner: Boolean(c.author_id), earlier: commentEarlier(c.id) };
     if (!threads.has(c.target)) threads.set(c.target, []);
     threads.get(c.target).push(commentNote(site, row, commentAuthor(site, row)));
   }
@@ -117,6 +131,7 @@ function documents(t) {
       "afterwrd:kind": p.kind,
       "afterwrd:onWallOf": person(p.target_id),
       "afterwrd:source": p.source,
+      ...editedFields({ ...p, earlier: postEarlier(p.id) }),
       "afterwrd:facebookId": p.fbid || undefined,
       "afterwrd:poll": poll(p),
       replies: replies(key),
@@ -239,6 +254,7 @@ function documents(t) {
         published: iso(c.created_at),
         mediaType: "text/plain",
         content: c.text,
+        ...editedFields({ ...c, earlier: elsewhereEarlier(c.id) }),
       })), { name: "Your comments on friends' sites (the originals are kept there)" }),
   };
 }
@@ -277,6 +293,9 @@ Facebook's own download doesn't say which post a comment or like was on, only wh
 ("afterwrd:on"), and when. Those keep what Facebook gave.
 
 Photos: "afterwrd:file" is where each one is in media/ here. Text is plain, not HTML ("mediaType": "text/plain").
+
+Edits: a post or comment that was changed after it was written has "updated" (when), and "afterwrd:earlier", what
+it said before, oldest first, each with when it was replaced ("afterwrd:replaced").
 `;
 
 form.addEventListener("submit", async (event) => {

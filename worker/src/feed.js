@@ -3,6 +3,7 @@
 // copy is kept here in comments_elsewhere.
 //   POST /_feed/comments                                       connection, target, text, back (a form)
 //   POST /_feed/comments/<connection>/<remote id>/delete       back (a form)
+//   POST /_feed/comments/<connection>/<remote id>/edit         text, back: change it (their site decides: edits.js)
 //   POST /_feed/vote                                           connection, target, choice…, back: answering their poll
 import { actorId, commentId, targetId } from "../public/static/activity.js";
 import { MAX_COMMENT } from "./archive/comments.js";
@@ -12,6 +13,7 @@ import { messagePage } from "./views/pages.js";
 import { callSite } from "./peers.js";
 import { html, now, Refusal, withoutKeys } from "./util.js";
 import { INBOX_JOIN } from "./notify.js";
+import { EDIT_SECONDS, elsewhereVersions, elsewhereVersionsGone } from "./edits.js";
 
 // Home asks friends' sites for their newest posts when it opens. Each is a request, and the free plan allows 50 per
 // page, so with more friends than SITES it asks those whose notes (notify.js) say they've posted lately, newest
@@ -43,10 +45,16 @@ export function rememberPicture(db, connection, avatar) {
  */
 export async function markMine(db, connectionId, target, comments, ownOrigin) {
   if (!comments) return null; // nothing there takes comments
-  const { results } = await db.prepare("SELECT remote_id, text FROM comments_elsewhere WHERE connection_id = ? AND target = ?")
+  const { results } = await db.prepare("SELECT id, remote_id, text, edited_at FROM comments_elsewhere WHERE connection_id = ? AND target = ?")
     .bind(connectionId, target).all();
-  const sent = new Map(results.map((r) => [r.remote_id, r.text]));
-  return comments.flatMap((c) => (sent.has(c.id) ? [{ ...c, mine: true, text: sent.get(c.id), from: null }]
+  const sent = new Map(results.map((r) => [r.remote_id, r]));
+  // The owner's own words, and their own record of changing them: never what the friend's site says they said.
+  const earlier = await elsewhereVersions(db, results.filter((r) => r.edited_at).map((r) => r.id));
+  // Whether the owner can still change one: as their site will decide (edits.js), so the page only offers what works.
+  const later = (c) => comments.some((l) => l.id > c.id && !sent.has(l.id));
+  return comments.flatMap((c) => (sent.has(c.id)
+    ? [{ ...c, mine: true, from: null, text: sent.get(c.id).text, edited_at: sent.get(c.id).edited_at, earlier: earlier.get(sent.get(c.id).id) ?? [],
+      editable: c.created_at > now() - EDIT_SECONDS && !later(c) }]
     : c.from === ownOrigin ? [] : [{ ...c, mine: false }]));
 }
 
@@ -142,6 +150,12 @@ export async function handleFeed(request, env, url) {
       back.hash = `f${Number(connection) || 0}-${TARGET_RE.test(target) ? target : ""}`;
       return Response.redirect(back, 303);
     }
+    const change = /^\/_feed\/comments\/(\d+)\/(\d+)\/edit$/.exec(url.pathname);
+    if (change) {
+      await editFriendComment(env, { connection: change[1], id: Number(change[2]), text: String(form.get("text") ?? "") });
+      back.hash = `r${Number(change[1])}-${Number(change[2])}`;
+      return Response.redirect(back, 303);
+    }
     const del = /^\/_feed\/comments\/(\d+)\/(\d+)\/delete$/.exec(url.pathname);
     if (del) {
       await deleteFriendComment(env, { connection: del[1], id: Number(del[2]) });
@@ -216,10 +230,39 @@ export async function deleteFriendComment(env, { connection: connectionId, id })
   if (!connection) throw new Refusal("You're no longer connected with them.");
   try {
     await callSite(connection.origin, `/_peer/comments/${id}/delete`, { key: connection.their_key, body: {} });
-    await db.prepare("DELETE FROM comments_elsewhere WHERE connection_id = ? AND remote_id = ?").bind(connection.id, id).run();
+    await db.batch([db.prepare("DELETE FROM comments_elsewhere WHERE connection_id = ? AND remote_id = ?").bind(connection.id, id),
+      elsewhereVersionsGone(db)]);
   } catch (error) {
     throw new Refusal(`Couldn't delete your comment: ${error.message}`);
   }
+}
+
+/**
+ * The owner changes their comment `id` (their number for it) on friend `connection`'s site. Their site decides whether
+ * it still can be (edits.js there); then this site's copy changes too, keeping what it said before.
+ */
+export async function editFriendComment(env, { connection: connectionId, id, text }) {
+  const db = env.DB;
+  const connection = await connectionById(db, connectionId);
+  if (!connection) throw new Refusal("You're no longer connected with them.");
+  text = text.replace(/\r\n?/g, "\n").trim();
+  if (!text || text.length > MAX_COMMENT) throw new Refusal(`Comments need 1 to ${MAX_COMMENT} characters.`);
+  const mine = await db.prepare("SELECT * FROM comments_elsewhere WHERE connection_id = ? AND remote_id = ?").bind(connection.id, id).first();
+  if (!mine) throw new Refusal("That isn't a comment of yours.");
+  if (mine.text === text) return;
+  try {
+    await callSite(connection.origin, `/_peer/comments/${id}/edit`, { key: connection.their_key,
+      body: { "@context": "https://www.w3.org/ns/activitystreams", type: "Note", mediaType: "text/plain", content: text } });
+  } catch (error) {
+    // A site from before editing answers an unknown address with "Not found.".
+    if (error.status === 404 && error.message === "Not found.") throw new Refusal(`${connection.name}'s site can't change comments yet. You can still delete it.`);
+    throw new Refusal(`Couldn't change your comment: ${error.message}`);
+  }
+  const at = now();
+  await db.batch([
+    db.prepare("INSERT INTO comments_elsewhere_versions (comment_id, text, replaced_at) VALUES (?, ?, ?)").bind(mine.id, mine.text, at),
+    db.prepare("UPDATE comments_elsewhere SET text = ?, edited_at = ? WHERE id = ?").bind(text, at, mine.id),
+  ]);
 }
 
 const problem = (message, back = null) =>

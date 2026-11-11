@@ -43,12 +43,13 @@ if (stage === "before") {
   await page.waitForFunction(() => /Done\./.test(document.getElementById("status").textContent)
     || document.getElementById("error").textContent, { timeout: 180_000, polling: 500 });
   check("imported on the old release", !(await page.$eval("#error", (e) => e.textContent)));
+  // (From 0.41.0, imported posts and photos take no comments: nothing to say there.)
   await page.goto(`${BASE}/posts`);
-  await say("main article.card:last-of-type", "On an imported post");
+  if (await page.$("main article.card:last-of-type .say")) await say("main article.card:last-of-type", "On an imported post");
   await page.goto(`${BASE}/photos/album/other`);
   const importedPhoto = await page.$eval(".justified a.tile", (a) => a.getAttribute("href"));
   await page.goto(BASE + importedPhoto);
-  await say(".info", "On an imported photo");
+  if (await page.$(".info .say")) await say(".info", "On an imported photo");
 
   // Posted here: two photos with a comment, and a poll with an answer.
   await page.goto(`${BASE}/posts`);
@@ -129,6 +130,13 @@ if (stage === "before") {
   await page.type("#composer textarea", "After the upgrade");
   await Promise.all([page.waitForNavigation(), page.click("#composer button.post")]);
   check("new posts work too", (await page.$eval(`${own}:first-of-type .text`, (t) => t.textContent)) === "After the upgrade");
+  // Comments made before the upgrade can be changed like any other (still within their 15 minutes here).
+  await page.goto(BASE + was.address);
+  await page.click("main article.card .comment details.edit summary");
+  await page.$eval("main article.card .comment details.edit textarea", (t) => { t.value = "Still here, after the upgrade"; });
+  await Promise.all([page.waitForNavigation(), page.click("main article.card .comment details.edit button")]);
+  check("a comment from before the upgrade can be changed", (await said("main article.card")).join() === "Still here, after the upgrade"
+    && (await page.$eval("main article.card .comment details.edited", (d) => d.textContent).catch(() => "")).includes("Still here?"));
 }
 check("no script errors", errors.length === 0, errors.join(" | "));
 await browser.close();

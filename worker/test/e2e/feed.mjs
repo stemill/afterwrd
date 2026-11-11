@@ -163,13 +163,46 @@ const onBob = await bob.$$eval("main article.card:first-of-type .comment", (l) =
 check("Bob sees it under his post, without Ann's site address (she's his friend: it's on her page)", onBob.length === 1 && onBob[0].name === "Ann Example" && onBob[0].from === undefined, JSON.stringify(onBob));
 check("Bob's Activity counts it as new", (await bob.$eval('header.site a[href="/activity"] .count', (c) => c.firstChild.textContent)) === "1");
 
+// Ann's comment on Bob's post locks it: Bob can't change his words under her reply (edits.js).
+check("Bob can't change a post Ann has commented on", !(await bob.$("main article.card:first-of-type > details.edit")));
+// Ann changes her comment from her Feed; Bob's site decides, and keeps what it said before.
+await ann.goto(`${A}/`);
+const annComment = "article.from-friend .comment:first-of-type";
+check("Ann's own comment offers Edit", Boolean(await ann.$(`${annComment} details.edit`)));
+await ann.click(`${annComment} details.edit summary`);
+await ann.$eval(`${annComment} details.edit textarea`, (t) => { t.value = "Looks great, Bob! Where was it?"; });
+await Promise.all([ann.waitForNavigation(), ann.click(`${annComment} details.edit button`)]);
+check("…changed on Bob's site, keeping what it said before", sql(stateB, "SELECT text, edited_at FROM comments WHERE origin != 'site'")
+  .some((c) => c.text === "Looks great, Bob! Where was it?" && c.edited_at)
+  && sql(stateB, "SELECT text FROM comment_versions").map((v) => v.text).join() === "Looks great, Bob!");
+check("…and in Ann's own copy", sql(stateA, "SELECT text FROM comments_elsewhere")[0]?.text === "Looks great, Bob! Where was it?"
+  && sql(stateA, "SELECT text FROM comments_elsewhere_versions").map((v) => v.text).join() === "Looks great, Bob!");
+check("Ann's Feed shows it Edited, with what it said before", (await ann.$eval(`${annComment} details.edited`, (d) => d.textContent).catch(() => ""))
+  .includes("Looks great, Bob!"));
+await bob.goto(`${B}/posts`);
+check("Bob sees it Edited too", (await bob.$eval("main article.card:first-of-type .comment details.edited", (d) => d.textContent).catch(() => ""))
+  .includes("Looks great, Bob!"));
+
 // Bob replies on his own site; Ann sees the reply in her Feed but can't delete it.
 await bob.type("main article.card:first-of-type .say textarea", "Thanks Ann");
 await Promise.all([bob.waitForNavigation(), bob.click("main article.card:first-of-type .say button")]);
 await ann.goto(`${A}/`);
 annFeed = await feedCards(ann);
-check("Ann sees Bob's reply, not deletable by her", annFeed[0].comments.map((c) => c.text).join("|") === "Looks great, Bob!|Thanks Ann"
+check("Ann sees Bob's reply, not deletable by her", annFeed[0].comments.map((c) => c.text).join("|") === "Looks great, Bob! Where was it?|Thanks Ann"
   && !annFeed[0].comments[1].canDelete);
+
+// Bob's reply locks Ann's comment: her site no longer offers Edit, and Bob's refuses it.
+check("once Bob has replied, Ann can't change her comment", !(await ann.$(`${annComment} details.edit`)));
+const annRemoteId = sql(stateA, "SELECT remote_id FROM comments_elsewhere")[0].remote_id;
+const lateEdit = await fetch(`${B}/_peer/comments/${annRemoteId}/edit`, { method: "POST",
+  headers: { Authorization: `Bearer ${sql(stateA, "SELECT their_key FROM connections")[0].their_key}`, "Content-Type": "application/json" },
+  body: JSON.stringify({ type: "Note", content: "changed after Bob replied" }) });
+check("…Bob's site refuses it", lateEdit.status === 403 && !sql(stateB, "SELECT text FROM comments").some((c) => c.text === "changed after Bob replied"));
+const bobsOwn = sql(stateB, "SELECT id FROM comments WHERE origin = 'site' LIMIT 1")[0].id;
+const notAnns = await fetch(`${B}/_peer/comments/${bobsOwn}/edit`, { method: "POST",
+  headers: { Authorization: `Bearer ${sql(stateA, "SELECT their_key FROM connections")[0].their_key}`, "Content-Type": "application/json" },
+  body: JSON.stringify({ type: "Note", content: "words Bob never wrote" }) });
+check("…and Ann's site can't change Bob's comment", notAnns.status === 404 && !sql(stateB, "SELECT text FROM comments").some((c) => c.text === "words Bob never wrote"));
 
 // Bob's site tells Ann's about the reply, because she commented there too: it's on her Notifications.
 check("Bob's site sends Ann a note about his reply", await waitFor(() => sql(stateA, "SELECT COUNT(*) AS n FROM inbox WHERE kind = 'comment'")[0].n === 1));
@@ -427,6 +460,17 @@ const everything = annZip.list.filter((f) => f.endsWith(".json")).map((f) => ann
 const annKeys = sql(stateA, "SELECT their_key, key_hash FROM connections")[0];
 check("no keys in the download", !everything.includes(annKeys.their_key) && !everything.includes(annKeys.key_hash) && !everything.includes("key_hash"));
 check("Ann's connections list Bob by address", annZip.json("connections.json").orderedItems[0]?.id === `${B}/`);
+
+// Bob changes a new post's words; Ann's Home shows it Edited, with what it said before.
+await compose(bob, B, "Off to the coast");
+await bob.goto(`${B}/posts`);
+await bob.click("main article.card:first-of-type > details.edit summary");
+await bob.$eval("main article.card:first-of-type > details.edit textarea", (t) => { t.value = "Off to the coast tomorrow"; });
+await Promise.all([bob.waitForNavigation(), bob.click("main article.card:first-of-type > details.edit button")]);
+await ann.goto(`${A}/`);
+const edited = await ann.$$eval("article.from-friend", (l) => l.map((a) => ({ text: a.querySelector(".text")?.textContent,
+  was: a.querySelector(":scope > details.edited")?.textContent ?? "" })).find((p) => p.text === "Off to the coast tomorrow"));
+check("Ann sees Bob's changed post, Edited, with what it said before", Boolean(edited) && edited.was.includes("Off to the coast"), JSON.stringify(edited));
 
 // Phone view of the Feed, then disconnect.
 await ann.setViewport({ width: 375, height: 800, isMobile: true });

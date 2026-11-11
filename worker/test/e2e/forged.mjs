@@ -31,6 +31,24 @@ check("a comment falsely claiming to be Ann's is left out", !shown.some((c) => c
 check("Ann's real comment shows the words her site kept", shown.find((c) => c.id === 3)?.text === "What Ann actually wrote" && shown.find((c) => c.id === 3).mine);
 check("other people's comments still show, not as Ann's", shown.find((c) => c.id === 4)?.mine === false);
 
+// Edits (edits.js): what a site says a post or comment said before is checked like everything else.
+const editedReply = (extra) => ({ ...reply(5, { type: "Person", name: "Cat" }, "now"), ...extra });
+const earlier = (n, at) => Array.from({ length: n }, (_, i) => ({ type: "Note", content: `was ${i}`, "afterwrd:replaced": at }));
+const edits = (extra) => cleanFeed(note([editedReply(extra)]), B).posts[0].comments[0];
+check("an edited comment shows its earlier words", edits({ updated: "2026-11-03T10:05:00Z", "afterwrd:earlier": earlier(1, "2026-11-03T10:05:00Z") })
+  .earlier?.[0]?.text === "was 0");
+check("at most 20 earlier versions are kept", edits({ updated: "2026-11-03T10:05:00Z", "afterwrd:earlier": earlier(500, "2026-11-03T10:04:00Z") }).earlier.length === 20);
+check("versions 'replaced' before the comment was written, or after its last change, are dropped",
+  edits({ updated: "2026-11-03T10:05:00Z", "afterwrd:earlier": [...earlier(1, "2026-11-03T09:00:00Z"), ...earlier(1, "2026-11-04T09:00:00Z")] }).earlier.length === 0);
+check("an 'edit' before the comment was written isn't believed", edits({ updated: "2026-11-01T00:00:00Z", "afterwrd:earlier": earlier(1, "2026-11-01T00:00:00Z") })
+  .edited_at === null);
+check("overlong earlier words are dropped", edits({ updated: "2026-11-03T10:05:00Z",
+  "afterwrd:earlier": [{ type: "Note", content: "x".repeat(2001), "afterwrd:replaced": "2026-11-03T10:04:00Z" }] }).earlier.length === 0);
+// Ann's own comment: her site's record of her words and edits, never what Bob's site claims she said before.
+const claimed = { ...feed.posts[0].comments.find((c) => c.id === 3), edited_at: 1762164300, earlier: [{ text: "words Ann never wrote", replaced_at: 1762164200 }] };
+const mineShown = (await markMine(db, 1, "post-1700000000-0b918c1b", [claimed], A))[0];
+check("Ann's own comment shows her own record of its edits, not Bob's site's", mineShown?.mine && !mineShown.edited_at && mineShown.earlier.length === 0);
+
 // A group's site (Bob's, group 7) as seen from Ann's: what it sends about the group, its posts and their comments.
 const group = { type: "Group", id: `${B}/groups/7`, name: "Walkers", attributedTo: { type: "Person", id: `${B}/`, name: "Bob" }, "afterwrd:members": 3 };
 const groupNote = (id, author, extra = {}) => ({ type: "Note", id, attributedTo: author, published: "2026-11-03T10:00:00Z", content: "Hi", ...extra });

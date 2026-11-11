@@ -440,6 +440,26 @@ Deletes comment `n` if, and only if, it came from the calling site's origin. Alw
 
 Source: `src/peers.js:162-166`, `test/e2e/feed.mjs:194-196`.
 
+### 5.8a `POST /_peer/comments/<n>/edit` (since 0.42.0)
+
+The calling site's owner changes the words of comment `n`, which they wrote:
+
+```json
+{"@context": "https://www.w3.org/ns/activitystreams", "type": "Note", "mediaType": "text/plain", "content": "Looks great, Bob! Where was it?"}
+```
+
+Receiver rules:
+
+- The comment must exist and have come from the calling site's origin. Otherwise `404 {"error": "That comment isn't there any more."}`.
+- `type` must be `Note`; `content` is normalised as in 5.7 and must be 1 to 2000 characters. Otherwise `400`.
+- It can be changed at most 10 times, only for 15 minutes after it was made, and only until someone else has commented after it on the same post or photo. The same author's later comments don't count. Otherwise `403 {"error": "A comment can only be changed 10 times, for 15 minutes, and until someone else comments after it."}`. The window and the order are checked in the same statement as the change.
+- The words it had are kept, and from then on the comment carries `updated` and `afterwrd:earlier` (6.5).
+- On success: `200 {"ok": true}`. The same words again: `200`, nothing changed.
+
+A site from before 0.42.0 answers `404 {"error": "Not found."}`, as for any unknown address; the calling site tells its owner that site can't change comments yet.
+
+Source: `src/peers.js`, `src/edits.js`, `src/feed.js` (editFriendComment).
+
 ### 5.9 `POST /_peer/notify`
 
 Receives a note. See section 8.
@@ -616,6 +636,7 @@ Source: `src/share.js:57-65`.
 | `afterwrd:kind` | Facebook's kind for a post from the download: one of `status`, `photo`, `video`, `link`, `checkin`, `shared` or `review`. Left out for a post written on afterwrd (since 0.41.0). Receivers default to `status`. |
 | `afterwrd:poll` | A poll the post asks (its `content` is the question): see below. Only on posts written on afterwrd (0.40.0). |
 | `replies` | Left out in `afterwrd:postedWith`, and for a post from the Facebook download, which takes no comments (since 0.41.0; 5.7). |
+| `updated`, `afterwrd:earlier` | Only on a post written on afterwrd whose words were changed (since 0.42.0): when, and what it said before, oldest first, as `{"type": "Note", "mediaType": "text/plain", "content", "afterwrd:replaced"}` (when those words were replaced). At most the newest 20. Words can be changed for 15 minutes after posting, and only until someone else comments on the post or answers its poll. |
 
 What a receiver accepts (`parseNote`). It drops the Note unless all of these hold:
 
@@ -722,6 +743,7 @@ What a receiver accepts (`parseThread`):
   - `content` is 2000 characters or fewer;
   - `published` parses.
 - It treats `attributedTo.id`, with its trailing slash removed, as the author's site only if it is a valid origin.
+- A comment whose words were changed (since 0.42.0; 5.8a) carries `updated` and `afterwrd:earlier`, as on a post (6.3). The receiver keeps at most 20 earlier versions, each 2000 characters or fewer, replaced no earlier than the comment was written and no later than `updated`; it ignores both fields if `updated` doesn't parse or is before `published`. For the owner's own comments it shows its own record of their words and edits, never the other site's.
 
 **Own comments rule (a receiver expectation).** When a site shows a friend's thread, it uses its own records for its owner's comments: the comment ids, and the text the friend's site returned when each comment was made.
 
@@ -1098,6 +1120,19 @@ Rules:
   member's site checks that the id is under that group. A group from before polls keeps the post without one and
   says nothing: the member's site then deletes it again and tells its owner the group needs updating.
 
+#### `POST /_group/posts/<m>/edit` and `POST /_group/comments/<k>/edit` (since 0.42.0)
+
+Body: `{"type": "Note", "mediaType": "text/plain", "content": "…"}`: new words for the calling member's own post or
+comment. Only whoever wrote it, never an admin or the owner for someone else. The rules are those of 5.8a: at most 10 times, for 15
+minutes after it was made; a post until someone else comments on it or answers its poll; a comment until someone else
+comments after it on the same post. An event's post isn't changed this way (`400`: it has its own edit, below). A post
+keeps its photos and poll; without photos it needs words; with a poll, its words (the question) too.
+
+It answers `200 {"ok": true}`; `404 {"error": "That isn't yours, or it's gone."}`; `403` once it can't be changed; `400`
+for words that won't do. What it said before is kept, and the post or comment then carries `updated` and
+`afterwrd:earlier` (6.3, 6.5) when members' sites read it. The member's own site keeps its own record of the change
+and shows that, not what the group says. A group's site from before 0.42.0 answers `404 {"error": "Not found."}`.
+
 #### `POST /_group/posts/<m>/delete` and `POST /_group/comments/<k>/delete`
 
 These answer `200 {"ok": true}`, or `404 {"error": "That isn't yours, or it's already gone."}`. Who may delete:
@@ -1459,6 +1494,7 @@ Notes on the "Auth" column:
 | GET | `/_peer/photos/<sha256>` | A friend's site | issued key (approved) | One photo or video, with comments and neighbours |
 | POST | `/_peer/comments` | A friend's site | issued key (approved) | Comment on a post or photo → `{id}` |
 | POST | `/_peer/comments/<n>/delete` | A friend's site | issued key (approved) | Delete its own comment |
+| POST | `/_peer/comments/<n>/edit` | A friend's site | issued key (approved) | Change its own comment's words (15 minutes) |
 | POST | `/_peer/notify` | A friend's site | issued key (approved) | A note (section 8) |
 | POST | `/_peer/message` | A friend's site | issued key (approved) | A message (5.14) |
 | POST | `/_peer/disconnect` | A friend's site | issued key (pending or approved) | Ends the connection |
@@ -1487,6 +1523,7 @@ Notes on the "Auth" column:
 | POST | `/_group/comments/<k>/delete` | A member's site | issued key (approved) | Delete a comment |
 | POST | `/_group/events/<m>/answer` | A member's site | issued key (approved) | `{answer}` → the event's post |
 | POST | `/_group/events/<m>/edit` | A member's site | issued key (approved, writer) | Change an event → the event's post |
+| POST | `/_group/(posts\|comments)/<n>/edit` | A member's site | issued key (approved, writer) | Change its own words (15 minutes) |
 | POST | `/_group/events/<m>/cancel` | A member's site | issued key (approved, writer, admin or owner) | Call an event off → the event's post |
 | POST | `/_group/leave` | A member's site | issued key (any, not the owner) | Leave, or withdraw a request |
 | POST | `/_group/chat` | A member's site | issued key (approved) | A message in the chat (9.9) |

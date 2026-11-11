@@ -7,6 +7,8 @@
 //   GET  /_peer/photos/<sha256>
 //   POST /_peer/comments                a Note inReplyTo a post or photo made on afterwrd: their owner comments on it
 //   POST /_peer/comments/<n>/delete     their owner deletes a comment they made
+//   POST /_peer/comments/<n>/edit       a Note: their owner changes a comment they made (15 minutes, until someone
+//                                       else comments after it: edits.js)
 //   POST /_peer/vote                    {inReplyTo: a post here, afterwrd:choices: [n…]}: their owner answers its poll
 //                                       (none takes it back); answers with the poll as they now see it (polls.js)
 //   POST /_peer/notify                  a note: something new on their site (notify.js)
@@ -22,8 +24,9 @@
 // other sites.
 import { commentId, CONTEXT, POST_KEY_RE, postId, tidy } from "../public/static/activity.js";
 import { commentable, findTarget, MAX_COMMENT } from "./archive/comments.js";
+import { editComment, versionsGone } from "./edits.js";
 import { notes, ownerActor, photoShared, postShared, shareAlbum, shareAlbums, sharePhoto, sharePosts } from "./share.js";
-import { json, now, sha256 } from "./util.js";
+import { json, now, Refusal, sha256 } from "./util.js";
 import { notifyComment, receiveNote } from "./notify.js";
 import { receiveIntroduction } from "./connect.js";
 import { receiveChecked, receiveCheckRequest } from "./checks.js";
@@ -213,7 +216,19 @@ export async function handlePeer(request, env, url, work) {
 
   const del = /^POST \/_peer\/comments\/(\d+)\/delete$/.exec(route);
   if (del) {
-    await db.prepare("DELETE FROM comments WHERE id = ? AND origin = ?").bind(Number(del[1]), peer.origin).run();
+    await db.batch([db.prepare("DELETE FROM comments WHERE id = ? AND origin = ?").bind(Number(del[1]), peer.origin), ...versionsGone(db)]);
+    return json({ ok: true });
+  }
+  const change = /^POST \/_peer\/comments\/(\d+)\/edit$/.exec(route);
+  if (change) {
+    const note = await request.json().catch(() => ({}));
+    try {
+      if (note?.type !== "Note") throw new Refusal("That isn't a comment.", 400);
+      await editComment(env, Number(change[1]), { origin: peer.origin }, note.content, MAX_COMMENT);
+    } catch (error) {
+      if (error instanceof Refusal) return json({ error: error.message }, error.status);
+      throw error;
+    }
     return json({ ok: true });
   }
   return json({ error: "Not found." }, 404);

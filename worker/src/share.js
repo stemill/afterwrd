@@ -6,7 +6,8 @@
 //   photo(hash)      one photo or video, with comments, the post it came with, and its neighbours
 // Photos and videos aren't sent: each comes with a link signed here ("afterwrd:fetch") that the friend's browser
 // loads straight from this site for the next hour or two (signedFile, checked in index.js).
-import { actorId, commentAuthor, commentNote, iso, mediaObject, postId } from "../public/static/activity.js";
+import { actorId, commentAuthor, commentNote, editedFields, iso, mediaObject, postId } from "../public/static/activity.js";
+import { postVersions } from "./edits.js";
 import { loadThreads } from "./archive/comments.js";
 import { mediaSet } from "./archive/routes.js";
 import { profilePictures } from "./photos.js";
@@ -97,6 +98,7 @@ export async function notes(env, site, posts, { replies = true, viewer = null } 
   const own = posts.filter((p) => p.source === "afterwrd");
   const threads = replies ? await loadThreads(db, own.map((p) => p.key)) : new Map();
   const polls = await sitePolls(db, own.map((p) => p.id), viewer);
+  const earlier = await postVersions(db, own.filter((p) => p.edited_at).map((p) => p.id));
   return Promise.all(posts.map(async (p) => ({
     type: "Note",
     id: postId(site, p.key),
@@ -112,6 +114,7 @@ export async function notes(env, site, posts, { replies = true, viewer = null } 
     tag: tags.results.filter((t) => t.post_id === p.id).map((t) => ({ type: "Mention", name: t.name })),
     location: p.place_name ? { type: "Place", name: p.place_name } : undefined,
     context: p.group_name ? { type: "Group", name: p.group_name } : undefined,
+    ...editedFields({ ...p, earlier: earlier.get(p.id) }),
     "afterwrd:kind": p.kind ?? undefined, // Facebook's; afterwrd's own posts have none
     "afterwrd:poll": polls.has(p.id) ? pollObject(polls.get(p.id)) : undefined,
     replies: threads.has(p.key) ? {

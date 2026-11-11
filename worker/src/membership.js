@@ -21,6 +21,7 @@
 //   POST /_groups/<id>/posts              {text, photos} (compose.js)
 //   POST /_groups/<id>/comments           post, text, back
 //   POST /_groups/<id>/(posts|comments)/<n>/delete    back
+//   POST /_groups/<id>/(posts|comments)/<n>/edit      text, back: their own words, while the group still lets them
 //   POST /_groups/<id>/leave
 //   POST /_groups/<id>/events             an event (the form in views.js): they're going, to start with
 //   POST /_groups/<id>/events/<m>/(answer|edit|cancel)    answer: going, maybe or no; edit: their own; cancel: as delete
@@ -31,7 +32,8 @@ import { CONTEXT, fileUrl, groupId, groupPostId, seconds } from "../public/stati
 import { MAX_COMMENT } from "./archive/comments.js";
 import { safeNext } from "./auth.js";
 import { ANSWERS, eventObject, parseEvent, readEventForm } from "./calendar.js";
-import { parseMedia } from "./friends.js";
+import { parseEdits, parseMedia } from "./friends.js";
+import { EDIT_SECONDS, mineVersions, mineVersionsGone } from "./edits.js";
 import { cleanName, cleanText, MAX_GROUP_ABOUT, MAX_GROUP_NAME, MAX_GROUP_PHOTOS, MAX_GROUP_TEXT } from "./groups.js";
 import { handleGroupSites } from "./groupsites.js";
 import { receiveGroupMessage } from "./messages.js";
@@ -69,7 +71,7 @@ function parseComments(collection, base, env) {
     const { name, from } = person(c?.attributedTo, env);
     const at = seconds(c?.published);
     return c?.type === "Note" && n && name && text(c.content, MAX_COMMENT) && at !== null
-      ? [{ id: Number(n[1]), name, from, text: c.content, created_at: at }] : [];
+      ? [{ id: Number(n[1]), name, from, text: c.content, created_at: at, ...parseEdits(c, at, MAX_COMMENT) }] : [];
   });
 }
 
@@ -92,6 +94,7 @@ export function parseGroupNote(note, site, n, env) {
   const attachments = Array.isArray(note.attachment) ? note.attachment.slice(0, 20) : [];
   return {
     id: Number(id), created_at: at, text: text(note.content, MAX_GROUP_TEXT * 2) || null, name, from,
+    ...parseEdits(note, at, MAX_GROUP_TEXT * 2),
     photos: attachments.map((m) => parseMedia(m, site)).filter(Boolean),
     comments: parseComments(note.replies, note.id, env),
     commentCount: count(note.replies?.totalItems) ?? 0, // the group sends only the newest with a page of posts
@@ -142,8 +145,14 @@ export function parseGroupMembers(data, site, n, env) {
  * claiming to be from this site is left out.
  */
 export async function markMine(db, group, posts, ownOrigin) {
-  const { results } = await db.prepare(`SELECT kind, post_id, remote_id, text, photos, event, poll, created_at FROM group_mine
+  const { results } = await db.prepare(`SELECT id, kind, post_id, remote_id, text, photos, event, poll, created_at, edited_at FROM group_mine
     WHERE site = ? AND remote_group = ?`).bind(group.origin, group.remote_id).all();
+  // Their own record of changing their words (never what the group says they said before).
+  const earlier = await mineVersions(db, results.filter((r) => r.edited_at).map((r) => r.id));
+  const edits = (sent) => ({ edited_at: sent.edited_at, earlier: earlier.get(sent.id) ?? [] });
+  // Whether they can still change it, as the group will decide (edits.js), so the page only offers what works: new
+  // enough, not an event, and nobody else has commented after it (or answered it).
+  const fresh = (sent) => sent.created_at > now() - EDIT_SECONDS;
   const posted = new Map(results.filter((r) => r.kind === "post").map((r) => [r.remote_id, r]));
   const said = new Map(results.filter((r) => r.kind === "comment").map((r) => [`${r.post_id}:${r.remote_id}`, r]));
   const hashes = (sent) => { try { return new Set(JSON.parse(sent.photos ?? "[]")); } catch { return new Set(); } };
@@ -168,11 +177,18 @@ export async function markMine(db, group, posts, ownOrigin) {
   return posts.flatMap((p) => {
     const sent = posted.get(p.id);
     if (!sent && p.from === ownOrigin) return [];
+    const others = p.comments.filter((c) => !said.has(`${p.id}:${c.id}`));
+    const answeredByOthers = p.poll && p.poll.voters > (p.poll.answered ? 1 : 0);
     const post = sent ? { ...p, mine: true, text: sent.text, created_at: sent.created_at, photos: p.photos.filter((m) => hashes(sent).has(m.hash)),
-      event: event(sent, p.event), poll: poll(sent, p.poll) } : { ...p, mine: false, poll: theirs(p.poll) };
+      event: event(sent, p.event), poll: poll(sent, p.poll), ...edits(sent),
+      editable: fresh(sent) && !p.event && !others.length && p.commentCount <= p.comments.length && !answeredByOthers }
+      : { ...p, mine: false, poll: theirs(p.poll) };
     return [{ ...post, comments: p.comments.flatMap((c) => {
       const kept = said.get(`${p.id}:${c.id}`);
-      if (kept) return [{ ...c, mine: true, text: kept.text, created_at: kept.created_at }];
+      if (kept) {
+        return [{ ...c, mine: true, text: kept.text, created_at: kept.created_at, ...edits(kept),
+          editable: fresh(kept) && !others.some((o) => o.id > c.id) }];
+      }
       return c.from === ownOrigin ? [] : [{ ...c, mine: false }];
     }) }];
   });
@@ -523,6 +539,34 @@ export async function cancelEvent(env, site, group, id) {
   }
 }
 
+/**
+ * Changes the words of the owner's own post or comment in a group (`kind`: posts or comments). The group decides
+ * whether it still can be (edits.js there); then the owner's own copy changes too, keeping what it said before.
+ */
+export async function editInGroup(env, group, kind, id, words) {
+  const db = env.DB;
+  const mine = await db.prepare("SELECT * FROM group_mine WHERE site = ? AND remote_group = ? AND kind = ? AND remote_id = ?")
+    .bind(group.origin, group.remote_id, kind === "posts" ? "post" : "comment", Number(id)).first();
+  if (!mine) throw new Refusal("That isn't yours.");
+  const max = kind === "posts" ? MAX_GROUP_TEXT : MAX_COMMENT;
+  if (words.length > max) throw new Refusal(`That can be up to ${max} characters.`);
+  if (words === (mine.text ?? "")) return;
+  try {
+    await call(group, `/_group/${kind}/${Number(id)}/edit`, { "@context": CONTEXT, type: "Note", mediaType: "text/plain", content: words });
+  } catch (error) {
+    // A group's site from before editing answers an unknown address with "Not found.".
+    if (error.status === 404 && error.message === "Not found.") {
+      throw new Refusal(`${group.name}'s site can't change posts or comments yet. Its owner can update it from their Update page.`);
+    }
+    throw new Refusal(`Couldn't change it: ${error.message}`);
+  }
+  const at = now();
+  await db.batch([
+    db.prepare("INSERT INTO group_mine_versions (mine_id, text, replaced_at) VALUES (?, ?, ?)").bind(mine.id, mine.text, at),
+    db.prepare("UPDATE group_mine SET text = ?, edited_at = ? WHERE id = ?").bind(words || null, at, mine.id),
+  ]);
+}
+
 /** Deletes a post or comment (`kind`: posts or comments): the owner's own, or, running the group, anyone's. */
 export async function deleteInGroup(env, group, kind, id) {
   try {
@@ -534,6 +578,7 @@ export async function deleteInGroup(env, group, kind, id) {
     env.DB.prepare("DELETE FROM group_mine WHERE site = ? AND remote_group = ? AND kind = ? AND remote_id = ?")
       .bind(group.origin, group.remote_id, kind === "posts" ? "post" : "comment", Number(id)),
     ...(kind === "posts" ? [env.DB.prepare("DELETE FROM group_plans WHERE group_id = ? AND post_id = ?").bind(group.id, Number(id))] : []),
+    mineVersionsGone(env.DB),
   ]);
 }
 
@@ -604,6 +649,7 @@ export async function handleGroupActions(request, env, url) {
   let back = new URL(safeNext(String(form.get("back") ?? home), url), site);
   const members = new URL(`${home}/members`, site);
   const del = /^\/(posts|comments)\/(\d{1,15})\/delete$/.exec(action);
+  const change = /^\/(posts|comments)\/(\d{1,15})\/edit$/.exec(action);
   const ev = /^\/events\/(\d{1,15})\/(answer|edit|cancel)$/.exec(action);
   const polled = /^\/polls\/(\d{1,15})\/(vote|close)$/.exec(action);
   const decision = /^\/members\/(\d{1,15})\/(approve|decline|remove|admin|member)$/.exec(action);
@@ -614,6 +660,9 @@ export async function handleGroupActions(request, env, url) {
       if (made) back.hash = `g${post}-${made.id}`;
     } else if (del) {
       await deleteInGroup(env, group, del[1], del[2]);
+    } else if (change) {
+      await editInGroup(env, group, change[1], change[2], cleanText(String(form.get("text") ?? "")));
+      back.hash = change[1] === "posts" ? `gp${change[2]}` : `g${String(form.get("post") ?? "")}-${change[2]}`;
     } else if (action === "/events" || ev?.[2] === "edit") {
       const read = readEventForm(form, request.cf?.timezone);
       if (read.error) return problem(read.error, back);

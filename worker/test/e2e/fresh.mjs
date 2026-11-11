@@ -76,6 +76,13 @@ await page.goto(`${BASE}/photos`);
 check("Photos shows only the afterwrd album", (await albums()).join() === "Posted on afterwrd", (await albums()).join());
 check("imported photo sets stay hidden", (await page.goto(`${BASE}/photos/album/other`)).status() === 404
   && (await page.goto(`${BASE}/photos/tagged`)).status() === 404);
+// Nothing imported points at a row the import didn't bring (albums, with Photos left out): a later album can't pick
+// Facebook's photos up.
+const rows = (q) => JSON.parse(execFileSync("./node_modules/.bin/wrangler", ["d1", "execute", "afterwrd", "--local", "--json", "--command", q],
+  { cwd: WORKER, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }))[0].results;
+check("imported photos don't point at albums that weren't imported", rows(`SELECT COUNT(*) AS n FROM media WHERE source = 'facebook'
+  AND album_id IS NOT NULL AND album_id NOT IN (SELECT id FROM albums WHERE source = 'facebook')`)[0].n === 0
+  && rows("SELECT COUNT(*) AS n FROM media WHERE source = 'facebook'")[0].n > 0);
 
 // With no picture chosen here, Facebook's profile picture and cover (from the download) are used.
 const sql = (q) => execFileSync("./node_modules/.bin/wrangler", ["d1", "execute", "afterwrd", "--local", "--command", q],
