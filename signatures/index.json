@@ -1,11 +1,16 @@
 {
-  "seq": 1,
+  "seq": 2,
   "releases": [
+    {
+      "version": "0.39.1",
+      "manifest_sha256": "a20616063ae209f35bcde57e18ac899b88bc6f878997d8ccff8e6672003c130f",
+      "signed_at": "2026-11-11T01:11:35Z"
+    },
     {
       "version": "0.39.0",
       "manifest_sha256": "7b959cb058510dc64f10233b635bc277db09db1feb6f1e8985a0eb97879b5f48",
       "signed_at": "2026-11-11T00:40:20Z"
     }
   ],
-  "signature": "8cdTEhkUwhaIxkxDCP+o9iLbtT4kwlm8Moj0CFfRz4+DXZ1zRD9RBj33Yg7/JFoXD9WwXkHjiGHUOuuKHgK5AA=="
+  "signature": "hKrFm0etRBDGhPbpA3hraSTMmbh40nJtUIc/pQ3dLbBNW6F/gg+e5q/9+I7f5eQG7q+Hvrz949EFwzAlp+3LAw=="
 }
