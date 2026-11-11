@@ -119,8 +119,9 @@ photos and videos. To check a release for yourself, see [Check it yourself](SECU
   shared until you approve the request on *Friends*.
 - **Photo locations are removed** from photos you post, and left out of a Facebook import unless you tick *Photo
   locations*; they can show where you live.
-- **Keep it up to date.** The owner's *Update* page installs a newer release, keeping your passkeys, connections
-  and archive. (Pasting a newer `installer.js` over your afterwrd Worker does the same.) Home says so when an update
+- **Keep it up to date.** Turn on automatic updates (one *Allow*, on the *Update* page) and the site installs each
+  signed release by itself after a few days. Otherwise the owner's *Update* page installs a newer release, keeping
+  your passkeys, connections and archive. (Pasting a newer `installer.js` over your afterwrd Worker does the same.) Home says so when an update
   fixes a security problem. To hear about every release, *Watch* the repository on GitHub (*Custom* → *Releases*) or
   follow its [releases feed](https://github.com/stemill/afterwrd/releases.atom).
 - **Watch for new devices.** When a passkey is added, Home on your other devices says so for two weeks. If it
@@ -185,7 +186,8 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   details phones hide in them (such as where a photo was taken), and they're collected in a *Posted on
   afterwrd* album. Importing again keeps them; deleting a post deletes its photos and comments.
 - **Update** (marked when a new version is out) shows what's new and installs it: press *Connect Cloudflare*,
-  *Allow* on Cloudflare's page, and it goes ahead. The connection lasts an hour and nothing is kept; sites updated
+  *Allow* on Cloudflare's page, and it goes ahead, switching straight back if the new version doesn't work. It's
+  also where automatic updates are turned on or off, with what's coming next and what last happened. The connection lasts an hour and nothing is kept; sites updated
   from versions before 0.20.0 are offered *Forget it* for the token they used to remember.
 - **Download everything** (the download icon) saves the whole site as one zip: posts, photos and videos,
   albums, comments (those written here, and yours on friends' sites), likes, friends and connections, as

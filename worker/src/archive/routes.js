@@ -16,6 +16,7 @@ import { newDevices } from "../admin.js";
 import { newPushDevices } from "../push.js";
 import { checkRequests, lastChecked, recentChecks } from "../checks.js";
 import { securityFixWaiting, waitingRelease } from "../update.js";
+import { autoState } from "../auto.js";
 import { now, pageData, withoutKeys } from "../util.js";
 import { fmtDate, fmtMonth } from "../views/format.js";
 import * as views from "../views/archive.js";
@@ -511,6 +512,7 @@ async function home(ctx, params) {
   return {
     own, feed: friendsFeed, onThisDay: await onThisDay(ctx, 2), friends: friendsFeed.connections,
     newDevices: await newDevices(db, ctx.user), newNotifying: await newPushDevices(db), securityFix: await securityFixWaiting(db),
+    auto: await autoState(db), // automatic updates (auto.js): offered once, and anything that needs the owner
     // Until it's been checked (by a friend's site, or the owner themselves: checks.js), Home suggests a check.
     unchecked: !(await lastChecked(db)),
     // Friends asking for their site to be checked: one tap makes the link to send back (checks.js).

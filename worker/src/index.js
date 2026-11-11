@@ -25,6 +25,7 @@ import { html } from "./util.js";
 import { handleLive } from "./live.js";
 import { handleMessages } from "./messages.js";
 import { handlePush } from "./push.js";
+import { handleAutoConnect, handleAutoStep, health, runAuto } from "./auto.js";
 
 export { MediaStore } from "./media.js";
 export { Outbox } from "./outbox.js";
@@ -48,6 +49,10 @@ export default {
     for (const [name, value] of Object.entries(HEADERS)) headers.set(name, value);
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   },
+  // The daily run of automatic updates (auto.js), at the time set when they were turned on. Group Workers have none.
+  async scheduled(event, env, work) {
+    if (!env.GROUP_KEY) work.waitUntil(runAuto(env));
+  },
 };
 
 async function route(request, env, work) {
@@ -56,9 +61,14 @@ async function route(request, env, work) {
   if (env.GROUP_KEY) return routeGroup(request, env, url);
   // Which uploaded version of the Worker is answering at this address: public, as it says nothing but an ID Cloudflare
   // made up. A friend's check (checks.js) compares it with what Cloudflare says, to be sure it read the right Worker.
+  // With ?health=1, also a few typical reads: what an update waits for before it counts (auto.js). The migrations have
+  // already run by now, as for every request.
   if (url.pathname === "/_version" && request.method === "GET") {
-    return new Response(JSON.stringify({ id: env.VERSION?.id ?? null }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+    const answer = url.searchParams.has("health") ? await health(env) : { id: env.VERSION?.id ?? null };
+    return new Response(JSON.stringify(answer), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
   }
+  // The steps of an automatic update, asked for by the site's own daily run with a key only it has (auto.js).
+  if (url.pathname.startsWith("/_auto/")) return handleAutoStep(request, env, url);
   if (url.pathname.startsWith("/_auth/")) return handleAuth(request, env, url);
   // A friend's Connect link, and their site's calls once connected, which carry a key instead of a session.
   if (url.pathname.startsWith("/_connect/")) return handleConnectLink(request, env, url);
@@ -88,6 +98,8 @@ async function route(request, env, work) {
   }
   if (url.pathname === "/_admin" || url.pathname.startsWith("/_admin/")) return handleAdmin(request, env, url, user);
   // Connecting to Cloudflare, for updating and groups (an hour's token in a cookie; cloudflare.js).
+  // Background access for automatic updates is a Connect of its own (auto.js).
+  if (url.pathname.startsWith("/_cloudflare/auto-")) return (await handleAutoConnect(request, env, url)) ?? new Response("Not found", { status: 404 });
   if (url.pathname.startsWith("/_cloudflare/")) return (await handleCloudflare(request, env, url)) ?? new Response("Not found", { status: 404 });
   if (url.pathname === "/_comments" || url.pathname.startsWith("/_comments/")) return handleComments(request, env, url, user);
   if (url.pathname === "/_live") return handleLive(request, env, url, user, work);

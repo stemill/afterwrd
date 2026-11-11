@@ -448,6 +448,11 @@ function expected(e, script, created) {
   switch (`${e.type} ${e.what}`) {
     case "create workers/scripts.assets-upload-session": case "update workers/scripts": case "delete workers/scripts":
     case "create workers/scripts.subdomain": return ours;
+    // Updates since 0.39 (auto.js, update.js): a version staged, then made live (or put back), and the daily schedule
+    // automatic updates run at. The live version's code is checked above whatever the log says.
+    // TODO before release: confirm these names against a real audit log (docs/security-and-install-plan.md, section 6).
+    case "create workers/scripts.versions": case "create workers/scripts.deployments":
+    case "update workers/scripts.schedules": return ours;
     // Making and deleting databases (a site's, a group's); never a query, which could change what's in one.
     case "create d1/database": case "delete d1/database": return !/query/i.test(e.description);
     // A brand-new account's workers.dev name, set by the installer at install.afterwrd.app just before it made the

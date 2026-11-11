@@ -28,7 +28,7 @@
   a { color: var(--accent-strong); }
   .meta { color: var(--muted); font-size: 0.9rem; }
   #error:empty { display: none; }
-  #ask[hidden], #ask-check[hidden] { display: none; }
+  #ask[hidden], #ask-check[hidden], #ask-auto[hidden] { display: none; }
   #host, #check-host { font: 800 1.15rem/1.3 var(--round); word-break: break-all; }
   button { display: inline-block; padding: 10px 18px; border: 0; border-radius: 999px; background: var(--text); color: var(--bg);
     font: inherit; font-weight: 700; cursor: pointer; margin-top: 8px; }
@@ -45,6 +45,17 @@
   only ever for <b>your own</b> site: check this is its address. Cloudflare's next page says what's being asked for, but
   not which site it's for: only this page does. If this isn't your own site, close this tab.</p>
   <p><button id="continue">Continue to Cloudflare</button></p>
+</section>
+<section id="ask-auto" hidden>
+  <p>Let your afterwrd site keep itself up to date?</p>
+  <p id="auto-host"></p>
+  <p class="meta">It's asking Cloudflare for <b>lasting</b> Background Access to change your Workers (Workers Editor), so it
+  can install each new afterwrd release by itself once it's been out for a few days. Unlike installing, this doesn't end
+  after an hour: it lasts until you turn it off. Nothing else: it can't make or read
+  databases, read your account's settings or make tokens. Turn it off any time on the site's Update page, or in
+  Cloudflare (My Profile → Access Management → Connected Applications). Only continue if this is <b>your own</b> site's
+  address.</p>
+  <p><button id="continue-auto">Continue to Cloudflare</button></p>
 </section>
 <section id="ask-check" hidden>
   <p>Let this friend's afterwrd site check yours?</p>
@@ -64,9 +75,12 @@
   //                      Admin", because "Workers Editor" can't create a Worker.
   //   /_check/done       a friend's site checking yours (worker/src/checks.js): read-only, your Workers' code and the
   //                      account's settings and audit log.
+  //   /_cloudflare/auto-done  your own site keeping itself up to date (worker/src/auto.js): Background Access to change
+  //                      Workers (Workers Editor) and nothing else: no databases, no account settings, no tokens.
   const SCOPES = {
     "/_cloudflare/done": "workers-scripts.admin d1.write account-settings.read",
     "/_check/done": "workers-scripts.content_read account-settings.read",
+    "/_cloudflare/auto-done": "offline_access workers-scripts.edit",
   };
   const KEY = "afterwrd-connect";
   const status = document.getElementById("status");
@@ -103,11 +117,12 @@
       }
       if (!problem.textContent) {
         // The one place the person can see which site is being connected, so it asks before going on.
-        const checking = site.pathname === "/_check/done";
+        const kind = { "/_check/done": ["check-host", "ask-check", "continue-check"],
+          "/_cloudflare/auto-done": ["auto-host", "ask-auto", "continue-auto"] }[site.pathname] ?? ["host", "ask", "continue"];
         status.textContent = "";
-        document.getElementById(checking ? "check-host" : "host").textContent = site.host;
-        document.getElementById(checking ? "ask-check" : "ask").hidden = false;
-        document.getElementById(checking ? "continue-check" : "continue").addEventListener("click", () => {
+        document.getElementById(kind[0]).textContent = site.host;
+        document.getElementById(kind[1]).hidden = false;
+        document.getElementById(kind[2]).addEventListener("click", () => {
           const auth = new URL("https://dash.cloudflare.com/oauth2/auth");
           auth.searchParams.set("response_type", "code");
           auth.searchParams.set("client_id", CLIENT_ID);

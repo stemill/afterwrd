@@ -145,7 +145,39 @@ export function existingDatabase(settings) {
  * update keeps the Worker's existing secrets. The photo store's class is only created if the Worker hasn't got
  * it yet, so photos already stored are untouched.
  */
-export async function deployVersion(token, account, script, release, { jwt, databaseId, settings, secrets = {} }) {
+export async function deployVersion(token, account, script, release, options) {
+  const { metadata } = releaseMetadata(release, options);
+  await api(token, `/accounts/${account}/workers/scripts/${script}`, { method: "PUT", body: await releaseForm(release, metadata) });
+}
+
+/**
+ * Uploads the release's code as a new version of `script` WITHOUT making it live (Cloudflare's Worker versions), and
+ * returns its id: nothing runs it, and the database isn't touched, until switchTo() makes it live. Refuses a release
+ * that adds a Durable Object class (a new store), which Cloudflare only accepts as a direct deploy (`needsHand`).
+ */
+export async function stageVersion(token, account, script, release, options) {
+  const { metadata, newClasses } = releaseMetadata(release, options);
+  if (newClasses.length) throw Object.assign(new Error("This release adds a new kind of store, so it has to be installed by hand."), { needsHand: true });
+  const result = await api(token, `/accounts/${account}/workers/scripts/${script}/versions`, { method: "POST", body: await releaseForm(release, metadata) });
+  if (typeof result?.id !== "string") throw new Error("Cloudflare didn't say which version it made.");
+  return result.id;
+}
+
+/** The one version serving all of `script`'s visitors, or null if it's more than one (or none). */
+export async function liveVersion(token, account, script) {
+  const serving = (await api(token, `/accounts/${account}/workers/scripts/${script}/deployments`))?.deployments?.[0]?.versions ?? [];
+  return serving.length === 1 && serving[0].percentage === 100 && typeof serving[0].version_id === "string" ? serving[0].version_id : null;
+}
+
+/** Makes version `id` of `script` serve everyone. */
+export async function switchTo(token, account, script, id) {
+  await api(token, `/accounts/${account}/workers/scripts/${script}/deployments`, {
+    method: "POST", body: JSON.stringify({ strategy: "percentage", versions: [{ version_id: id, percentage: 100 }] }),
+  });
+}
+
+/** What Cloudflare is sent with the release's code (and the store classes it would add), for deploying or staging. */
+function releaseMetadata(release, { jwt, databaseId, settings, secrets = {} }) {
   const { manifest } = release;
   const hasStore = (name) => settings.bindings?.some((b) => b.type === "durable_object_namespace" && b.class_name === name);
   const newClasses = manifest.migrations.new_sqlite_classes.filter((name) => !hasStore(name));
@@ -166,13 +198,16 @@ export async function deployVersion(token, account, script, release, { jwt, data
     assets: { jwt, config: manifest.assets_config },
   };
   if (newClasses.length) metadata.migrations = { new_tag: manifest.migrations.new_tag, new_sqlite_classes: newClasses };
+  return { metadata, newClasses };
+}
 
+async function releaseForm(release, metadata) {
   const form = new FormData();
   form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
-  for (const module of manifest.modules) {
+  for (const module of release.manifest.modules) {
     form.append(module.name, new File([await release.file(module.sha256)], module.name, { type: module.type }));
   }
-  await api(token, `/accounts/${account}/workers/scripts/${script}`, { method: "PUT", body: form });
+  return form;
 }
 
 async function downloadWithRetries(url, tries) {

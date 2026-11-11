@@ -121,6 +121,19 @@ if (built !== assetHashes() || built !== `${JSON.stringify(Object.fromEntries(as
   process.exit(1);
 }
 
+// A new kind of store (Durable Object class) can't be installed carefully: Cloudflare only takes one in a deploy that
+// goes live at once, without the staging, health check and switching back every other update gets, and it may not
+// allow going back past it. So new storage goes into the existing stores as tables (the vault in an Outbox object, for
+// one). If a new class is ever truly needed, release it first with nothing using it, with --new-store, and start using
+// it in the release after (docs/security-and-install-plan.md, section 6).
+const STORES = ["MediaStore", "Outbox"];
+const newStores = config.migrations.flatMap((m) => m.new_sqlite_classes ?? []).filter((name) => !STORES.includes(name));
+if (newStores.length && !args.includes("--new-store")) {
+  console.error(`This release adds a new kind of store (${newStores.join(", ")}), which every site would have to install by hand,`
+    + " with no check or way back. Put the storage in an existing store instead, or see the note in scripts/release.mjs.");
+  process.exit(1);
+}
+
 const manifest = {
   name: "afterwrd",
   version,

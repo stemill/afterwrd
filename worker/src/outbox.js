@@ -1,4 +1,6 @@
-// Notes waiting to go to other sites (notify.js), sent a batch at a time by this Durable Object's alarm: to friends'
+// Notes waiting to go to other sites (notify.js), sent a batch at a time by this Durable Object's alarm (and, apart
+// from them, in a separate object of this class named "vault", the few secrets the site keeps for automatic updates:
+// auto.js, the vault table below): to friends'
 // sites (POST /_peer/notify) and, in a group's Worker, to its members' sites (POST /_member/notify). Also messages
 // to friends (messages.js, POST /_peer/message) that couldn't be delivered straight away: those go first, and the
 // message here is marked delivered, or not delivered and why, when that's known. One request
@@ -40,6 +42,22 @@ export class Outbox extends DurableObject {
         tries INTEGER NOT NULL DEFAULT 0, due INTEGER NOT NULL
       )`);
     }
+    // Secrets the site keeps for itself (auto.js), only ever in the object named "vault", never the "outbox" one: the
+    // background grant's refresh token, which changes at every use (so it can't be a Worker secret: changing one makes
+    // a new version), and the key its own update steps carry. Here rather than in D1, so they're never in an export, a
+    // restored database or anything a page reads.
+    this.sql.exec("CREATE TABLE IF NOT EXISTS vault (name TEXT PRIMARY KEY, value TEXT NOT NULL)");
+  }
+
+  /** A secret kept here (auto.js), or null. */
+  secret(name) {
+    return this.sql.exec("SELECT value FROM vault WHERE name = ?", name).toArray()[0]?.value ?? null;
+  }
+
+  /** Keeps a secret here, replacing any of that name; null deletes it. */
+  keepSecret(name, value) {
+    if (value === null) this.sql.exec("DELETE FROM vault WHERE name = ?", name);
+    else this.sql.exec("INSERT INTO vault (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value", name, value);
   }
 
   /** Queues `body` for each connection id (friends' sites), and sees that the alarm will send it. */

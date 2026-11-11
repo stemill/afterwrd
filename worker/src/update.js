@@ -7,6 +7,9 @@
 //   POST /_admin/update/assets     {token?, account, tag} -> upload the release's site files
 //   POST /_admin/update/deploy     {token?, account, tag, jwt} -> the new version
 //   POST /_admin/update/forget     delete UPDATE_TOKEN, a token an earlier version remembered (no longer used)
+//   POST /_admin/update/auto-off   turn automatic updates off (auto.js; turning them on is a Connect of its own)
+// An update is staged and then switched by this version, which puts itself back if the new one doesn't answer
+// healthily within a few minutes (auto.js switchCarefully), as automatic updates are.
 //   POST /_admin/update/group-assets  {token?, group} -> upload this version's site files for a group this site made
 //   POST /_admin/update/group-deploy  {token?, group, jwt} -> bring that group's Worker up to this site's version
 // Without a token in the request, the connected one is used. Groups (groupsites.js) follow their owner's site: once
@@ -15,7 +18,9 @@
 // the release's manifest; as with installing, trust rests on that repository.
 import pkg from "../package.json";
 import { connectedToken, tokenFor } from "./cloudflare.js";
-import { api, deployVersion, existingDatabase, findWorker, loadRelease, uploadAssets } from "./deploy.js";
+import { api, deployVersion, existingDatabase, findWorker, loadRelease, stageVersion, uploadAssets } from "./deploy.js";
+import { autoState, backgroundToken, healthCheck, laterAuto, runAuto, switchCarefully, turnOff } from "./auto.js";
+import { releaseKey } from "./signing.js";
 import { GROUP_RELEASE, isGroupWorker } from "./groupsites.js";
 import { html, json, now, pageData } from "./util.js";
 import { updatePage } from "./views/update.js";
@@ -41,6 +46,21 @@ export async function handleUpdate(request, env, url, owner) {
   if (request.method === "GET" && path === "/version") return json({ version: VERSION });
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
 
+  if (path === "/auto-later") { // "Not now" on Home's offer of automatic updates: the Update page still has it
+    if (request.headers.get("Origin") !== url.origin) return json({ error: "Request from another site" }, 403);
+    await laterAuto(env);
+    return Response.redirect(`${url.origin}/`, 303);
+  }
+  if (path === "/auto-now") { // "Look for an update now": the daily run, straight away (the owner waits for it)
+    if (request.headers.get("Origin") !== url.origin) return json({ error: "Request from another site" }, 403);
+    await runAuto(env);
+    return Response.redirect(`${url.origin}/_admin/update#auto`, 303);
+  }
+  if (path === "/auto-off") {
+    if (request.headers.get("Origin") !== url.origin) return json({ error: "Request from another site" }, 403);
+    await turnOff(env, url);
+    return Response.redirect(`${url.origin}/_admin/update#auto`, 303);
+  }
   const body = await request.json().catch(() => ({}));
   if (path === "/group-assets" || path === "/group-deploy") return updateGroup(request, env, path, body);
   try {
@@ -60,7 +80,7 @@ export async function handleUpdate(request, env, url, owner) {
       await api(token, `/accounts/${account}/workers/scripts/${script}/secrets/UPDATE_TOKEN`, { method: "DELETE" });
       return json({ ok: true });
     }
-    const token = tokenFor(request, body);
+    const token = await updateToken(request, env, url, body);
     if (path !== "/check" && !/^[0-9a-f]{32}$/.test(body.account ?? "")) throw new Error("Unknown Cloudflare account.");
     const release = () => loadRelease(`https://github.com/${REPO}/releases/download/${body.tag}`);
     if (path === "/check") return json({ account: (await findWorker(token, url.hostname)).account });
@@ -75,13 +95,42 @@ export async function handleUpdate(request, env, url, owner) {
       const settings = await api(token, `/accounts/${body.account}/workers/scripts/${script}/settings`);
       const databaseId = existingDatabase(settings);
       if (!databaseId) throw new Error("This Worker doesn't look like afterwrd, so it wasn't updated.");
-      await deployVersion(token, body.account, script, await release(), { jwt: body.jwt, databaseId, settings });
+      const loaded = await release();
+      // Staged, then switched by this (the old) version, which puts itself back if the new one doesn't answer
+      // healthily (auto.js switchCarefully). A release that adds a new kind of store can't be staged: deployed directly.
+      let versionId;
+      try {
+        versionId = await stageVersion(token, body.account, script, loaded, { jwt: body.jwt, databaseId, settings });
+      } catch (error) {
+        if (!error.needsHand) throw error;
+        await deployVersion(token, body.account, script, loaded, { jwt: body.jwt, databaseId, settings });
+        return json({ ok: true });
+      }
+      const switched = await switchCarefully(env, url.origin, token, body.account, script, versionId, healthCheck(env, url.origin), env.VERSION?.id);
+      if (switched.result !== "done") {
+        throw new Error(`afterwrd ${body.tag.slice(1)} didn't ${switched.result === "unhealthy" ? "work" : "start"} on this site, so it was put back as it was.`
+          + " Nothing in it has changed. Please tell whoever looks after afterwrd.");
+      }
       return json({ ok: true });
     }
   } catch (error) {
     return json({ error: error.message }, 400);
   }
   return new Response("Not found", { status: 404 });
+}
+
+/**
+ * The token an update step uses: one pasted or from Connect, as before, or, while automatic updates are on, one from
+ * their background access, so the owner needn't connect at all.
+ */
+async function updateToken(request, env, url, body) {
+  try {
+    return tokenFor(request, body);
+  } catch (error) {
+    const background = await backgroundToken(env, url.origin);
+    if (background) return background;
+    throw error;
+  }
 }
 
 /** What the Update page shows: this version, the latest release, groups behind, and asking a friend for a check. */
@@ -94,6 +143,7 @@ async function updateData(request, env, url, owner) {
     securityFix: latest.securityFix && newer(latest.securityFix, VERSION) ? latest.securityFix : null,
     site: url.host, connected: Boolean(connectedToken(request)), oldToken: Boolean(env.UPDATE_TOKEN), groups: await groupsBehind(env.DB),
     go: url.searchParams.get("go"), checked: await lastChecked(env.DB), checkWait: tooSoonToCheck(env),
+    auto: { ...(await autoState(env.DB)), signed: Boolean(releaseKey(env, url.origin)) },
     friends: (await env.DB.prepare(`SELECT id, name FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NOT NULL
       AND their_key IS NOT NULL ORDER BY name COLLATE NOCASE LIMIT 200`).all()).results,
   };
@@ -111,12 +161,12 @@ async function madeGroups(db) {
 }
 
 /** Those of them running an older version than this site. */
-const groupsBehind = async (db) => (await madeGroups(db)).filter((g) => g.version && newer(VERSION, g.version));
+export const groupsBehind = async (db) => (await madeGroups(db)).filter((g) => g.version && newer(VERSION, g.version));
 
 /** Brings a group this site made up to this site's version: its files, then its code (keeping its database and secrets). */
 async function updateGroup(request, env, path, body) {
   try {
-    const token = tokenFor(request, body);
+    const token = await updateToken(request, env, new URL(request.url), body);
     const group = (await groupsBehind(env.DB)).find((g) => g.id === Number(body.group));
     if (!group || !/^[0-9a-f]{32}$/.test(group.account)) throw new Error("That group is already up to date, or couldn't be reached.");
     const release = await loadRelease(GROUP_RELEASE);

@@ -75,8 +75,9 @@ same browser, with the account you installed into.</p>
     start later appears here as a Worker of its own.</li>
     <li><b><a href="https://dash.cloudflare.com/?to=/:account/workers/d1" target="_blank" rel="noopener">D1</a></b>: one database with
     your site's name (and later one per group).</li>
-    <li>Nothing else you didn't make yourself. afterwrd doesn't use scheduled (cron) triggers, custom domains, or any
-    other Cloudflare product.</li>
+    <li>Nothing else you didn't make yourself. afterwrd doesn't use custom domains or any other Cloudflare product.
+    The one scheduled (cron) trigger it sets, once a day on your site's Worker, is there only if you've turned on
+    automatic updates.</li>
   </ul>
 </section>
 
@@ -95,8 +96,10 @@ same browser, with the account you installed into.</p>
   </ol>
   <p>If you used Cloudflare's Deploy page instead, it starts with the Deploy page making the installer (marked
   <i>Dashboard</i>) and ends with one more: Delete Worker, the installer removing itself.</p>
-  <p>An update from your site's Update page leaves a shorter trail (the upload session, the file uploads and Upload
-  Worker), and a group being started leaves its own (with the group's name). Anything else marked <b>OAuth</b> around then, such as changes
+  <p>An update leaves a shorter trail: the upload session, the file uploads, Upload Version (the new version, not yet
+  live), then a deployment making it live (and a second one putting the old version back, if the new one didn't work).
+  Automatic updates leave the same trail, around the same time each day, and setting the daily schedule when you turn
+  them on or off. A group being started leaves its own trail (with the group's name). Anything else marked <b>OAuth</b> around then, such as changes
   to other Workers, DNS, members or API tokens, wasn't afterwrd. If there's a long list of page views, filter with
   <i>Action Type is not view</i>.</p>
   <p class="meta">Cloudflare's log says an app you allowed did these things, but not which app. That's why the
@@ -105,10 +108,12 @@ same browser, with the account you installed into.</p>
 
 <section id="revoke">
   <h2>3. Take the permission back</h2>
-  <p>afterwrd doesn't need to keep access to your account: every update asks again. Under
+  <p>afterwrd only keeps access to your account if you've turned on automatic updates. Then it keeps
+  <i>Background Access</i> to change Workers, and nothing else (no databases, settings or tokens). Without them, every
+  update asks again. Under
   <b><a href="https://dash.cloudflare.com/profile/access-management/authorization" target="_blank" rel="noopener">Connected applications</a></b>,
-  revoke afterwrd if you like. Revoking stops it being given new access; access it was already given still lasts out
-  its hour.</p>
+  revoke afterwrd if you like: that ends background access, and automatic updates turn themselves off. The hour's access
+  an install or a hand update was given may still last out its hour.</p>
 </section>
 
 <section id="friend">

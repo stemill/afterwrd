@@ -26,6 +26,13 @@ do something to protect people better, that's worth hearing.
 Only the latest release is supported. Every site can update itself from its Update page, so fixes go out as new
 releases. When a release fixes a security problem, each older site says so to its owner on Home.
 
+Sites with automatic updates turned on install a release by themselves once it has been **signed** and has been out
+for three days (one day for a security fix). Signing (`worker/scripts/sign.mjs`) happens on the maintainer's own
+machine, with a key that never goes near GitHub, and only after rebuilding the release from its tag and finding it
+matches what GitHub published byte for byte. The signatures are in [`signatures/`](signatures); deleting one pulls
+that release from automatic updates. Every update, automatic or by hand, is put in place without going live, switched
+to, and switched straight back if the new version doesn't answer healthily.
+
 To hear about every release, *Watch* this repository on GitHub (*Watch* → *Custom* → *Releases*) or follow the
 [releases feed](https://github.com/stemill/afterwrd/releases.atom). Each release's notes are what its sites show on
 their Update page.
@@ -38,6 +45,11 @@ installer or your site gets a token that lasts **one hour**. Nothing is kept aft
 - making, changing and deleting **Workers** (Cloudflare calls this *Workers Admin*),
 - making, changing and deleting **D1 databases**,
 - reading the account's basic settings (its workers.dev name).
+
+Automatic updates, if turned on, ask once for **Background Access** with *Workers Editor* only: changing (not making)
+Workers, nothing else. It lasts until turned off on the Update page or revoked under *Connected Applications*. The
+refresh token is kept in the site's own Durable Object storage, never in its database or downloads. afterwrd never
+asks for permission to make API tokens: a token that can make tokens can make one with any permission in the account.
 
 That's every Worker and database **in the account**, not just afterwrd's. So if you use Cloudflare for other things,
 make a separate Cloudflare account just for afterwrd. It doesn't cover your domains, DNS, other Cloudflare

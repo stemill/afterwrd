@@ -1,6 +1,6 @@
 {
   "name": "afterwrd-worker",
-  "version": "0.38.0",
+  "version": "0.39.0",
   "private": true,
   "license": "AGPL-3.0-or-later",
   "type": "module",
@@ -26,6 +26,7 @@
   "afterwrd": {
     "releases": "stemill/afterwrd",
     "site": "afterwrd.app",
-    "cloudflareClient": "9a89827907d5681523b116176031302e"
+    "cloudflareClient": "9a89827907d5681523b116176031302e",
+    "releaseKey": "jWNP4nrIYvCKiaHm2PXOy9lx2wobn4m7FjWWZARyEK8="
   }
 }

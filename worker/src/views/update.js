@@ -7,8 +7,10 @@ import { checkedWords } from "./checks.js";
 import { asset, FAVICON, ownerHeader } from "./nav.js";
 
 /** The Connect button for a step, or a note that it's done, with the by-hand fallback folded away. */
-function connectPart(connected, back, what) {
+function connectPart(connected, back, what, background = false) {
   if (connected) return `<p class="meta connected">Connected to Cloudflare for the next hour.</p>`;
+  // Automatic updates' background access does it: nothing to connect.
+  if (background) return `<p class="meta connected">This uses automatic updates' access, so there's no need to connect.</p>`;
   return `
 <p><a class="button" id="connect" href="${escape(connectLink(back))}">Connect Cloudflare</a>
   <span class="meta">Cloudflare asks you to allow afterwrd ${what}, for an hour. Nothing is kept afterwards.</span></p>
@@ -22,14 +24,52 @@ function connectPart(connected, back, what) {
 </details>`;
 }
 
-export function updatePage({ owner, version: VERSION, latest, available, securityFix, site, connected, oldToken, groups, go, checked = null, friends = [], checkWait = 0 }) {
+const day = (seconds) => new Date(seconds * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Europe/London" });
+
+/** Automatic updates (auto.js): on or off, what's next, what last happened, and anything that needs the owner. */
+function autoPart(auto) {
+  const last = auto.last && auto.last.result !== "done" ? `<p class="notice alert">afterwrd ${escape(auto.last.version)} didn't
+    ${auto.last.result === "unhealthy" ? "work" : "start"} on this site on ${escape(day(auto.last.at))}, so it was put back as it was.
+    It won't be tried again by itself; a later release will be.</p>`
+    : auto.last ? `<p class="meta">Last updated itself to ${escape(auto.last.version)} on ${escape(day(auto.last.at))}.</p>` : "";
+  const waiting = auto.waiting?.needsHand ? `<p class="notice alert">afterwrd ${escape(auto.waiting.version)} adds a new kind of
+    store, which Cloudflare only lets you install by hand. Update to it above.</p>`
+    : auto.waiting?.version && auto.waiting.after ? `<p>afterwrd ${escape(auto.waiting.version)} will install itself after
+    ${escape(day(auto.waiting.after))}.</p>` : "";
+  const problem = auto.problem ? `<p class="notice alert">The last automatic update couldn't run: ${escape(auto.problem)}</p>` : "";
+  if (auto.on) {
+    return `
+<section class="card" id="auto">
+  <h2>Automatic updates are on</h2>
+  ${waiting}${last}${problem}
+  <p class="meta">Once a day this site looks for a new afterwrd release. It installs one only when it's signed by
+  afterwrd's own key and has been out for three days (one, for a security fix), and puts itself back as it was if the
+  new version doesn't work. Your groups follow.${auto.signed ? "" : " (No release is signed yet, so it's waiting for the first.)"}</p>
+  <form method="post" action="/_admin/update/auto-now"><button class="link" id="auto-now">Look for an update now</button>
+    <span class="meta">(it can take a few minutes if there's one to install)</span></form>
+  <form method="post" action="/_admin/update/auto-off"><button class="link">Turn automatic updates off</button>
+    <span class="meta">Then, to be sure, remove afterwrd in Cloudflare too: My Profile → Access Management → Connected Applications.</span></form>
+</section>`;
+  }
+  return `
+<section class="card" id="auto">
+  <h2>Keep afterwrd up to date by itself</h2>
+  ${problem}
+  <p>Your site can install each new afterwrd release by itself, so you never have to come here. Cloudflare will ask you to
+  allow <b>Background Access</b> to change your Workers, and nothing else: it can't touch your databases or your account's
+  settings.</p>
+  <p><a class="button" href="/_cloudflare/auto-start">Turn on automatic updates</a></p>
+</section>`;
+}
+
+export function updatePage({ owner, version: VERSION, latest, available, securityFix, site, connected, oldToken, groups, go, checked = null, friends = [], checkWait = 0, auto = { on: false } }) {
   // Groups this site made that are behind it: brought up to this version, with the same connection.
   const groupsPart = groups.length && !available ? `
 <section class="card" id="groups">
   <h2>Your groups</h2>
   <p>${groups.map((g) => `${escape(g.name)} (${escape(g.version)})`).join(", ")} ${groups.length === 1 ? "is" : "are"} behind your
   site. Bring ${groups.length === 1 ? "it" : "them"} up to ${escape(VERSION)}:</p>
-  ${connectPart(connected, "/_admin/update?go=groups", "to change the groups' Workers")}
+  ${connectPart(connected, "/_admin/update?go=groups", "to change the groups' Workers", auto.on)}
   <p><button id="groups-go" data-groups="${escape(JSON.stringify(groups.map((g) => ({ id: g.id, name: g.name }))))}">Update ${groups.length === 1 ? "the group" : "the groups"}</button></p>
   <ol id="group-log"></ol>
   <p id="group-error" role="alert"></p>
@@ -54,8 +94,9 @@ export function updatePage({ owner, version: VERSION, latest, available, securit
 ${securityFix ? `<p class="security"><b>It fixes a security problem</b> (in ${escape(securityFix)}), so it's worth updating soon.</p>` : ""}
 ${notes}
 <p class="meta">Updating keeps everyone's access, your archive and your photos.</p>
-${connectPart(connected, "/_admin/update?go=update", "to change this site's Worker")}
-<p><button id="go" data-tag="${escape(latest.tag)}" data-version="${escape(latest.version)}">Update to ${escape(latest.version)}</button></p>
+${connectPart(connected, "/_admin/update?go=update", "to change this site's Worker", auto.on)}
+<p><button id="go" data-tag="${escape(latest.tag)}" data-version="${escape(latest.version)}">Update to ${escape(latest.version)}</button>
+  <span class="meta">Keep this page open until it says it's done: it checks the new version works, and puts the old one back if not.</span></p>
 <ol id="log"></ol>
 <p id="error" role="alert"></p>
 <section id="done" class="card" hidden>
@@ -84,7 +125,7 @@ ${FAVICON}
   #error, #group-error, #forget-error { color: #d93025; }
   .security { padding: 0.6rem 0.9rem; border-left: 3px solid var(--danger); border-radius: 10px; background: var(--tint-4); }
   #done[hidden], #done [hidden] { display: none; }
-  .notes h2, #check h2 { margin: 0 0 0.4rem; font-size: 1rem; }
+  .notes h2, #check h2, #auto h2 { margin: 0 0 0.4rem; font-size: 1rem; }
   #ask-message { width: 100%; font: inherit; padding: 0.6rem; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); color: var(--text); }
   .notes p { margin: 0; white-space: pre-wrap; }
   .other { margin: 1rem 0; }
@@ -98,6 +139,7 @@ ${ownerHeader("update")}
 <h1>Update afterwrd</h1>
 <p class="meta">Signed in as ${escape(owner)}. This site is afterwrd ${escape(VERSION)}.</p>
 ${body}
+${autoPart(auto)}
 <section class="card" id="check">
   <h2>Get your site checked</h2>
   <p id="last-checked">${checked ? escape(checkedWords(checked)) : "Your site hasn't been checked yet."}</p>
@@ -163,7 +205,7 @@ ${forget}
     askShare.hidden = false;
     askShare.addEventListener("click", () => navigator.share({ text: document.getElementById("ask-message").value }).catch(() => {}));
   }
-  const connected = ${connected};
+  const connected = ${connected || Boolean(auto.on)}; // automatic updates' access counts as connected
   const autoGo = ${JSON.stringify(go === "update" || go === "groups" ? go : null)};
   async function post(path, body) {
     const res = await fetch("/_admin/update/" + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -216,7 +258,7 @@ ${forget}
       const { account } = await post("check", { token, tag });
       log("Uploading " + version + "'s site files…");
       const { jwt } = await post("assets", { token, account, tag });
-      log("Installing " + version + "…");
+      log("Installing " + version + " and checking it works (this can take a few minutes)…");
       await post("deploy", { token, account, tag, jwt });
       const box = document.getElementById("token");
       if (box) box.value = "";
