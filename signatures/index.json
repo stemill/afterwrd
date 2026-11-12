@@ -1,46 +1,61 @@
 {
-  "seq": 8,
+  "seq": 9,
   "releases": [
+    {
+      "version": "0.44.0",
+      "manifest_sha256": "d9cd99033e404f918cd1b60d277862b3b4497f22492fa72e4d6bbbe03917cea3",
+      "signed_at": "2026-11-12T19:00:19Z",
+      "etag": "45e6c499d1e43df9604616f272c628bb43edbcdedf7b87cd526b498a37181fc2"
+    },
     {
       "version": "0.43.0",
       "manifest_sha256": "509b762ef469b4ea68e4933a761a332988d8960cc1545803aebecbcc162526fc",
-      "signed_at": "2026-11-12T11:12:14Z"
+      "signed_at": "2026-11-12T11:12:14Z",
+      "etag": "7b0085eceb13163002ac311b0b9b22e983af813838c6cd198f2e16b6daded48d"
     },
     {
       "version": "0.42.1",
       "manifest_sha256": "eb8dd7c0825beba72c57fafad78b7a20104b50a4b17498a78becf60a24f995e6",
-      "signed_at": "2026-11-11T23:44:10Z"
+      "signed_at": "2026-11-11T23:44:10Z",
+      "etag": "86fc1356488deac69fd19e4748d801138da9d161f1b30bbcb90190d381894921"
     },
     {
       "version": "0.42.0",
       "manifest_sha256": "574fb71eadf19fb0d70b7892dd574c7e5ba9fb400faab1330526c8ff27917a6b",
-      "signed_at": "2026-11-11T22:26:13Z"
+      "signed_at": "2026-11-11T22:26:13Z",
+      "etag": "58a965b9e1ad78f74dd1f75d7876d8ba01c5cc94e2e34dbc6db5238aad8b6e29"
     },
     {
       "version": "0.41.0",
       "manifest_sha256": "f32c3651aadedb594085645ce32369105dc223395f35bee320dc62e80f9b3828",
-      "signed_at": "2026-11-11T21:12:21Z"
+      "signed_at": "2026-11-11T21:12:21Z",
+      "etag": "0806bd45a7aee07455641dd6416a54bfa9988b2df3271b5e97abb2ef3be8063f"
     },
     {
       "version": "0.40.1",
       "manifest_sha256": "f480e8473e30da62c45f2797ebd1637643cc1959e7f74394ad5ffda569930d71",
-      "signed_at": "2026-11-11T16:23:26Z"
+      "signed_at": "2026-11-11T16:23:26Z",
+      "etag": "518b138d146ab0c928a378987c9bd4393d41343d89367ca84198938f102a92c3"
     },
     {
       "version": "0.40.0",
       "manifest_sha256": "74d0e814a9fc9c38c4189afd6e41e65971d6a40568448e128b7b0d4406b1b943",
-      "signed_at": "2026-11-11T15:20:15Z"
+      "signed_at": "2026-11-11T15:20:15Z",
+      "etag": "d87a9168830f4c4dfe22440a4207de5689f44dbb03ec882cd59ce1a4d98afdab"
     },
     {
       "version": "0.39.1",
       "manifest_sha256": "a20616063ae209f35bcde57e18ac899b88bc6f878997d8ccff8e6672003c130f",
-      "signed_at": "2026-11-11T01:11:35Z"
+      "signed_at": "2026-11-11T01:11:35Z",
+      "etag": "f68eacd7d084afe0516bd50f39d13e839355911e88344350b5418e28fb8ad5b2"
     },
     {
       "version": "0.39.0",
       "manifest_sha256": "7b959cb058510dc64f10233b635bc277db09db1feb6f1e8985a0eb97879b5f48",
-      "signed_at": "2026-11-11T00:40:20Z"
+      "signed_at": "2026-11-11T00:40:20Z",
+      "etag": "7d08fbae9f17aca7cdfb4dc641c214d5c3026a0f4c323642e38a0852316507e1"
     }
   ],
-  "signature": "QcNVkc+32wTr65LuP1OYYJLDAh96g/8HDCxrSgHbnRZvGBWoB+rL0NPPtaXPwz29/8/Z4RXYAMlEfkieRwf3AQ=="
+  "signature": "OdwBR0xClHPpVkmyn+7STSWlxeKCdh6vP/MCEcfsLUj145mZ8anMeD8nGWokAMnBiYKu2+SFJ/jTXOwfrk6rDg==",
+  "signature2": "QX/sFHCMlU2um/lW70HVH/CixlEeLEdZzBx7/mvJLwU1yfXdlqt8wdzdHJY1gF2FvzyWQhwjfPX1fOMqXx2nBA=="
 }
