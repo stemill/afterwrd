@@ -13,6 +13,13 @@ WRANGLER="$WORKER/node_modules/.bin/wrangler"
 FAILED=0
 mkdir -p "$OUT"
 
+# The tests' own Chrome, the version this Puppeteer is made for (chrome.mjs; downloaded the first time), unless CHROME
+# names another.
+if [ -z "${CHROME:-}" ]; then
+  CHROME="$(cd "$WORKER" && node test/e2e/chrome.mjs)" || { echo "Couldn't get the tests' Chrome (see above)." >&2; exit 1; }
+fi
+export CHROME
+
 for port in 8787 8788 8789 8790; do
   if lsof -iTCP:$port -sTCP:LISTEN >/dev/null 2>&1; then
     echo "Port $port is in use (is \`npm run dev\` running?). Stop it and try again." >&2

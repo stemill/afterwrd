@@ -20,7 +20,7 @@
   "devDependencies": {
     "esbuild": "0.28.2",
     "lz-string": "1.5.0",
-    "puppeteer-core": "25.16.0",
+    "puppeteer-core": "25.17.0",
     "typescript": "7.0.2",
     "wrangler": "4.156.2"
   },

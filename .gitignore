@@ -25,3 +25,4 @@ worker/.dev.vars
 
 # End-to-end test output (local sites, screenshots, downloads)
 worker/test/e2e/out/
+worker/test/e2e/chrome/

@@ -12,7 +12,9 @@ npm run test:e2e -- feed              # one or more suites: core fresh albums up
 npm run test:e2e -- upgrade v0.17.0   # an older release's site (0.17.0 or later), upgraded in place to this code
 ```
 
-You need Google Chrome (set `CHROME` to its path if it isn't in /Applications), `zip`, and ports 8787–8790 free, so
+The tests drive their own copy of Chrome, the version this Puppeteer is made for, downloaded the first time into
+`test/e2e/chrome/` (about 200 MB; `chrome.mjs`). Chrome on the computer updates itself, and once it's ahead of
+Puppeteer the tests lose track of a page now and then ("detached Frame"); set `CHROME` to use another anyway. You need `zip`, and ports 8787–8790 free, so
 stop `npm run dev` first. The update tests read the latest release from GitHub, so they need the internet. Your
 own local database (`.wrangler/state`) is set aside while the tests run and put back afterwards. Logs, screenshots
 and downloads go to `out/`, which git ignores.
