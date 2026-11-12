@@ -3,7 +3,7 @@
 import { connectLink } from "../cloudflare.js";
 import { TOKEN_URL, TOKENS_PAGE } from "../update.js";
 import { escape } from "../util.js";
-import { checkedWords } from "./checks.js";
+import { checkedWords, resultHtml } from "./checks.js";
 import { asset, FAVICON, ownerHeader } from "./nav.js";
 
 /** The Connect button for a step, or a note that it's done, with the by-hand fallback folded away. */
@@ -41,8 +41,7 @@ function autoPart(auto) {
     ${escape(day(auto.waiting.after))}.</p>` : "";
   const problem = auto.problem ? `<p class="notice alert">The last automatic update couldn't run: ${escape(auto.problem)}</p>` : "";
   const ago = (seconds) => { const m = Math.max(0, Math.round((Date.now() / 1000 - seconds) / 60)); return m < 1 ? "just now" : m === 1 ? "a minute ago" : `${m} minutes ago`; };
-  const running = auto.running ? `<p class="notice" id="auto-running">It's looking for an update now (started ${escape(ago(auto.running))}).
-    This page doesn't need to stay open.</p>` : auto.busy ? `<p class="notice" id="auto-running">It was already looking.</p>` : "";
+  const running = auto.running ? `<p class="notice" id="auto-running">It's looking for an update now (started ${escape(ago(auto.running))}).</p>` : "";
   const lastCheck = auto.lastCheck && !auto.running ? `<p id="auto-last"><b>Last looked ${escape(ago(auto.lastCheck.at))}:</b> ${escape(auto.lastCheck.words)}</p>` : "";
   const groupLines = Object.values(auto.groups ?? {}).filter((g) => g.result !== "done");
   const groupsDone = groupLines.length ? `<ul class="meta">${groupLines.map((g) => `<li>${escape(g.name)}: ${escape(
@@ -52,22 +51,12 @@ function autoPart(auto) {
     return `
 <section class="card" id="auto">
   <h2>Automatic updates are on</h2>
+  ${auto.since ? `<p class="meta" id="auto-since">On since ${escape(day(auto.since))}.${auto.refusedAt
+    ? ` Cloudflare stopped allowing their access on ${escape(day(auto.refusedAt))}, so they were off until then.` : ""}</p>` : ""}
   ${running}${lastCheck}${waiting}${last}${problem}${groupsDone}
   <p class="meta">Once a day this site looks for a new afterwrd release. It installs one only when it's signed by
   afterwrd's own key and has been out for three days (one, for a security fix), and puts itself back as it was if the
-  new version doesn't work. Your groups follow.${auto.signed ? "" : " (No release is signed yet, so it's waiting for the first.)"}</p>
-  <form method="post" action="/_admin/update/auto-now" id="auto-now-form"><button class="link" id="auto-now"${auto.running ? " disabled" : ""}>Look for an update now</button>
-    <span class="meta" id="auto-now-note">(it can take a few minutes if there's one to install)</span></form>
-  <script>
-    // Once pressed, it says so and can't be pressed again: pressing again would cut the first look short.
-    document.getElementById("auto-now-form").addEventListener("submit", (e) => {
-      const button = document.getElementById("auto-now");
-      if (button.dataset.sent) { e.preventDefault(); return; }
-      button.dataset.sent = "1";
-      button.textContent = "Looking…";
-      document.getElementById("auto-now-note").textContent = "This can take a few minutes if there's something to install. It'll say what happened.";
-    });
-  </script>
+  new version doesn't work. Your groups follow straight after.${auto.signed ? "" : " (No release is signed yet, so it's waiting for the first.)"}</p>
   <form method="post" action="/_admin/update/auto-off"><button class="link">Turn automatic updates off</button>
     <span class="meta">Then, to be sure, remove afterwrd in Cloudflare too: My Profile → Access Management → Connected Applications.</span></form>
 </section>`;
@@ -75,7 +64,8 @@ function autoPart(auto) {
   return `
 <section class="card" id="auto">
   <h2>Keep afterwrd up to date by itself</h2>
-  ${problem}
+  ${problem}${auto.refusedAt ? `<p class="notice alert" id="auto-refused">They turned themselves off on ${escape(day(auto.refusedAt))}:
+    Cloudflare stopped allowing their access (removed under Connected Applications, perhaps).</p>` : ""}
   <p>Your site can install each new afterwrd release by itself, so you never have to come here. Cloudflare will ask you to
   allow <b>Background Access</b> to change your Workers, and nothing else: it can't touch your databases or your account's
   settings.</p>
@@ -83,17 +73,82 @@ function autoPart(auto) {
 </section>`;
 }
 
-export function updatePage({ owner, version: VERSION, latest, available, securityFix, site, connected, oldToken, groups, go, checked = null, friends = [], checkWait = 0, auto = { on: false }, history = [], problem = null }) {
+/** While automatic updates are on: what they'll do with the newest release, and "Install it now". */
+function autoNext(auto, running) {
+  const next = auto.next;
+  const signedLater = `<p id="auto-next">It'll install itself once it's been signed with afterwrd's own key, and has been out for a few days.</p>`;
+  if (next.unsigned && !next.after) return signedLater;
+  const older = next.unsigned ? `${signedLater}<p>afterwrd ${escape(next.version)}, in between, is signed. ` : `<p id="auto-next">`;
+  const when = next.failed ? `It didn't work on this site before, so it won't be tried again by itself.`
+    : next.after * 1000 > Date.now() ? `It'll install itself after ${escape(day(next.after))}, or you can install it now.`
+    : "It'll install itself at its next daily look, or you can install it now.";
+  return `${older}${when}</p>
+<p><button class="go" data-install-now${running ? " disabled" : ""}>${next.failed ? `Try ${next.unsigned ? escape(next.version) : "it"} again`
+    : next.unsigned ? `Install ${escape(next.version)} now` : "Install it now"}</button>
+  <span class="meta">Your groups follow straight after. Your site carries on by itself, so this page can be closed.</span></p>
+<ol class="log"></ol>
+<p class="error" role="alert"></p>`;
+}
+
+/** Friends' sites checking this one by themselves (friendchecks.js): allowing it, or that it's allowed. */
+function checksPart(grant, failure) {
+  const found = failure ? `<div class="notice alert" id="check-failure"><p><b>${escape(failure.name)}'s site checked yours</b> on
+    ${escape(day(failure.checked_at))}${failure.version ? ` (afterwrd ${escape(failure.version)})` : ""} and found something that needs a look:</p>
+    <ul>${failure.problems.map((p) => `<li>${escape(p)}</li>`).join("")}</ul>
+    <p class="meta">If you didn't change anything in Cloudflare yourself, ask ${escape(failure.name)}, and see
+    <a href="https://afterwrd.app/check/#wrong">what to do</a>.</p></div>` : "";
+  if (grant.on) {
+    return `${found}<p id="checks-on">Your friends' sites check yours by themselves now and then, and after updates.
+  <span class="meta">Each check is read-only: your site hands a friend's site a pass to read its code for an hour.</span></p>
+  <form method="post" action="/_admin/checks/let-off" class="meta"><button class="link">Stop letting them</button>, and then,
+    to be sure, remove afterwrd in Cloudflare too: My Profile → Access Management → Connected Applications.</form>`;
+  }
+  return `${found}<div id="checks-off">${grant.problem ? `<p class="notice alert">Friends' sites can't check yours by themselves any more: ${escape(grant.problem)}</p>` : ""}
+  <p><b>Let your friends' sites check yours by themselves.</b> Now and then, and after each update, a friend's afterwrd site
+  checks that yours is exactly the published afterwrd, with nobody having to do anything. Cloudflare will ask you to allow
+  <b>Background Access</b> to read the code of every Worker in your Cloudflare account, and nothing else, which your site
+  hands a friend's site an hour at a time.</p>
+  <p><a class="button" href="/_cloudflare/checks-start">Let friends check it</a></p></div>`;
+}
+
+/** This site's checks of its friends' sites (friendchecks.js). */
+function checkingPart(auto, checking, results) {
+  const verdictWords = { "all good": "all good", "needs a look": "found something that needs a look", "couldn't check": "couldn't check it" };
+  const list = results.length ? `<ul class="friend-checks">${results.map((r) => `<li id="friend-check-${r.id}">
+    <b>${escape(r.name)}</b>, ${escape(day(r.checked_at))}: ${escape(verdictWords[r.verdict] ?? r.verdict)}${r.verdict === "couldn't check" && r.result?.why
+      ? ` <span class="meta">(${escape(r.result.why)})</span>` : ""}
+    ${r.verdict === "needs a look" ? `<details${r.seen_at ? "" : " open"}><summary class="meta">What it found</summary>${resultHtml(r.result, "theirs")}
+      ${r.seen_at ? "" : `<form method="post" action="/_admin/checks/found/${r.id}/seen?back=update"><button class="link">Put it away</button></form>`}</details>` : ""}
+  </li>`).join("")}</ul>` : "";
+  const how = !auto.on ? `<p class="meta">Your site checks your friends' sites by itself while automatic updates are on (above).</p>`
+    : checking ? `<p class="meta">A few times a week, your site checks one of your friends' sites by itself, if they let it: that it's
+      exactly the published afterwrd, and that nothing else has been put in its place since the last check.</p>
+      <form method="post" action="/_admin/checks/checking-off" class="meta"><button class="link">Stop checking friends' sites</button></form>`
+    : `<p class="meta">Your site doesn't check your friends' sites by itself.</p>
+      <form method="post" action="/_admin/checks/checking-on" class="meta"><button class="link">Check them again</button></form>`;
+  return `<section class="card" id="checking">
+  <h2>Checking your friends' sites</h2>
+  ${list}${how}
+</section>`;
+}
+
+export function updatePage({ owner, version: VERSION, latest, available, securityFix, site, connected, oldToken, groups, go, checked = null, friends = [], checkWait = 0, auto = { on: false }, history = [], problem = null, madeGroups = 0, checkGrant = {}, checkFailure = null, checking = true, friendChecks = [] }) {
+  // While automatic updates are on, they're the one way to update (signed releases only), unless a release has to be
+  // installed by hand (a new kind of store): then the steps below, with their access.
+  const byHand = !auto.on || !auto.next || (auto.waiting?.needsHand && auto.waiting.version === auto.next.version);
   // Groups this site made that are behind it: brought up to this version, with the same connection.
   const groupsPart = groups.length && !available ? `
 <section class="card" id="groups">
   <h2>Your groups</h2>
   <p>${groups.map((g) => `${escape(g.name)} (${escape(g.version)})`).join(", ")} ${groups.length === 1 ? "is" : "are"} behind your
   site. Bring ${groups.length === 1 ? "it" : "them"} up to ${escape(VERSION)}:</p>
-  ${connectPart(connected, "/_admin/update?go=groups", "to change the groups' Workers", auto.on)}
+  ${auto.on ? `<p class="meta">Automatic updates bring them up to date at the next daily look.</p>
+  <p><button class="go" data-install-now${auto.running ? " disabled" : ""}>Update ${groups.length === 1 ? "it" : "them"} now</button></p>
+  <ol class="log"></ol>
+  <p class="error" role="alert"></p>` : `${connectPart(connected, "/_admin/update?go=groups", "to change the groups' Workers")}
   <p><button id="groups-go" data-groups="${escape(JSON.stringify(groups.map((g) => ({ id: g.id, name: g.name }))))}">Update ${groups.length === 1 ? "the group" : "the groups"}</button></p>
   <ol id="group-log"></ol>
-  <p id="group-error" role="alert"></p>
+  <p id="group-error" role="alert"></p>`}
 </section>` : "";
   // A token kept by a version before 0.20.0, which nothing uses any more.
   const forget = oldToken ? `
@@ -115,7 +170,7 @@ export function updatePage({ owner, version: VERSION, latest, available, securit
 ${securityFix ? `<p class="security"><b>It fixes a security problem</b> (in ${escape(securityFix)}), so it's worth updating soon.</p>` : ""}
 ${notes}
 <p class="meta">Updating keeps everyone's access, your archive and your photos.</p>
-${connectPart(connected, "/_admin/update?go=update", "to change this site's Worker", auto.on)}
+${byHand ? `${connectPart(connected, "/_admin/update?go=update", "to change this site's Worker", auto.on)}
 <p><button id="go" data-tag="${escape(latest.tag)}" data-version="${escape(latest.version)}">Update to ${escape(latest.version)}</button>
   <span class="meta">Keep this page open until it says it's done: it checks the new version works, and puts the old one back if not.</span></p>
 <ol id="log"></ol>
@@ -124,7 +179,7 @@ ${connectPart(connected, "/_admin/update?go=update", "to change this site's Work
   <p><b>Updated to ${escape(latest.version)}.</b></p>
   <p class="meta">If a friend has afterwrd, it's worth <a href="#check">asking them to check your site</a> now.</p>
   <p><a class="button" href="/_admin/update">Done</a></p>
-</section>`;
+</section>` : autoNext(auto, auto.running)}`;
   }
   return `<!doctype html>
 <html lang="en-GB">
@@ -137,13 +192,13 @@ ${FAVICON}
 <style>
   .how { padding-left: 1.2rem; }
   .how li { margin: 0.6rem 0; }
-  .button, #go, #groups-go { display: inline-block; padding: 0.5rem 1rem; border: 0; border-radius: 999px; background: var(--button); color: var(--on-button);
+  .button, #go, #groups-go, button.go { display: inline-block; padding: 0.5rem 1rem; border: 0; border-radius: 999px; background: var(--button); color: var(--on-button);
     font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
   .button + .meta { display: block; margin-top: 0.4rem; }
-  #go:disabled, #groups-go:disabled { opacity: 0.6; cursor: default; }
+  #go:disabled, #groups-go:disabled, button.go:disabled { opacity: 0.6; cursor: default; }
   #token { width: 100%; font: inherit; padding: 0.5rem; margin-top: 0.3rem; border: 1px solid var(--border); border-radius: 999px;
     background: var(--bg); color: var(--text); -webkit-text-security: disc; }
-  #error, #group-error, #forget-error { color: var(--danger); }
+  #error, #group-error, #forget-error, .error { color: var(--danger); }
   .security { padding: 0.6rem 0.9rem; border-left: 3px solid var(--danger); border-radius: 10px; background: var(--tint-4); }
   #done[hidden], #done [hidden] { display: none; }
   .notes h2, #check h2, #auto h2 { margin: 0 0 0.4rem; font-size: 1rem; }
@@ -171,9 +226,10 @@ ${history.length ? `<section class="card" id="history">
 <section class="card" id="check">
   <h2>Get your site checked</h2>
   <p id="last-checked">${checked ? escape(checkedWords(checked)) : "Your site hasn't been checked yet."}</p>
-  <p class="meta">A friend's afterwrd site can check that yours is exactly the published afterwrd, with nothing else done in
-  your Cloudflare account. Worth doing when your site is new, and after updates. Ask a friend: they'll send you a link by
-  message. Open it and press Allow when Cloudflare asks.</p>
+  ${checksPart(checkGrant, checkFailure)}
+  <p class="meta">${checkGrant.on ? "For a fuller check, which also reads your account's log of changes," : "Or"} a friend's afterwrd site
+  can check that yours is exactly the published afterwrd, with nothing else done in your Cloudflare account. Worth doing
+  when your site is new. Ask a friend: they'll send you a link by message. Open it and press Allow when Cloudflare asks.</p>
   ${checkWait ? `<p class="notice" id="check-wait">Your site was updated less than an hour ago. Ask for a check after
   <b>${escape(new Date(checkWait * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" }))}</b>:
   for an hour after an update, the access it used could still change your site, so a check before then can't count.</p>` : ""}
@@ -192,6 +248,7 @@ ${history.length ? `<section class="card" id="history">
   <form method="post" action="/_admin/checks/myself?back=update" class="meta">Or <a href="https://afterwrd.app/check/">check it
     yourself</a>, and then <button class="link">say you've checked it</button>.</form>
 </section>
+${checkingPart(auto, checking, friendChecks)}
 ${groupsPart}
 ${forget}
 </main>
@@ -301,16 +358,69 @@ ${forget}
       // Never "done" unless this site is the new version: an update that went somewhere else must say so.
       if (!started) throw new Error("Cloudflare has the update, but hasn't started using it yet. Don't update again:"
         + " reload this page in five minutes or so, and it should say " + version + ".");
+      // The groups get the new version's code, so the new version's page brings them up to date, straight away.
+      if (${madeGroups > 0} && connected) {
+        log("Your site is on " + version + ". Now your groups…");
+        location.assign("/_admin/update?go=groups");
+        return;
+      }
       document.getElementById("done").hidden = false;
     } catch (err) {
       error.textContent = err.message;
       go.disabled = false;
     }
   });
+  // "Install it now" (automatic updates on): the automatic run, straight away, showing what it does as it goes.
+  document.querySelectorAll("button[data-install-now]").forEach((button) => button.addEventListener("click", async () => {
+    const card = button.closest("section") ?? document;
+    const list = card.querySelector(".log");
+    const error = card.querySelector(".error");
+    const show = (lines) => { list.replaceChildren(...lines.map((line) => Object.assign(document.createElement("li"), { textContent: line }))); };
+    document.querySelectorAll("button[data-install-now]").forEach((b) => { b.disabled = true; });
+    button.textContent = "Installing…";
+    error.textContent = "";
+    show(["Starting…"]);
+    let finished = false;
+    const watch = (async () => {
+      while (!finished) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const res = await fetch("/_admin/update/progress", { cache: "no-store" }).catch(() => null);
+        const now = res && res.ok ? await res.json().catch(() => null) : null;
+        if (!finished && now?.lines?.length) show(now.lines);
+      }
+    })();
+    try {
+      const res = await fetch("/_admin/update/install-now", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Something went wrong.");
+      if (data.busy) throw new Error("It's already installing something: reload this page in a few minutes to see what happened.");
+      // The site carries on by itself (it doesn't need this page); this only watches until the run has finished.
+      let state = null;
+      for (let i = 0; i < 450; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const got = await fetch("/_admin/update/progress", { cache: "no-store" }).catch(() => null);
+        state = got && got.ok ? await got.json().catch(() => null) : null;
+        if (state?.lastRun >= data.asked && !state.running) break;
+      }
+      finished = true;
+      await watch;
+      if (!(state?.lastRun >= data.asked)) throw new Error("It's still going: this page can be closed, and the Update page will say what happened.");
+      if (state.problem) throw new Error(state.problem);
+      show([state.words || "Done."]);
+      const done = document.createElement("p");
+      done.append(Object.assign(document.createElement("a"), { className: "button", href: "/_admin/update", textContent: "Done" }));
+      list.after(done);
+    } catch (err) {
+      finished = true;
+      error.textContent = err.message;
+      button.textContent = "Try again";
+      document.querySelectorAll("button[data-install-now]").forEach((b) => { b.disabled = false; });
+    }
+  }));
   // Back from Connect: carry on with what was asked for.
   if (connected && autoGo) {
     history.replaceState(null, "", "/_admin/update");
-    (autoGo === "groups" ? groupsGo : go)?.click();
+    (autoGo === "groups" ? groupsGo ?? document.querySelector("#groups button[data-install-now]") : go)?.click();
   }
 </script>
 </body>

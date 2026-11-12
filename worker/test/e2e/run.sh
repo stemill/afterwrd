@@ -119,8 +119,28 @@ run_auto() { # automatic updates: one site, the daily run started by /__schedule
   fresh --test-scheduled --var ALLOW_LOCAL_SITES:1 --var OAUTH_TOKEN_URL:http://127.0.0.1:8799/token \
     --var CLOUDFLARE_API_URL:http://127.0.0.1:8799/client/v4 --var RELEASES_URL:http://127.0.0.1:8799/releases \
     --var SIGNATURES_URL:http://127.0.0.1:8799/signatures --var TEST_HEALTH_URL:http://127.0.0.1:8799/health --var TEST_HEALTH_MS:1500 \
-    --var TEST_WORKER:0123456789abcdef0123456789abcdef:localhost --var TEST_RELEASE_KEY:H1DwXVvwn1lXX22JrLZPLTs+Gh5c1QcWFyqbVDWXbe0=
+    --var TEST_WORKER:0123456789abcdef0123456789abcdef:localhost --var TEST_RELEASE_KEY:H1DwXVvwn1lXX22JrLZPLTs+Gh5c1QcWFyqbVDWXbe0= \
+    --var TEST_SIGNATURE2_FROM:5
   suite auto.mjs; stop
+}
+run_friendchecks() { # friends' automatic checks (src/friendchecks.js): Ann's site (A, 8787) lets friends check it, Sam's
+  # (B, 8788) checks it in its daily run (/__scheduled); stand-ins on 8799 for Cloudflare, GitHub and the signatures
+  stop
+  local common="--var ALLOW_LOCAL_SITES:1 --var TEST_VERSION_AT:2026-01-01T00:00:00Z --var OAUTH_TOKEN_URL:http://127.0.0.1:8799/token
+    --var CLOUDFLARE_API_URL:http://127.0.0.1:8799/client/v4 --var RELEASES_URL:http://127.0.0.1:8799/releases
+    --var SIGNATURES_URL:http://127.0.0.1:8799/signatures --var TEST_RELEASE_KEY:H1DwXVvwn1lXX22JrLZPLTs+Gh5c1QcWFyqbVDWXbe0=
+    --var TEST_SIGNATURE2_FROM:1 --var TEST_SUBDOMAIN:ann"
+  for site in 8787:A 8788:B; do
+    local port="${site%%:*}" name="${site##*:}" extra=""
+    if [ "$name" = B ]; then extra="--test-scheduled --var TEST_WORKER:0123456789abcdef0123456789abcdef:samsite --var TEST_CHECK_EVERYONE:1"; fi
+    rm -rf "$OUT/state$name"
+    # shellcheck disable=SC2086
+    (cd "$WORKER" && "$WRANGLER" dev --name "afterwrd-$port" --port "$port" --ip 127.0.0.1 --inspector-port $((port + 500)) \
+      --persist-to "$OUT/state$name" --var SETUP_CODE:local-test-setup-code $CHECKS $common $extra > "$OUT/dev$port.log" 2>&1 &)
+  done
+  wait_for 8787 && wait_for 8788
+  suite friendchecks.mjs "$OUT/stateA" "$OUT/stateB"
+  pkill -f "wrangler dev --name afterwrd-87" 2>/dev/null; sleep 2
 }
 run_screenshots() { three_sites screenshots.mjs group; } # the README's pictures, in docs/screenshots (not a test)
 run_forged() {
@@ -143,10 +163,10 @@ run_upgrade() { # $1: an older release tag
   git -C "$WORKER" worktree remove --force "$OUT/old"
 }
 
-if [ $# -eq 0 ]; then set -- core fresh albums messages update auto feed groups group_chats polls checks central forged; fi
+if [ $# -eq 0 ]; then set -- core fresh albums messages update auto friendchecks feed groups group_chats polls checks central forged; fi
 while [ $# -gt 0 ]; do
   case "$1" in
-    core|fresh|albums|update|auto|feed|groups|checks|central|forged|screenshots|messages|group_chats|polls) "run_$1" ;;
+    core|fresh|albums|update|auto|friendchecks|feed|groups|checks|central|forged|screenshots|messages|group_chats|polls) "run_$1" ;;
     upgrade) shift; run_upgrade "${1:?give an older release tag, e.g. v0.12.0}" ;;
     *) echo "Unknown suite: $1" >&2; FAILED=1 ;;
   esac

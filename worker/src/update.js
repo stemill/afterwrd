@@ -8,6 +8,12 @@
 //   POST /_admin/update/deploy     {token?, account, tag, jwt} -> the new version
 //   POST /_admin/update/forget     delete UPDATE_TOKEN, a token an earlier version remembered (no longer used)
 //   POST /_admin/update/auto-off   turn automatic updates off (auto.js; turning them on is a Connect of its own)
+//   POST /_admin/update/install-now  while they're on: "Install it now", the automatic run straight away, not waiting
+//                                    out the days (only a signed release; groups follow in the same run), started by
+//                                    the vault's alarm so it doesn't depend on the page staying open
+//   GET  /_admin/update/progress   what that run has done so far, for the page to show while the owner waits
+// While automatic updates are on, the steps below use their access instead of a Connect, and then only install a
+// release (or bring a group up to one) that's in the signed list, exactly as signed.
 // An update is staged and then switched by this version, which puts itself back if the new one doesn't answer
 // healthily within a few minutes (auto.js switchCarefully), as automatic updates are.
 //   POST /_admin/update/group-assets  {token?, group} -> upload this version's site files for a group this site made
@@ -19,13 +25,14 @@
 import pkg from "../package.json";
 import { connectedToken, tokenFor } from "./cloudflare.js";
 import { api, deployVersion, existingDatabase, findWorker, loadRelease, stageVersion, uploadAssets } from "./deploy.js";
-import { autoState, backgroundToken, healthCheck, laterAuto, runAuto, runningSince, switchCarefully, turnOff } from "./auto.js";
+import { autoState, backgroundToken, chooseRelease, healthCheck, laterAuto, runningSince, startRunNow, switchCarefully, turnOff } from "./auto.js";
 import { checkNewer, PROBLEM_KEY } from "./migrate.js";
-import { releaseKey } from "./signing.js";
+import { releaseKey, signedList } from "./signing.js";
 import { GROUP_RELEASE, isGroupWorker } from "./groupsites.js";
 import { html, json, now, pageData } from "./util.js";
 import { updatePage } from "./views/update.js";
 import { lastChecked, tooSoonToCheck } from "./checks.js";
+import { checkGrant, checkingFriends, friendCheckResults, lastFailure } from "./friendchecks.js";
 
 const VERSION = pkg.version;
 const REPO = pkg.afterwrd.releases;
@@ -45,6 +52,11 @@ export async function handleUpdate(request, env, url, owner) {
     return html(updatePage(pageData(env, await updateData(request, env, url, owner))));
   }
   if (request.method === "GET" && path === "/version") return json({ version: VERSION });
+  if (request.method === "GET" && path === "/progress") {
+    const state = await autoState(env.DB);
+    return json({ version: VERSION, running: Boolean(await runningSince(env.DB)), lines: state.progress ?? [], words: state.lastCheck?.words ?? null,
+      lastRun: state.lastRun ?? 0, problem: state.problem ?? null });
+  }
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
 
   if (path === "/auto-later") { // "Not now" on Home's offer of automatic updates: the Update page still has it
@@ -52,10 +64,13 @@ export async function handleUpdate(request, env, url, owner) {
     await laterAuto(env);
     return Response.redirect(`${url.origin}/`, 303);
   }
-  if (path === "/auto-now") { // "Look for an update now": the daily run, straight away (the owner waits for it)
+  if (path === "/install-now") { // "Install it now": the automatic run, straight away (the page waits for it)
     if (request.headers.get("Origin") !== url.origin) return json({ error: "Request from another site" }, 403);
-    const ran = await runAuto(env);
-    return Response.redirect(`${url.origin}/_admin/update${ran ? "" : "?auto=busy"}#auto`, 303);
+    if (!(await autoState(env.DB)).on) return json({ error: "Automatic updates are off." }, 400);
+    if (await runningSince(env.DB)) return json({ busy: true });
+    // Started by the vault, so it carries on whatever happens to this page (auto.js startRunNow).
+    await startRunNow(env, url.origin);
+    return json({ asked: Date.now() });
   }
   if (path === "/auto-off") {
     if (request.headers.get("Origin") !== url.origin) return json({ error: "Request from another site" }, 403);
@@ -81,9 +96,11 @@ export async function handleUpdate(request, env, url, owner) {
       await api(token, `/accounts/${account}/workers/scripts/${script}/secrets/UPDATE_TOKEN`, { method: "DELETE" });
       return json({ ok: true });
     }
-    const token = await updateToken(request, env, url, body);
+    const { token, background } = await updateToken(request, env, url, body);
     if (path !== "/check" && !/^[0-9a-f]{32}$/.test(body.account ?? "")) throw new Error("Unknown Cloudflare account.");
-    const release = () => loadRelease(`https://github.com/${REPO}/releases/download/${body.tag}`);
+    // With automatic updates' access, only what's signed, exactly as signed (as the automatic run does).
+    const pinned = background ? await signedManifest(env, url.origin, body.tag.slice(1)) : undefined;
+    const release = () => loadRelease(`https://github.com/${REPO}/releases/download/${body.tag}`, pinned);
     if (path === "/check") return json({ account: (await findWorker(token, url.hostname)).account });
     if (path === "/assets") return json({ jwt: await uploadAssets(token, body.account, script, await release()) });
     if (path === "/deploy") {
@@ -131,12 +148,21 @@ export async function handleUpdate(request, env, url, owner) {
  */
 async function updateToken(request, env, url, body) {
   try {
-    return tokenFor(request, body);
+    return { token: tokenFor(request, body), background: false };
   } catch (error) {
     const background = await backgroundToken(env, url.origin);
-    if (background) return background;
+    if (background) return { token: background, background: true };
     throw error;
   }
+}
+
+/** The signed manifest hash for `version` (signing.js), or an error saying it isn't signed yet. */
+async function signedManifest(env, origin, version) {
+  const list = await signedList(env, origin);
+  const state = await autoState(env.DB);
+  const signed = list && list.seq >= (state.listSeq ?? 0) ? list.releases.get(version) : null;
+  if (!signed) throw new Error(`afterwrd ${version} isn't signed yet, so automatic updates' access won't install it. It'll install itself once it is.`);
+  return signed.manifestSha256;
 }
 
 /** What the Update page shows: this version, the latest release, groups behind, and asking a friend for a check. */
@@ -149,13 +175,38 @@ async function updateData(request, env, url, owner) {
     securityFix: latest.securityFix && newer(latest.securityFix, VERSION) ? latest.securityFix : null,
     site: url.host, connected: Boolean(connectedToken(request)), oldToken: Boolean(env.UPDATE_TOKEN), groups: await groupsBehind(env.DB),
     go: url.searchParams.get("go"), checked: await lastChecked(env.DB), checkWait: tooSoonToCheck(env),
-    auto: { ...(await autoState(env.DB)), signed: Boolean(releaseKey(env, url.origin)), running: await runningSince(env.DB), busy: url.searchParams.get("auto") === "busy" },
+    auto: await autoData(env, url, latest),
+    madeGroups: (await env.DB.prepare(`SELECT COUNT(*) AS n FROM groups WHERE joined_at IS NOT NULL AND role = 'owner'
+      AND script IS NOT NULL AND script != ''`).first())?.n ?? 0,
     friends: (await env.DB.prepare(`SELECT id, name FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NOT NULL
       AND their_key IS NOT NULL ORDER BY name COLLATE NOCASE LIMIT 200`).all()).results,
     // The versions this site has run (migrate.js), newest first, and a newer one's database update that failed.
     history: (await env.DB.prepare("SELECT version, from_version, at FROM updates ORDER BY id DESC LIMIT 5").all()).results,
     problem: await updateProblem(env.DB),
+    // Friends' automatic checks (friendchecks.js): whether friends' sites may check this one, what the last that found
+    // something said, and this site's checks of theirs.
+    checkGrant: await checkGrant(env.DB), checkFailure: await lastFailure(env.DB),
+    checking: await checkingFriends(env.DB), friendChecks: await friendCheckResults(env.DB),
   };
+}
+
+/**
+ * Automatic updates, for the Update page: their state, and, when a newer release is out, what they'll do with it:
+ * next = {version, after} (signed: installs itself after `after`, or now), {version, unsigned: true}, or null.
+ */
+async function autoData(env, url, latest) {
+  const state = await autoState(env.DB);
+  const data = { ...state, signed: Boolean(releaseKey(env, url.origin)), running: await runningSince(env.DB), next: null };
+  if (!state.on || !latest.version || !newer(latest.version, VERSION) || !data.signed) return data;
+  const list = await signedList(env, url.origin);
+  if (!list || list.seq < (state.listSeq ?? 0)) return { ...data, next: { version: latest.version, unsigned: true } };
+  // The newest signed release (what "Install it now" installs), and when it'd install itself.
+  const pick = (await chooseRelease(env, url.origin, list, [], fetch, { noWait: true })).ready;
+  if (!pick) return { ...data, next: { version: latest.version, unsigned: true } };
+  data.next = { version: pick.version, after: pick.after, failed: (state.failed ?? []).includes(pick.version),
+    // GitHub's newest isn't signed (yet), but an older one, still newer than this site, is.
+    unsigned: pick.version !== latest.version ? latest.version : null };
+  return data;
 }
 
 /** A newer version's failed database update, kept by migrate.js: {version, migration, error, at}, or null. */
@@ -182,10 +233,11 @@ export const groupsBehind = async (db) => (await madeGroups(db)).filter((g) => g
 /** Brings a group this site made up to this site's version: its files, then its code (keeping its database and secrets). */
 async function updateGroup(request, env, path, body) {
   try {
-    const token = await updateToken(request, env, new URL(request.url), body);
+    const url = new URL(request.url);
+    const { token, background } = await updateToken(request, env, url, body);
     const group = (await groupsBehind(env.DB)).find((g) => g.id === Number(body.group));
     if (!group || !/^[0-9a-f]{32}$/.test(group.account)) throw new Error("That group is already up to date, or couldn't be reached.");
-    const release = await loadRelease(GROUP_RELEASE);
+    const release = await loadRelease(GROUP_RELEASE, background ? await signedManifest(env, url.origin, VERSION) : undefined);
     if (path === "/group-assets") return json({ jwt: await uploadAssets(token, group.account, group.script, release) });
     const settings = await api(token, `/accounts/${group.account}/workers/scripts/${group.script}/settings`);
     if (!isGroupWorker(settings, group)) throw new Error("That Worker isn't the group's any more, so it wasn't updated.");

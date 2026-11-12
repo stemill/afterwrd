@@ -60,6 +60,15 @@ export class Outbox extends DurableObject {
     else this.sql.exec("INSERT INTO vault (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value", name, value);
   }
 
+  /**
+   * In the vault: "Install it now" (auto.js). The alarm asks the site's own address to run the automatic update, and
+   * waits for it, so the run belongs to this object (which has up to 15 minutes), not to the owner's page.
+   */
+  async runSoon(origin) {
+    this.keepSecret("run_now", origin);
+    await this.wake(Date.now());
+  }
+
   /** Queues `body` for each connection id (friends' sites), and sees that the alarm will send it. */
   send(connectionIds, body) {
     return this.queue("notes", connectionIds, body);
@@ -100,6 +109,16 @@ export class Outbox extends DurableObject {
   }
 
   async alarm() {
+    const origin = this.secret("run_now");
+    if (origin) {
+      this.keepSecret("run_now", null);
+      const key = this.secret("auto_key");
+      if (key) {
+        await fetch(`${origin}/_auto/step`, { method: "POST", redirect: "manual",
+          headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: JSON.stringify({ step: "run-now" }) })
+          .then((r) => r.body?.cancel()).catch((error) => console.error("Install it now:", error.message));
+      }
+    }
     let room = BATCH;
     for (const table of Object.keys(KINDS)) room -= await this.sendDue(table, room);
     const next = Math.min(...Object.keys(KINDS).map((t) => this.sql.exec(`SELECT MIN(due) AS due FROM ${t}`).one().due ?? Infinity));

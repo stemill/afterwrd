@@ -25,8 +25,18 @@ export function resultHtml(r, whose = "theirs", by = null) {
     else say(false, "This Worker doesn't look like afterwrd: its version couldn't be read.");
     for (const p of r.problems ?? []) say(false, escape(p));
     if (!(r.problems ?? []).length && r.code === "matches") say(true, "It's connected to exactly what afterwrd uses, and hands out its files only through its code.");
+    const v = r.versions;
+    if (v && !v.none) {
+      const since = v.from ? ` since ${escape(when(v.from))}` : "";
+      if ((v.unknown ?? []).length) {
+        say(false, `${v.unknown.length === 1 ? "One version" : `${v.unknown.length} versions`} of ${your} site's code uploaded or made live${since} ${v.unknown.length === 1 ? "wasn't" : "weren't"}
+          a signed afterwrd release (${v.unknown.map((u) => `version ${escape(String(u.number ?? "?"))}, ${escape(when(u.at))}`).join("; ")}). Something
+          other than afterwrd changed ${your} site's code, even if only for a while.`);
+      } else if (v.more) say(false, `There were more uploads to ${your} site's code${since} than one check looks at.`);
+      else say(true, `Every version of ${your} site's code uploaded or made live${since} was a signed afterwrd release (${v.checked} ${v.checked === 1 ? "version" : "versions"}).`);
+    }
     if (r.newer) lines.push(`<p class="meta">afterwrd ${escape(r.newer)} is out: worth updating.</p>`);
-    if (recent(r)) {
+    if (recent(r) && !r.automatic) {
       lines.push(`<p class="check-bad">⏳ ${Your} site was installed or updated less than an hour before this check. Access given to an
         installer or an update lasts an hour and can't be cut short, so ask for another check after <b>${escape(when(r.modified + HOUR))}</b>.</p>`);
     }
@@ -50,7 +60,10 @@ export function resultHtml(r, whose = "theirs", by = null) {
       }
     }
   }
-  lines.push(`<p class="meta">Checked ${escape(when(r.checkedAt))}, read-only. The access Cloudflare gave was used for this check and not kept.</p>`);
+  lines.push(r.automatic
+    ? `<p class="meta">Checked by itself ${escape(when(r.checkedAt))}, read-only, with a one-hour pass ${your} site handed over. Its
+      account's log of changes isn't read by these checks.</p>`
+    : `<p class="meta">Checked ${escape(when(r.checkedAt))}, read-only. The access Cloudflare gave was used for this check and not kept.</p>`);
   return lines.join("\n");
 }
 

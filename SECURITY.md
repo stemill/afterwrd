@@ -29,9 +29,18 @@ releases. When a release fixes a security problem, each older site says so to it
 Sites with automatic updates turned on install a release by themselves once it has been **signed** and has been out
 for three days (one day for a security fix). Signing (`worker/scripts/sign.mjs`) happens on the maintainer's own
 machine, with a key that never goes near GitHub, and only after rebuilding the release from its tag and finding it
-matches what GitHub published byte for byte. The signatures are in [`signatures/`](signatures); deleting one pulls
-that release from automatic updates. Every update, automatic or by hand, is put in place without going live, switched
-to, and switched straight back if the new version doesn't answer healthily.
+matches what GitHub published byte for byte. The signed list of releases is
+[`signatures/index.json`](signatures/index.json): one list, signed as a whole with a number that only goes up, so a
+release is pulled by signing the list again without it, and an older list can't be put back. Each release in it also
+carries its **etag**, Cloudflare's fingerprint of the release's code (the same in every account), which friends'
+checks use. Every update, automatic or by hand, is put in place without going live, switched to, and switched straight
+back if the new version doesn't answer healthily. *Install it now* on the Update page installs only signed releases
+too.
+
+Sites can also let their friends' sites **check them by themselves** (see below): a few times a week, and after each
+update, a friend's site checks with read-only access that the site's code is exactly a signed release, set up as
+afterwrd sets it up, in the account at its address, and that every upload to its code since the last check was a
+signed release. A finding shows on both sites' Home.
 
 To hear about every release, *Watch* this repository on GitHub (*Watch* → *Custom* → *Releases*) or follow the
 [releases feed](https://github.com/stemill/afterwrd/releases.atom). Each release's notes are what its sites show on
@@ -50,6 +59,12 @@ Automatic updates, if turned on, ask once for **Background Access** with *Worker
 Workers, nothing else. It lasts until turned off on the Update page or revoked under *Connected Applications*. The
 refresh token is kept in the site's own Durable Object storage, never in its database or downloads. afterwrd never
 asks for permission to make API tokens: a token that can make tokens can make one with any permission in the account.
+
+Letting friends' sites check yours, if turned on, asks once for **Background Access** to read Workers' code
+(`workers-scripts.content_read`) only. Your site hands a friend's site that asks a one-hour access token from it, at
+most two a day for each friend and twelve a day in all; the friend's site uses it for that check and keeps nothing. It
+reads every Worker's code in the account (groups' too), but can't change anything or read databases, settings or the
+audit log.
 
 That's every Worker and database **in the account**, not just afterwrd's. So if you use Cloudflare for other things,
 make a separate Cloudflare account just for afterwrd. It doesn't cover your domains, DNS, other Cloudflare

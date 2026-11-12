@@ -28,8 +28,8 @@
   a { color: var(--accent-strong); }
   .meta { color: var(--muted); font-size: 0.9rem; }
   #error:empty { display: none; }
-  #ask[hidden], #ask-check[hidden], #ask-auto[hidden] { display: none; }
-  #host, #check-host { font: 800 1.15rem/1.3 var(--round); word-break: break-all; }
+  #ask[hidden], #ask-check[hidden], #ask-auto[hidden], #ask-checks[hidden] { display: none; }
+  #host, #check-host, #auto-host, #checks-host { font: 800 1.15rem/1.3 var(--round); word-break: break-all; }
   button { display: inline-block; padding: 10px 18px; border: 0; border-radius: 999px; background: var(--text); color: var(--bg);
     font: inherit; font-weight: 700; cursor: pointer; margin-top: 8px; }
 </style>
@@ -57,6 +57,18 @@
   address.</p>
   <p><button id="continue-auto">Continue to Cloudflare</button></p>
 </section>
+<section id="ask-checks" hidden>
+  <p>Let your friends' afterwrd sites check yours by themselves?</p>
+  <p id="checks-host"></p>
+  <p class="meta">It's asking Cloudflare for <b>lasting</b> Background Access to <b>read</b> the code of every Worker in
+  your Cloudflare account (not only afterwrd's), and nothing else: it can't change anything, or read your databases or
+  your account's settings. Your
+  site hands a friend's site that asks a one-hour, read-only pass from it, so they can check your site is exactly the
+  published afterwrd, now and then, without you doing anything. Turn it off any time on the site's Update page, or in
+  Cloudflare (My Profile → Access Management → Connected Applications). Only continue if this is <b>your own</b> site's
+  address.</p>
+  <p><button id="continue-checks">Continue to Cloudflare</button></p>
+</section>
 <section id="ask-check" hidden>
   <p>Let this friend's afterwrd site check yours?</p>
   <p id="check-host"></p>
@@ -77,10 +89,13 @@
   //                      account's settings and audit log.
   //   /_cloudflare/auto-done  your own site keeping itself up to date (worker/src/auto.js): Background Access to change
   //                      Workers (Workers Editor) and nothing else: no databases, no account settings, no tokens.
+  //   /_cloudflare/checks-done  your own site letting friends' sites check it by themselves (worker/src/friendchecks.js):
+  //                      Background Access to read your Workers' code, and nothing else.
   const SCOPES = {
     "/_cloudflare/done": "workers-scripts.admin d1.write account-settings.read",
     "/_check/done": "workers-scripts.content_read account-settings.read",
     "/_cloudflare/auto-done": "offline_access workers-scripts.edit",
+    "/_cloudflare/checks-done": "offline_access workers-scripts.content_read",
   };
   const KEY = "afterwrd-connect";
   const status = document.getElementById("status");
@@ -118,7 +133,8 @@
       if (!problem.textContent) {
         // The one place the person can see which site is being connected, so it asks before going on.
         const kind = { "/_check/done": ["check-host", "ask-check", "continue-check"],
-          "/_cloudflare/auto-done": ["auto-host", "ask-auto", "continue-auto"] }[site.pathname] ?? ["host", "ask", "continue"];
+          "/_cloudflare/auto-done": ["auto-host", "ask-auto", "continue-auto"],
+          "/_cloudflare/checks-done": ["checks-host", "ask-checks", "continue-checks"] }[site.pathname] ?? ["host", "ask", "continue"];
         status.textContent = "";
         document.getElementById(kind[0]).textContent = site.host;
         document.getElementById(kind[1]).hidden = false;

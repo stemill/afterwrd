@@ -332,15 +332,29 @@ non-technical version, see <a href="/compared/">how afterwrd is different from F
   <i>Background Access</i> to change your Workers, and nothing else. Your site then installs a release only when it has
   been signed with afterwrd's own key, which is kept off GitHub, and has been out for three days (one, for a security
   fix), so a bad release can be pulled before it reaches anyone, and taking over the GitHub account isn't enough to
-  reach every site. Releases that add a new kind of store are still installed by hand, because Cloudflare insists. Turn
-  them off on the Update page, or revoke afterwrd under <i>Connected Applications</i>.</p>
+  reach every site. You can still install a release straight away with <b>Install it now</b> on the Update page; it has
+  to be signed too. Your groups follow your site in the same run. Releases that add a new kind of store are still
+  installed by hand, because Cloudflare insists. Turn them off on the Update page, or revoke afterwrd under
+  <i>Connected Applications</i>.</p>
+  <p id="checks"><b>Friends' checks</b>, if you let them, keep an eye on your site without anyone doing anything. Cloudflare
+  asks you to allow <i>Background Access</i> to <b>read</b> your Workers' code, and nothing else. A few times a week, and
+  soon after each update, one of your friends' afterwrd sites asks yours for a one-hour pass from that access, and
+  checks, with no one present, that your site's code is exactly a release signed with afterwrd's key, that it's set up
+  as afterwrd sets it up, that the Cloudflare account is the one at your address, and that nothing else has been
+  uploaded as your site's code since the last check, even for a while (Cloudflare gives every upload a fingerprint of its
+  code, and the signed list of releases carries each release's). A pass is quiet. If a check finds something, both your
+  Home and your friend's say so. Your friends' sites choose when to check, so a site that's been tampered with can't
+  pick who checks it, and one that keeps refusing shows up on their Home too. These checks don't read your account's
+  log of changes; a check by link (on the Update page) still does, for when you want the fuller look.</p>
   <p>To see for yourself what the installer did, <a href="/check/">Check your install</a> lists what should be in your
   account afterwards and the trail it leaves in Cloudflare's audit log.</p>
   <p>What <b>Allow</b> covers, plainly: for that hour, every Worker and database in the Cloudflare account, not just
   afterwrd's, and the account's basic settings. Not your domains, other Cloudflare services, billing or login. That's
   why, if you use Cloudflare for anything else, it's best to make an account just for afterwrd. What you've allowed is
   listed, and can be revoked, under <i>My Profile → Connected Applications</i>. Automatic updates' Background Access
-  covers less, but for as long as it's on: changing every Worker in the account, not databases or settings.</p>
+  covers less, but for as long as it's on: changing every Worker in the account, not databases or settings. Friends'
+  checks' Background Access covers less again: reading every Worker's code in the account (groups' too), which your
+  friends' sites are handed an hour at a time.</p>
   <p>When an update fixes a security problem, your site says so on Home. To hear about every release, follow the
   <a href="__REPO_PAGE__/releases.atom">releases feed</a> or <i>Watch</i> the repository on GitHub (Custom → Releases).</p>
   <p class="meta">Trust, stated plainly: an installed site trusts the GitHub repository it updates from, and the
@@ -376,7 +390,11 @@ non-technical version, see <a href="/compared/">how afterwrd is different from F
     <li><b>Automatic updates' standing access.</b> While they're on, your site keeps Background Access to change Workers
     in your account. If your site's own code were ever tampered with, that access would let it change your Workers
     whenever it liked, not only during an hour you chose. Revoking afterwrd under Connected Applications ends it.
-    Another reason for an account used only for afterwrd.</li>
+    Another reason for an account used only for afterwrd. Friends' checks are what would show it: they look at every
+    upload since the last check, not only what's live.</li>
+    <li><b>A friend's check is a friend's word.</b> A friend's site whose own code had been tampered with could say all is
+    well when it isn't. Several friends checking makes that much harder; and the checks can't see a change made
+    straight to your database (only your account's log of changes shows that, which a check by link reads).</li>
     <li><b>Your Cloudflare account.</b> Anyone who gets into it can read your database and change your Worker. Use a
     strong password and two-factor authentication there, and ideally an account used for nothing else.</li>
     <li><b>Your devices.</b> A passkey is as safe as the phone or computer it's on. If one is lost, remove its passkey from
@@ -392,7 +410,7 @@ non-technical version, see <a href="/compared/">how afterwrd is different from F
 
 <footer>
   <p>afterwrd __VERSION__. Source code and releases: <a href="__REPO_PAGE__">GitHub</a>. afterwrd isn't affiliated with or
-  endorsed by Meta or Cloudflare.</p>
+  endorsed by Meta or Cloudflare. Facebook and Meta are trademarks of Meta Platforms, Inc.</p>
 </footer>
 </main>
 </body>

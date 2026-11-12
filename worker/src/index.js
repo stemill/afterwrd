@@ -25,7 +25,8 @@ import { html } from "./util.js";
 import { handleLive } from "./live.js";
 import { handleMessages } from "./messages.js";
 import { handlePush } from "./push.js";
-import { handleAutoConnect, handleAutoStep, health, runAuto } from "./auto.js";
+import { autoState, handleAutoConnect, handleAutoStep, health, runAuto } from "./auto.js";
+import { handleChecksConnect, runFriendChecks } from "./friendchecks.js";
 
 export { MediaStore } from "./media.js";
 export { Outbox } from "./outbox.js";
@@ -57,8 +58,14 @@ export default {
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   },
   // The daily run of automatic updates (auto.js), at the time set when they were turned on. Group Workers have none.
+  // Then this site's checks of its friends' sites that are due (friendchecks.js).
   async scheduled(event, env, work) {
-    if (!env.GROUP_KEY) work.waitUntil(runAuto(env));
+    if (env.GROUP_KEY) return;
+    work.waitUntil(runAuto(env).then(async () => {
+      const { on, origin } = await autoState(env.DB);
+      // (On this computer a test can have every friend checked at once.)
+      if (on && origin) await runFriendChecks(env, origin, { everyone: Boolean(env.ALLOW_LOCAL_SITES && env.TEST_CHECK_EVERYONE) });
+    }).catch((error) => console.error("Daily run:", error.message)));
   },
 };
 
@@ -124,6 +131,8 @@ async function route(request, env, work) {
   // Connecting to Cloudflare, for updating and groups (an hour's token in a cookie; cloudflare.js).
   // Background access for automatic updates is a Connect of its own (auto.js).
   if (url.pathname.startsWith("/_cloudflare/auto-")) return (await handleAutoConnect(request, env, url)) ?? new Response("Not found", { status: 404 });
+  // So is the read-only access friends' sites check this one with (friendchecks.js).
+  if (url.pathname.startsWith("/_cloudflare/checks-")) return (await handleChecksConnect(request, env, url)) ?? new Response("Not found", { status: 404 });
   if (url.pathname.startsWith("/_cloudflare/")) return (await handleCloudflare(request, env, url)) ?? new Response("Not found", { status: 404 });
   if (url.pathname === "/_comments" || url.pathname.startsWith("/_comments/")) return handleComments(request, env, url, user);
   if (url.pathname === "/_live") return handleLive(request, env, url, user, work);

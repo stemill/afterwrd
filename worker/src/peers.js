@@ -17,6 +17,9 @@
 //                                       (connect.js); either can then ask the other to be friends
 //   POST /_peer/checked                 {site, version}: their site checked this one and found it genuine (checks.js)
 //   POST /_peer/check-request           their owner asks the owner here to check their site (checks.js)
+//   POST /_peer/check-token             their site asks for a one-hour read-only token to check this one by itself
+//   POST /_peer/check-soon              their site was just updated: check it soon (friendchecks.js)
+//   POST /_peer/check-failed            {site, version, problems}: their site checked this one and found something
 //   POST /_peer/disconnect              they've disconnected
 // The feed and comments are ActivityStreams (public/static/activity.js). The feed and notes carry only posts written
 // on afterwrd; friend pages (posts, albums, photos) also show the parts of the Facebook archive the owner has chosen to
@@ -30,6 +33,7 @@ import { json, now, Refusal, sha256 } from "./util.js";
 import { notifyComment, receiveNote } from "./notify.js";
 import { receiveIntroduction } from "./connect.js";
 import { receiveChecked, receiveCheckRequest } from "./checks.js";
+import { giveCheckToken, receiveCheckFailed, receiveCheckSoon } from "./friendchecks.js";
 import { receiveMessage } from "./messages.js";
 import { answerHere, pollObject, sitePolls } from "./polls.js";
 
@@ -161,6 +165,18 @@ export async function handlePeer(request, env, url, work) {
   }
   if (route === "POST /_peer/check-request") {
     const [body, status] = await receiveCheckRequest(env, peer, await request.json().catch(() => ({})));
+    return json(body, status);
+  }
+  if (route === "POST /_peer/check-token") {
+    const [body, status] = await giveCheckToken(env, url, peer, await request.json().catch(() => ({})));
+    return json(body, status);
+  }
+  if (route === "POST /_peer/check-soon") {
+    const [body, status] = await receiveCheckSoon(env, peer, await request.json().catch(() => ({})));
+    return json(body, status);
+  }
+  if (route === "POST /_peer/check-failed") {
+    const [body, status] = await receiveCheckFailed(env, url, peer, await request.json().catch(() => ({})));
     return json(body, status);
   }
   if (route === "POST /_peer/checked") {

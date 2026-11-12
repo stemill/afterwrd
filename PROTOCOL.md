@@ -490,7 +490,7 @@ The caller's site has just checked the receiver's (a read-only look at its Cloud
 {"type": "Checked", "site": "https://afterwrd.ann.workers.dev", "version": "0.34.0"}
 ```
 
-- Sent once, after a check that found nothing wrong, and only to a friend's site; a check that found problems sends nothing. The caller doesn't retry: a site that can't be reached just isn't told.
+- Sent once, after a check that found nothing wrong, and only to a friend's site. A check by link that found problems sends nothing; an automatic check that did sends 5.18 instead. The caller doesn't retry: a site that can't be reached just isn't told.
 - `site` must be the receiver's own origin, or the answer is `400 {"error": "That isn't a check of this site."}`. `version` is the release the code matched; anything that isn't `x.y.z` is dropped.
 - The receiver keeps who checked it (the caller's name, as it has it) and when, at most one an hour from one caller (more still answer `200`), and the newest 10 such records. It's the friend's word: it only changes what the receiver suggests to its owner (no longer suggesting a check) and shows on its Update page. Answer: `200 {"ok": true}`.
 - Older sites answer `404`, which the caller ignores.
@@ -551,6 +551,55 @@ The caller's owner answers the poll in a post here (6.3, `afterwrd:poll`):
   connection. Answers notify no one.
 - On success: `200 {"afterwrd:poll": { …the Question as the caller now sees it… }}`.
 - Older sites answer `404`.
+
+### 5.16 `POST /_peer/check-token` (afterwrd 0.44.0)
+
+Friends' automatic checks: the caller's site asks for read access to check the receiver's site by itself, with no one
+present (5.12 says what a check looks at; an automatic one doesn't read the account's audit log).
+
+```
+{"type": "CheckToken"}
+```
+
+- Only if the receiver's owner has let friends' sites check it: they allowed, once, lasting read-only access to their
+  Workers' code (Cloudflare OAuth scopes `offline_access workers-scripts.content_read`, nothing more). Otherwise
+  `409 {"error": "…", "off": true}`.
+- On success: `200 {"token": "<a Cloudflare OAuth access token>", "until": <unix seconds>}`. The token reads the
+  receiver's Cloudflare account's Workers (code, versions, settings) and nothing else, and lasts until `until`, at most
+  an hour. Several callers may be handed the same token, as a new one would end the one before. The caller uses it
+  only for that check and never keeps it.
+- Limits: two a day for one caller, twelve a day for all of them together. Beyond them: `429`.
+- The caller checks the code and setup against the signed list of releases (the release's manifest exactly as signed),
+  that the account's workers.dev name is the one in the receiver's address, and that every version of the Worker
+  uploaded since its last check has the `etag` of a signed release. It then sends 5.12 (all good) or 5.18.
+- Older sites answer `404`, which the caller takes as "nothing to check".
+
+### 5.17 `POST /_peer/check-soon` (afterwrd 0.44.0)
+
+The caller's site has just been updated, and asks the receiver's site to check it soon (5.16):
+
+```
+{"type": "CheckSoon"}
+```
+
+- The receiver keeps one per caller (asking again moves it later) for three days, and checks the caller on one of its
+  next daily runs, if its owner hasn't stopped it checking friends' sites. Either way: `200 {"ok": true}`.
+- Older sites answer `404`, which the caller ignores. Callers ask two friends, picked at random, after each update.
+
+### 5.18 `POST /_peer/check-failed` (afterwrd 0.44.0)
+
+The caller's site checked the receiver's by itself (5.16) and found something that needs a look:
+
+```
+{"type": "CheckFailed", "site": "https://afterwrd.ann.workers.dev", "version": "0.44.0",
+ "problems": ["An upload to the site's code since the last check wasn't a signed afterwrd release."]}
+```
+
+- `site` must be the receiver's own origin; `problems`, one to five lines of plain text (each cut to 300 characters).
+  Otherwise `400`. `version` is what the site said it was, or `null`.
+- The receiver keeps it as 5.12 does (at most one an hour from one caller, the newest 10), and shows its owner what
+  was found until a friend's check passes again. It's the friend's word, as 5.12 is. Answer: `200 {"ok": true}`.
+- Older sites answer `404`, which the caller ignores.
 
 ## 6. Objects
 

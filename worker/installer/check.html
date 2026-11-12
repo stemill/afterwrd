@@ -108,12 +108,14 @@ same browser, with the account you installed into.</p>
 
 <section id="revoke">
   <h2>3. Take the permission back</h2>
-  <p>afterwrd only keeps access to your account if you've turned on automatic updates. Then it keeps
-  <i>Background Access</i> to change Workers, and nothing else (no databases, settings or tokens). Without them, every
-  update asks again. Under
+  <p>afterwrd only keeps access to your account if you've turned on automatic updates, or let your friends' sites check
+  yours by themselves. Automatic updates keep <i>Background Access</i> to change Workers, and nothing else (no
+  databases, settings or tokens). Friends' checks keep Background Access to read Workers' code, and nothing else; your
+  site hands a friend's site a one-hour pass from it when it asks to check. Without either, every update asks again.
+  Under
   <b><a href="https://dash.cloudflare.com/profile/access-management/authorization" target="_blank" rel="noopener">Connected applications</a></b>,
-  revoke afterwrd if you like: that ends background access, and automatic updates turn themselves off. The hour's access
-  an install or a hand update was given may still last out its hour.</p>
+  revoke afterwrd if you like: that ends both, and they turn themselves off. The hour's access an install, a hand update
+  or a friend's pass was given may still last out its hour.</p>
 </section>
 
 <section id="friend">
@@ -161,7 +163,7 @@ node worker/scripts/check-site.mjs afterwrd</code></pre>
 
 <footer>
   <p>afterwrd __VERSION__. Source code and releases: <a href="__REPO_PAGE__">GitHub</a>. afterwrd isn't affiliated with or
-  endorsed by Meta or Cloudflare.</p>
+  endorsed by Meta or Cloudflare. Facebook and Meta are trademarks of Meta Platforms, Inc.</p>
 </footer>
 </main>
 </body>

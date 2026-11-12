@@ -27,6 +27,7 @@ import m0012 from "../migrations/0012_polls.sql";
 import m0013 from "../migrations/0013_one_set_of_tables.js";
 import m0014 from "../migrations/0014_updates.sql";
 import m0015 from "../migrations/0015_editing.sql";
+import m0016 from "../migrations/0016_friend_checks.sql";
 import pkg from "../package.json";
 
 // Every file in migrations/, in order. A new migration needs adding here too.
@@ -46,6 +47,7 @@ const MIGRATIONS = [
   ["0013_one_set_of_tables", m0013],
   ["0014_updates.sql", m0014],
   ["0015_editing.sql", m0015],
+  ["0016_friend_checks.sql", m0016],
 ];
 const VERSION = pkg.version;
 // A migration that failed, kept so the version left running can say so (the Update page): {version, migration, error, at}.

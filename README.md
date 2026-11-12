@@ -120,7 +120,10 @@ photos and videos. To check a release for yourself, see [Check it yourself](SECU
 - **Photo locations are removed** from photos you post, and left out of a Facebook import unless you tick *Photo
   locations*; they can show where you live.
 - **Keep it up to date.** Turn on automatic updates (one *Allow*, on the *Update* page) and the site installs each
-  signed release by itself after a few days. Otherwise the owner's *Update* page installs a newer release, keeping
+  signed release by itself after a few days, or straight away with *Install it now*, its groups following.
+- **Let your friends' sites check it.** One more *Allow* (read-only), and a few times a week a friend's afterwrd site
+  checks yours is exactly a signed release, with nothing else uploaded in its place since the last check. A finding
+  shows on both your Homes. Otherwise the owner's *Update* page installs a newer release, keeping
   your passkeys, connections and archive. (Pasting a newer `installer.js` over your afterwrd Worker does the same.) Home says so when an update
   fixes a security problem. To hear about every release, *Watch* the repository on GitHub (*Custom* → *Releases*) or
   follow its [releases feed](https://github.com/stemill/afterwrd/releases.atom).
@@ -172,8 +175,10 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   details phones hide in them (such as where a photo was taken), and they're collected in a *Posted on
   afterwrd* album. Importing again keeps them; deleting a post deletes its photos and comments.
 - **Update** (marked when a new version is out) shows what's new and installs it: press *Connect Cloudflare*,
-  *Allow* on Cloudflare's page, and it goes ahead, switching straight back if the new version doesn't work. It's
-  also where automatic updates are turned on or off, with what's coming next and what last happened. The connection lasts an hour and nothing is kept; sites updated
+  *Allow* on Cloudflare's page, and it goes ahead, switching straight back if the new version doesn't work, and your
+  groups follow. With automatic updates on, it says when the release will install itself, with *Install it now*. It's
+  also where automatic updates and friends' checks are turned on or off, with what's coming next, what last happened,
+  and what your site's checks of your friends' sites found. The connection lasts an hour and nothing is kept; sites updated
   from versions before 0.20.0 are offered *Forget it* for the token they used to remember.
 - **Download everything** (the download icon) saves the whole site as one zip: posts, photos and videos,
   albums, comments (those written here, and yours on friends' sites), likes, friends and connections, as

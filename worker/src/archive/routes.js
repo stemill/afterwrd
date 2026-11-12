@@ -19,6 +19,7 @@ import { newPushDevices } from "../push.js";
 import { checkRequests, lastChecked, recentChecks } from "../checks.js";
 import { securityFixWaiting, waitingRelease } from "../update.js";
 import { autoState } from "../auto.js";
+import { checkGrant, friendCheckAlerts, lastFailure } from "../friendchecks.js";
 import { now, pageData, withoutKeys } from "../util.js";
 import { fmtDate, fmtMonth } from "../views/format.js";
 import * as views from "../views/archive.js";
@@ -539,6 +540,11 @@ async function home(ctx, params) {
     unchecked: !(await lastChecked(db)),
     // Friends asking for their site to be checked: one tap makes the link to send back (checks.js).
     checkRequests: await checkRequests(db),
+    // A friend's site that checked this one and found something; this one's checks of friends' sites that did (or
+    // that their sites keep refusing): friendchecks.js.
+    checkFailure: await lastFailure(db),
+    friendChecks: await friendCheckAlerts(db),
+    checkGrant: await checkGrant(db), // offered once, after automatic updates
     // Someone asking to be friends: approved (or not) from Home in one tap, as well as from Friends.
     asking: await all(db, `SELECT id, origin, name, invited_as, via_kind, via_name FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL
       ORDER BY connected_at DESC LIMIT 3`),

@@ -1807,7 +1807,7 @@ const SIDE_FRIENDS = 12; // on Home; the rest are on Friends
 /** "a", "a and b", "a, b and c". */
 const listed = (items) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
 
-export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { devices: [], canConfirm: false }, newNotifying = [], securityFix = null, asking = [], introductions = [], unchecked = false, checkRequests = [], auto = { on: false } }) {
+export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { devices: [], canConfirm: false }, newNotifying = [], securityFix = null, asking = [], introductions = [], unchecked = false, checkRequests = [], auto = { on: false }, checkFailure = null, friendChecks = [], checkGrant = {} }) {
   const stream = [
     ...own.map((p) => ({ at: p.created_at, card: postCard(ctx, p) })),
     ...feed.posts.map((p) => ({ at: p.created_at, card: remoteCard(ctx, p.connection, p) })),
@@ -1825,8 +1825,25 @@ export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { de
         : html`afterwrd ${auto.last.version} didn't work on this site, so it was put back as it was.`}
       <a href="/_admin/update#auto">See what happened</a>.</p>`}
     ${!auto.on && !auto.later && !auto.problem && html`<form class="notice" method="post" action="/_admin/update/auto-later">
-      afterwrd can keep itself up to date, so you never have to update it. <a href="/_admin/update#auto">Turn it on</a>
+      afterwrd can keep itself up to date, so you never have to update it, and let your friends' afterwrd sites check it
+      now and then, so you'd hear if anything were ever wrong with it. Cloudflare asks you to allow each.
+      <a href="/_cloudflare/auto-start?then=checks" id="auto-offer">Turn them on</a>
       <button class="link">Not now</button></form>`}
+    ${checkFailure && html`<p class="notice alert" id="check-failure"><strong>${checkFailure.name}'s site checked yours</strong> on
+      ${fmtDate(checkFailure.checked_at)} and found something that needs a look: ${checkFailure.problems[0]}
+      <a href="/_admin/update#check">See what it found</a>.</p>`}
+    ${friendChecks.map((f) => html`<form class="notice alert friend-check" method="post" action="/_admin/checks/found/${f.id}/seen">
+      ${f.verdict === "needs a look"
+        ? html`<span>Your site checked <strong>${f.name}'s site</strong> and found something that needs a look. It's told their
+          site too, but it's worth telling ${f.name}.</span>`
+        : html`<span><strong>${f.name}'s site</strong> hasn't let yours check it the last ${f.refusals} times it tried. It may just
+          be switched off, but it's worth asking ${f.name}.</span>`}
+      <a href="/_admin/update#checking">See what it found</a> <button class="link">Put it away</button></form>`)}
+    ${checkGrant.problem && html`<p class="notice alert">Your friends' sites can't check yours by themselves any more:
+      ${checkGrant.problem} <a href="/_admin/update#check">Let them again</a>.</p>`}
+    ${auto.on && !checkGrant.on && !checkGrant.later && !checkGrant.problem && html`<form class="notice" id="checks-offer" method="post" action="/_admin/checks/let-later">
+      Let your friends' afterwrd sites check yours by themselves now and then, so you'd hear if anything were ever wrong with it.
+      <a href="/_admin/update#check">Let them</a> <button class="link">Not now</button></form>`}
     ${newDevices.devices.length > 0 && html`<form class="notice alert" method="post" action="/_admin/devices/seen">
       ${newDevices.devices.length === 1
         ? html`A new device was added to your site on ${fmtDate(newDevices.devices[0].created_at)}.`

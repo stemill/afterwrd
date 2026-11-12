@@ -36,6 +36,8 @@ import { API } from "./deploy.js";
 import { checkLinkPage, messagePage } from "./views/pages.js";
 import { callSite, ownerName, siteOrigin } from "./peers.js";
 import { knownLatest, newer } from "./update.js";
+import { laterChecks, letOff, putAway, setCheckingFriends } from "./friendchecks.js";
+import { signedList } from "./signing.js";
 import { html, json, now, pageData, randomToken, Refusal, sha256 } from "./util.js";
 
 const REPO = pkg.afterwrd.releases;
@@ -62,6 +64,24 @@ export async function handleCheckAdmin(request, env, url) {
     await checkedMyself(env);
     const back = url.searchParams.get("back") === "update" ? "/_admin/update#check" : "/";
     return Response.redirect(`${url.origin}${back}`, 303);
+  }
+  // Friends' automatic checks (friendchecks.js): letting friends' sites check this one, this one checking theirs.
+  if (url.pathname === "/_admin/checks/let-later") {
+    await laterChecks(env.DB);
+    return Response.redirect(`${url.origin}/`, 303);
+  }
+  if (url.pathname === "/_admin/checks/let-off") {
+    await letOff(env);
+    return Response.redirect(`${url.origin}/_admin/update#check`, 303);
+  }
+  if (url.pathname === "/_admin/checks/checking-off" || url.pathname === "/_admin/checks/checking-on") {
+    await setCheckingFriends(env.DB, url.pathname.endsWith("-on"));
+    return Response.redirect(`${url.origin}/_admin/update#checking`, 303);
+  }
+  const seen = /^\/_admin\/checks\/found\/(\d+)\/seen$/.exec(url.pathname);
+  if (seen) {
+    await putAway(env.DB, Number(seen[1]));
+    return Response.redirect(`${url.origin}/${url.searchParams.get("back") === "update" ? "_admin/update#checking" : ""}`, 303);
   }
   // "Not now" on a friend's request for a check (a form on Home).
   const dismiss = /^\/_admin\/checks\/requests\/(\d+)\/dismiss$/.exec(url.pathname);
@@ -222,7 +242,8 @@ async function finish(request, env, url, body) {
   let result;
   try {
     access = (await exchangeCode(env, body.code, verifier, url.origin)).access_token;
-    result = await checkSite(access, check.site, env, url.origin, { latest: await knownLatest(env.DB) });
+    // With the signed list (if this site has afterwrd's key), what's serving is checked by its fingerprint too.
+    result = await checkSite(access, check.site, env, url.origin, { latest: await knownLatest(env.DB), signed: await signedList(env, url.origin) });
   } catch (error) {
     // Nothing is kept, so the link can be used again.
     return fail(`The check couldn't finish: ${String(error.message).slice(0, 300)} Open the link to try again.`);
@@ -272,6 +293,9 @@ const text = (value, max = 120) => (typeof value === "string" ? value.slice(0, m
 const hex = async (bytes) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
 const apiBase = (env, here) => (testingHere(env, here) && env.CLOUDFLARE_API_URL) || API;
 
+/** Reading Cloudflare's API with a token someone allowed: {call, getJSON}. */
+export const cloudflareReader = (token, env, here, fetcher = fetch) => client(token, env, here, fetcher);
+
 function client(token, env, here, fetcher) {
   const base = apiBase(env, here);
   const call = (path) => fetcher(base + path, { headers: { Authorization: `Bearer ${token}` } });
@@ -288,9 +312,12 @@ function client(token, env, here, fetcher) {
 
 /**
  * What a token allowed for someone's account shows about their site (all but the audit log, which auditStep reads
- * afterwards). `here` is this site's own origin; `fetcher` is for tests.
+ * afterwards). `here` is this site's own origin; `fetcher` is for tests. Friends' automatic checks (friendchecks.js)
+ * also give `signed` (the signed list: the release must be in it, its manifest exactly as signed), `tie` (the
+ * account's workers.dev name must be the address's, so a token for some other account can't stand in), and
+ * `files: false` (the site files are looked at in a step of their own, siteFiles()).
  */
-export async function checkSite(token, site, env, here, { latest = {} } = {}, fetcher = fetch) {
+export async function checkSite(token, site, env, here, { latest = {}, signed = null, tie = false, files: lookAtFiles = true } = {}, fetcher = fetch) {
   const { call, getJSON } = client(token, env, here, fetcher);
   const releases = (testingHere(env, here) && env.RELEASES_URL) || `https://github.com/${REPO}/releases/download`;
   const script = new URL(site).hostname.split(".")[0];
@@ -309,6 +336,16 @@ export async function checkSite(token, site, env, here, { latest = {} } = {}, fe
   const { account, worker, others } = found[0];
   const at = `/accounts/${account}/workers/scripts/${script}`;
   result.account = account.slice(-6);
+  if (tie) {
+    result.accountId = account; // for the automatic check's next step; not kept
+    const name = (await getJSON(`/accounts/${account}/workers/subdomain`).catch(() => ({}))).result?.subdomain;
+    // (On this computer a test says what the stand-in account's name is.)
+    const expected = testingHere(env, here) && env.TEST_SUBDOMAIN ? env.TEST_SUBDOMAIN : new URL(site).hostname.split(".")[1];
+    if (!name || name !== expected) {
+      result.tieFailed = true;
+      problems.push("The Cloudflare account that was allowed isn't the one at the site's address (its workers.dev name is different).");
+    }
+  }
   result.created = Math.floor(Date.parse(worker.created_on) / 1000) || null;
   result.modified = Math.floor(Date.parse(worker.modified_on) / 1000) || null;
   try {
@@ -333,7 +370,19 @@ export async function checkSite(token, site, env, here, { latest = {} } = {}, fe
     result.code = "unknown";
   } else {
     const response = await fetcher(`${releases}/v${version}/manifest.json`, { headers: { "User-Agent": "afterwrd" } });
-    manifest = response.ok ? await response.json().catch(() => null) : null;
+    const bytes = response.ok ? new Uint8Array(await response.arrayBuffer()) : null;
+    manifest = bytes ? (() => { try { return JSON.parse(new TextDecoder().decode(bytes)); } catch { return null; } })() : null;
+    if (manifest && signed) {
+      const entry = signed.releases.get(version);
+      if (!entry) {
+        result.unsigned = true;
+        problems.push(`afterwrd ${version} isn't a release signed with afterwrd's own key.`);
+      }
+      else if (entry.manifestSha256 !== await hex(bytes)) {
+        problems.push(`afterwrd ${version} on GitHub isn't the release that was signed, so it was compared with nothing.`);
+        manifest = null;
+      }
+    }
     if (!manifest || !Array.isArray(manifest.modules)) {
       result.code = response.status === 404 ? "no-release" : "release-unavailable";
       manifest = null;
@@ -372,6 +421,21 @@ export async function checkSite(token, site, env, here, { latest = {} } = {}, fe
       // in an account that isn't the one at that address, won't match.
       const said = await fetcher(`${site}/_version`, { redirect: "manual" }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
       const detail = (await getJSON(`${at}/versions/${encodeURIComponent(serving[0].version_id)}`)).result ?? {};
+      result.liveVersion = text(serving[0].version_id, 64);
+      // Cloudflare hands over the newest upload's code, which needn't be what's serving (an upload can sit there unused
+      // over something else that's live). So what's serving is told by its fingerprint: it must be the signed etag of
+      // the release it says it is (signing.js; releases signed before etags have none, so can't be confirmed).
+      const etag = detail.resources?.script?.etag;
+      const signedEtag = signed && version ? signed.releases.get(version)?.etag : null;
+      if (signed && version && signed.releases.has(version)) {
+        if (!signedEtag) {
+          result.servingUnconfirmed = true;
+          problems.push(`The code serving visitors couldn't be confirmed: the signed list has no fingerprint for afterwrd ${version}.`);
+        } else if (etag !== signedEtag) {
+          result.servingMismatch = true;
+          problems.push(`The code serving visitors isn't afterwrd ${version} as signed (its fingerprint is different), whatever the code handed over says.`);
+        }
+      }
       const have = (detail.resources?.bindings ?? []).map((b) => b?.type === "durable_object_namespace"
         ? `${b.type} ${b.name} ${b.class_name}` : `${text(b?.type, 40)} ${text(b?.name, 60)}`);
       const extra = have.filter((b) => !BINDINGS.includes(b) && !(b.startsWith("secret_text ") && SECRETS.has(b.slice(12))));
@@ -421,20 +485,25 @@ export async function checkSite(token, site, env, here, { latest = {} } = {}, fe
     problems.push("Couldn't read what it's connected to.");
   }
 
-  // Its site files only through its code: asked for without signing in, each must get the code's sign-in redirect.
-  if (manifest) {
-    const paths = (manifest.assets ?? []).map((a) => a?.path).filter((p) => typeof p === "string" && /^\/static\/[\w./-]+$/.test(p) && !p.startsWith("/static/fonts/"));
-    const direct = [];
-    for (const path of paths.slice(0, 25)) {
-      const response = await fetcher(site + path, { method: "HEAD", redirect: "manual" }).catch(() => null);
-      if (response && response.status === 200) direct.push(path);
-    }
-    if (direct.length) problems.push(`Cloudflare hands out ${direct.length === 1 ? "one of its files" : `${direct.length} of its files`} without its code checking them first (${direct.slice(0, 3).join(", ")}).`);
-  }
+  if (manifest && lookAtFiles) problems.push(...await siteFiles(site, manifest, fetcher));
 
   result.problems = problems;
   result.audit = { from: (result.created ?? now()) - 3600, until: new Date().toISOString(), count: 0, unexpected: [], other: [] };
   return result;
+}
+
+/**
+ * Its site files only through its code: asked for without signing in, each must get the code's sign-in redirect.
+ * Problems found, in words.
+ */
+export async function siteFiles(site, manifest, fetcher = fetch) {
+  const paths = (manifest.assets ?? []).map((a) => a?.path).filter((p) => typeof p === "string" && /^\/static\/[\w./-]+$/.test(p) && !p.startsWith("/static/fonts/"));
+  const direct = [];
+  for (const path of paths.slice(0, 25)) {
+    const response = await fetcher(site + path, { method: "HEAD", redirect: "manual" }).catch(() => null);
+    if (response && response.status === 200) direct.push(path);
+  }
+  return direct.length ? [`Cloudflare hands out ${direct.length === 1 ? "one of its files" : `${direct.length} of its files`} without its code checking them first (${direct.slice(0, 3).join(", ")}).`] : [];
 }
 
 // What afterwrd does in an account through Connect: installing and updating its site, starting and deleting groups
@@ -596,7 +665,7 @@ async function keepChecked(db, connectionId, name, version) {
 }
 
 /** This site's newest check, as { name (null: the owner's own), version, checked_at }, or null if it's never been checked. */
-export const lastChecked = (db) => db.prepare("SELECT name, version, checked_at FROM checked ORDER BY id DESC LIMIT 1").first();
+export const lastChecked = (db) => db.prepare("SELECT name, version, checked_at FROM checked WHERE problems IS NULL ORDER BY id DESC LIMIT 1").first();
 
 // Changed less than an hour before the check: whoever was given access for the install or update still had it.
 export const HOUR = 3600;
