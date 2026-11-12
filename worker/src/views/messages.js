@@ -112,7 +112,7 @@ ${earlier && html`<p><a href="/messages/${chat.id}?before=${earlier}">Earlier me
 </ol>
 ${paged && html`<p><a href="/messages/${chat.id}">Newest messages</a></p>`}
 ${canSend ? html`<form class="say" id="say" method="post" action="/_messages/${chat.id}/send">
-  <textarea name="text" rows="2" maxlength="${max}" required placeholder="Message ${chat.name}" aria-label="Message ${chat.name}"></textarea>
+  <textarea name="text" data-draft="message:${chat.id}" rows="2" maxlength="${max}" required placeholder="Message ${chat.name}" aria-label="Message ${chat.name}"></textarea>
   <button class="chip primary">Send</button>
 </form>
 <p id="say-error" role="alert"></p>` : html`<p class="meta">${isGroup ? `You're not in ${chat.name} any more, so you can't send messages to it.`

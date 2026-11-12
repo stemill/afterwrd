@@ -6,6 +6,9 @@
 import { execFileSync } from "node:child_process";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
+// A form sent in place (ui.js, "afterwrd-inplace" when it's done) or the old way, with a new page: whichever happens.
+const settled = (page, options) => Promise.race([page.waitForNavigation(options),
+  page.evaluate(() => new Promise((r) => document.addEventListener("afterwrd-inplace", () => r(), { once: true }))).catch(() => new Promise(() => {}))]);
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
 const OUT = process.env.OUT ?? fileURLToPath(new URL("./out/", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -49,7 +52,7 @@ async function importZip(page) {
 }
 async function say(page, scope, text) {
   await page.type(`${scope} .say textarea`, text);
-  await Promise.all([page.waitForNavigation(), page.click(`${scope} .say button`)]);
+  await Promise.all([settled(page), page.click(`${scope} .say button`)]);
 }
 const bubbles = (page, scope) => page.$$eval(`${scope} .comment`, (l) => l.map((c) => ({
   id: c.id, name: c.querySelector(".bubble strong").textContent, text: c.querySelector(".said").textContent,
@@ -83,7 +86,7 @@ const firstCard = "article.card:first-of-type";
 check("each post written here has a comment box, and only those", (await owner.$$("article.card .say textarea")).length === 2
   && (await owner.$$("article.own .say textarea")).length === 2);
 await say(owner, firstCard, "Lovely <script>alert(1)</script>\nsecond line https://example.com");
-check("posting lands back on the comment", /^\/posts#c\d+$/.test(new URL(owner.url()).pathname + new URL(owner.url()).hash), owner.url());
+check("posting stays on the page", new URL(owner.url()).pathname === "/posts" && !new URL(owner.url()).hash, owner.url());
 let shown = await bubbles(owner, firstCard);
 check("comment shows straight away, text kept as typed", shown.length === 1 && shown[0].text === "Lovely <script>alert(1)</script>\nsecond line https://example.com");
 check("names and text are escaped, link is a link", !(await owner.$(`${firstCard} .said script`)) && !(await owner.$(`${firstCard} .bubble strong b`))
@@ -149,7 +152,7 @@ const editComment = async (scope, words) => {
   await owner.click(`${scope} .under details.more summary`);
   await owner.click(`${scope} .under details.more a[href^="#edit"]`);
   await owner.$eval(`${scope} div.edit textarea`, (t, w) => { t.value = w; }, words);
-  await Promise.all([owner.waitForNavigation(), owner.click(`${scope} div.edit button`)]);
+  await Promise.all([settled(owner), owner.click(`${scope} div.edit button`)]);
 };
 check("the owner's comment offers Edit", Boolean(await owner.$(`${firstComment} div.edit`)));
 await editComment(firstComment, "Lovely, changed");
@@ -163,6 +166,8 @@ sql(`INSERT INTO comments (target, author_id, author_name, text, created_at, ori
   VALUES ('${mineFirst.target}', NULL, 'Sam Taylor', 'From a friend', strftime('%s','now'), 'https://friend.example')`);
 await owner.goto(`${BASE}/posts`);
 check("once someone else has commented after it, it can't be changed", !(await owner.$(`${firstComment} div.edit`)));
+check("nothing stray (like a 0) under someone else's comment", await owner.$$eval(`${firstCard} .comment`,
+  (l) => l.length > 1 && l.every((c) => ![...c.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent.trim()))));
 const tooLate = await fetch(`${BASE}/_comments/${mineFirst.id}/edit`, { method: "POST", redirect: "manual",
   headers: { Cookie: `__Host-session=${cookie}`, Origin: BASE, "Content-Type": "application/x-www-form-urlencoded" },
   body: new URLSearchParams({ text: "sneaky change", back: "/posts" }) });
@@ -180,7 +185,7 @@ await say(owner, firstCard, "Thanks!");
 const before = (await bubbles(owner, firstCard)).length;
 const last = (await bubbles(owner, firstCard)).at(-1).id;
 await owner.click(`#${last} .under details.more summary`);
-await Promise.all([owner.waitForNavigation(), owner.click(`#${last} .under .delete`)]);
+await Promise.all([settled(owner), owner.click(`#${last} .under .delete`)]);
 check("owner deletes a comment", (await bubbles(owner, firstCard)).length === before - 1);
 const beforeImport = (await bubbles(owner, firstCard)).length;
 check("re-import finishes", !(await importZip(owner)));
@@ -192,16 +197,89 @@ await owner.goto(`${BASE}/posts`);
 check("…and the posts written here keep their addresses", sql("SELECT COUNT(*) AS n FROM posts WHERE source = 'afterwrd'")[0].n === 2
   && (await owner.$eval(`${firstCard} a.when`, (a) => a.getAttribute("href"))) === postHref);
 
+// Offline (public/static/app/push-sw.js) and what's being written (ui.js): a comment typed and not sent is kept on the
+// device; one sent with no connection stays in its box, saying so, and goes once connected.
+await owner.goto(`${BASE}/posts`);
+await owner.evaluate(() => navigator.serviceWorker.ready);
+await owner.reload(); // so the service worker looks after the page
+const box = `${firstCard} .say textarea`;
+await owner.type(box, "Half-written");
+await owner.reload();
+check("a comment that isn't sent is still there after a reload", (await owner.$eval(box, (t) => t.value)) === "Half-written");
+const worker = await (await browser.waitForTarget((t) => t.type() === "service_worker" && t.url().startsWith(BASE))).createCDPSession();
+await worker.send("Network.enable"); // without it, the worker's own requests ignore "offline"
+const offline = async (on) => { // the worker first: the page reloads itself as soon as it's back online
+  await worker.send("Network.emulateNetworkConditions", { offline: on, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+  await owner.setOfflineMode(on);
+};
+const countBefore = sql("SELECT COUNT(*) AS n FROM comments")[0].n;
+await owner.evaluate(() => { window.samePage = true; });
+await offline(true);
+await Promise.all([settled(owner), owner.click(`${firstCard} .say button`)]);
+check("sending with no connection says so, on the same page, words still in the box",
+  (await owner.evaluate(() => window.samePage)) && (await owner.$eval(box, (t) => t.value)) === "Half-written"
+  && /not connected/.test(await owner.$eval(`${firstCard} .say + .form-error`, (p) => p.textContent).catch(() => "")));
+check("…and nothing was sent", sql("SELECT COUNT(*) AS n FROM comments")[0].n === countBefore);
+await offline(false);
+await Promise.all([settled(owner), owner.click(`${firstCard} .say button`)]);
+check("sent once connected, still on the same page, with no note left", (await owner.evaluate(() => window.samePage))
+  && sql("SELECT COUNT(*) AS n FROM comments WHERE text = 'Half-written'")[0].n === 1
+  && (await bubbles(owner, firstCard)).at(-1).text === "Half-written" && !(await owner.$(`${firstCard} .form-error`)));
+check("…the box is empty, and the words no longer kept on the device", (await owner.$eval(box, (t) => t.value)) === ""
+  && (await owner.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("afterwrd-draft:")).length)) === 0);
+await offline(true);
+const gone = await owner.goto(`${BASE}/activity`);
+check("a page opened with no connection says so, with Try again", gone.status() === 503
+  && (await owner.$eval("h1", (h) => h.textContent)) === "You're offline" && (await owner.$eval("main button", (b) => b.textContent)) === "Try again");
+await offline(false);
+check("…and loads by itself once connected", await owner.waitForSelector("header.site", { timeout: 15_000 }).then(() => true, () => false));
+sql("DELETE FROM comments WHERE text = 'Half-written'");
+
 // Phone layout: nothing wider than the screen.
 await owner.setViewport({ width: 375, height: 800, isMobile: true });
 await owner.goto(`${BASE}/posts`);
 check("no sideways scrolling on a phone", await owner.evaluate(() => document.documentElement.scrollWidth <= 375));
+// Sending a comment doesn't make the page jump (ui.js): no new page, nothing above it moves, and the new comment
+// shows where its box was. On Home, just that post is fetched again.
+const settle = () => new Promise((r) => setTimeout(r, 1200));
+const onScreen = (selector) => owner.evaluate((sel) => {
+  const el = sel ? document.querySelector(sel) : document.getElementById(decodeURIComponent(location.hash.slice(1)));
+  return { top: Math.round(el.getBoundingClientRect().top), header: Math.round(document.querySelector("header.site").getBoundingClientRect().bottom) };
+}, selector);
+for (const where of ["/posts", "/"]) {
+  await owner.goto(`${BASE}${where}`);
+  await owner.evaluate(() => { const box = document.querySelector("article.card .say"); scrollBy(0, box.getBoundingClientRect().top - 450); });
+  const box = await onScreen("article.card .say");
+  const before = await owner.evaluate(() => { window.samePage = true; return scrollY; });
+  await say(owner, "article.card:first-of-type", `Where it lands ${where}`);
+  await settle();
+  const landed = await owner.evaluate(() => {
+    const el = [...document.querySelectorAll("article.card:first-of-type .comment")].at(-1);
+    return { top: Math.round(el.getBoundingClientRect().top), text: el.querySelector(".said").textContent, scrollY, samePage: window.samePage };
+  });
+  check(`a new comment shows where its box was, and the page doesn't move (${where})`, landed.samePage && landed.scrollY === before
+    && landed.text === `Where it lands ${where}` && Math.abs(landed.top - box.top) <= 4, `box at ${box.top}, comment at ${landed.top}, scrolled ${landed.scrollY - before}`);
+}
+const linked = sql("SELECT id FROM comments WHERE text = 'Where it lands /posts'")[0].id;
+await owner.goto(`${BASE}/posts#c${linked}`);
+await settle();
+const opened = await onScreen();
+check("a link to a comment shows it just below the header", opened.top > opened.header && opened.top < opened.header + 40,
+  `comment at ${opened.top}, header to ${opened.header}`);
+sql("DELETE FROM comments WHERE text LIKE 'Where it lands%'");
 await owner.screenshot({ path: `${OUT}/comments-phone.png`, fullPage: true });
 await owner.setViewport({ width: 1280, height: 900 });
 await owner.goto(`${BASE}/activity`);
 await owner.screenshot({ path: `${OUT}/activity.png`, fullPage: true });
 await owner.goto(BASE + photoHref);
 await owner.screenshot({ path: `${OUT}/photo-comments.png` });
+
+// Words kept on the device go on Sign out (it may be a shared phone).
+await owner.goto(`${BASE}/posts`);
+await owner.type(box, "Not for the next person");
+await Promise.all([owner.waitForNavigation(), owner.$eval('form[action="/_auth/logout"]', (f) => f.requestSubmit())]);
+check("signing out clears what was being written", (await owner.evaluate(() => Object.keys(localStorage)
+  .filter((k) => k.startsWith("afterwrd-draft:")).length)) === 0);
 
 check("no script errors", errors.length === 0, errors.join(" | "));
 await browser.close();

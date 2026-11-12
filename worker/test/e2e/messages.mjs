@@ -10,6 +10,9 @@ import { createDecipheriv, createECDH, createHash, createPublicKey, hkdfSync, ra
 import { createServer } from "node:http";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
+// A form sent in place (ui.js, "afterwrd-inplace" when it's done) or the old way, with a new page: whichever happens.
+const settled = (page, options) => Promise.race([page.waitForNavigation(options),
+  page.evaluate(() => new Promise((r) => document.addEventListener("afterwrd-inplace", () => r(), { once: true }))).catch(() => new Promise(() => {}))]);
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
@@ -272,7 +275,7 @@ check("Your devices lists it, without its address", (await ann.$eval("#notifying
   && !(await ann.content()).includes(device.endpoint));
 await ann.goto(`${A}/`);
 check("Home says a new device has notifications on", (await mainText(ann)).includes("Notifications about your messages were turned on for a new device (Android (home screen))"));
-await Promise.all([ann.waitForNavigation(), ann.$eval('form[action="/_admin/notifications/seen"] button', (b) => b.click())]);
+await Promise.all([settled(ann), ann.$eval('form[action="/_admin/notifications/seen"] button', (b) => b.click())]);
 check("…until Ann says that was her", !(await mainText(ann)).includes("were turned on for a new device"));
 
 // Sam's chat with Ann is unmuted and not open on Ann's screen: a message notifies.

@@ -9,6 +9,9 @@ import { createHash, createPrivateKey, randomBytes, sign } from "node:crypto";
 import { createServer } from "node:http";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
+// A form sent in place (ui.js, "afterwrd-inplace" when it's done) or the old way, with a new page: whichever happens.
+const settled = (page, options) => Promise.race([page.waitForNavigation(options),
+  page.evaluate(() => new Promise((r) => document.addEventListener("afterwrd-inplace", () => r(), { once: true }))).catch(() => new Promise(() => {}))]);
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const [stateA, stateB] = process.argv.slice(2);
@@ -195,7 +198,7 @@ const autoOn = await connect(sam, "#auto a.button", "auto.code-1");
 check("Sam turns on automatic updates", autoOn === null && (await text(sam, "#auto")).includes("Automatic updates are on"), autoOn);
 await sam.goto(`${B}/`);
 check("then Home offers, once, to let friends' sites check his", Boolean(await sam.$("#checks-offer")));
-await Promise.all([sam.waitForNavigation(), sam.click("#checks-offer button")]);
+await Promise.all([settled(sam), sam.click("#checks-offer button")]);
 check("…and \"Not now\" puts it away", !(await sam.$("#checks-offer")));
 let found = await samsRun();
 let result = JSON.parse(found?.result ?? "{}");
@@ -232,7 +235,7 @@ await ann.goto(`${A}/_admin/update`);
 check("…and her Update page lists it, without saying it passed", (await text(ann, "#check-failure")).includes("something other than a signed afterwrd release")
   && (await text(ann, "#last-checked")).includes("Last checked by Sam Taylor's site"));
 await sam.goto(`${B}/`);
-await Promise.all([sam.waitForNavigation(), sam.click(".friend-check button")]);
+await Promise.all([settled(sam), sam.click(".friend-check button")]);
 check("Sam can put it away", !(await sam.$(".friend-check")));
 cf.versions.shift();
 

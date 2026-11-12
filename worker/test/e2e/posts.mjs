@@ -5,6 +5,9 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
+// A form sent in place (ui.js, "afterwrd-inplace" when it's done) or the old way, with a new page: whichever happens.
+const settled = (page, options) => Promise.race([page.waitForNavigation(options),
+  page.evaluate(() => new Promise((r) => document.addEventListener("afterwrd-inplace", () => r(), { once: true }))).catch(() => new Promise(() => {}))]);
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
 const OUT = process.env.OUT ?? fileURLToPath(new URL("./out/", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -74,10 +77,12 @@ check("owner can delete it", first.canDelete);
 const firstCard = "main article.card:first-of-type";
 const shown = (selector) => owner.$eval(selector, (e) => e.checkVisibility()).catch(() => false);
 const editPost = async (words) => {
+  // Where a person could tap it: not tucked under the sticky header, where a test's click would land on the header.
+  await owner.$eval(firstCard, (c) => c.scrollIntoView({ block: "center" }));
   await owner.click(`${firstCard} > header details.more summary`);
   await owner.click(`${firstCard} > header details.more a[href^="#edit"]`);
   await owner.$eval(`${firstCard} > div.edit textarea`, (t, w) => { t.value = w; }, words);
-  await Promise.all([owner.waitForNavigation(), owner.click(`${firstCard} > div.edit button`)]);
+  await Promise.all([settled(owner), owner.click(`${firstCard} > div.edit button`)]);
 };
 check("a new post offers Edit", Boolean(await owner.$(`${firstCard} > div.edit`)));
 // Edit and Delete wait behind the small V; Edit opens the words, ready to type, and Cancel puts them away.
@@ -96,11 +101,12 @@ await owner.click(`${firstCard} > header details.more summary`);
 await owner.click("main h1");
 check("a tap elsewhere closes the menu", await owner.waitForFunction((card) => !document.querySelector(`${card} > header details.more`).open,
   { timeout: 3000 }, firstCard).then(() => true, () => false));
+const postId = await owner.$eval(firstCard, (c) => c.id);
 await editPost("First post written on the site\nwith two lines, now changed");
 check("the new words show", (await cards(owner))[0].text === "First post written on the site\nwith two lines, now changed");
 check("…marked Edited", (await owner.$eval(`${firstCard} > details.edited summary`, (s) => s.textContent).catch(() => "")) === "Edited");
 check("…with what it said before", (await owner.$eval(`${firstCard} .versions`, (l) => l.textContent)).includes("First post written on the site\nwith two lines"));
-check("…and it keeps its address", new URL(owner.url()).hash.startsWith("#p-post-"));
+check("…and it keeps its address, with no new page", (await owner.$eval(firstCard, (c) => c.id)) === postId && !new URL(owner.url()).hash);
 await editPost("   ");
 check("a post with no photos can't lose all its words", (await owner.$eval("body", (m) => m.textContent)).includes("needs words"));
 // At most 10 changes to any one post: a limit on what anyone can make the site keep.
@@ -157,10 +163,10 @@ check("photo page shows it, with the post", (await owner.$eval(".info .album-lin
 // Comments on the post and on a photo; everything survives a re-import.
 await owner.goto(`${BASE}/posts`);
 await owner.type("main article.card:first-of-type .say textarea", "Nice ones");
-await Promise.all([owner.waitForNavigation(), owner.click("main article.card:first-of-type .say button")]);
+await Promise.all([settled(owner), owner.click("main article.card:first-of-type .say button")]);
 await owner.goto(`${BASE}/photos/${stored[0].id}`);
 await owner.type(".info .say textarea", "Love this");
-await Promise.all([owner.waitForNavigation(), owner.click(".info .say button")]);
+await Promise.all([settled(owner), owner.click(".info .say button")]);
 check("re-import finishes", !(await importZip(owner)));
 await owner.goto(`${BASE}/posts`);
 const after = await cards(owner);
@@ -186,7 +192,7 @@ check("only the two real posts exist", sql("SELECT COUNT(*) AS n FROM posts WHER
 // The owner deletes the photo post: post, photos, files, album and comments all go.
 await owner.goto(`${BASE}/posts`);
 await owner.click("main article.card:first-of-type header details.more summary");
-await Promise.all([owner.waitForNavigation(), owner.click("main article.card:first-of-type header .delete")]);
+await Promise.all([settled(owner), owner.click("main article.card:first-of-type header .delete")]);
 const left = await cards(owner);
 check("photo post deleted", left[0].text?.startsWith("First post"), left[0].text);
 const shared = sql(`SELECT COUNT(*) AS n FROM media WHERE thumb_hash = '${stored[1].thumb_hash}'`)[0].n;
@@ -205,7 +211,7 @@ await (await owner.$("#composer input[type=file]")).uploadFile(`${fixtures}/phot
 await Promise.all([owner.waitForNavigation({ timeout: 60_000 }), owner.click("#composer button.post")]);
 const address = await owner.$eval("main article.card:first-of-type a.when", (a) => a.getAttribute("href"));
 await owner.type("main article.card:first-of-type .say textarea", "Still here?");
-await Promise.all([owner.waitForNavigation(), owner.click("main article.card:first-of-type .say button")]);
+await Promise.all([settled(owner), owner.click("main article.card:first-of-type .say button")]);
 const [lone] = sql("SELECT m.id FROM media m JOIN posts p ON p.id = m.post_id WHERE p.text = 'Words and a photo'");
 await owner.goto(`${BASE}/photos/${lone.id}`);
 await Promise.all([owner.waitForNavigation(), owner.click(".photo-tools .danger")]);
@@ -218,7 +224,7 @@ check("deleting a post's only photo keeps the post, at the same address, with it
 const newest = sql("SELECT MAX(id) AS id FROM posts")[0].id;
 await owner.goto(`${BASE}/posts`);
 await owner.click("main article.card:first-of-type header details.more summary");
-await Promise.all([owner.waitForNavigation(), owner.click("main article.card:first-of-type header .delete")]);
+await Promise.all([settled(owner), owner.click("main article.card:first-of-type header .delete")]);
 await owner.type("#composer textarea", "After a delete");
 await Promise.all([owner.waitForNavigation(), owner.click("#composer button.post")]);
 check("a new post never takes a deleted one's id", sql("SELECT id FROM posts WHERE text = 'After a delete'")[0]?.id > newest);

@@ -37,7 +37,9 @@ export async function loadThreads(db, keys) {
   // Only comments from the last few minutes can still be changed: ask about those alone.
   const recent = results.filter((c) => c.created_at > now() - EDIT_SECONDS).map((c) => c.id);
   const [earlier, editable] = [await commentVersions(db, results.filter((c) => c.edited_at).map((c) => c.id)), await editableComments(db, recent)];
-  for (const c of results) threads.get(c.target).push({ ...c, earlier: earlier.get(c.id) ?? [], editable: editable.has(c.id) });
+  // author_is_owner comes back from SQLite as 1/0: a bare 0 would print as "0" under someone else's comment.
+  for (const c of results) threads.get(c.target).push({ ...c, author_is_owner: Boolean(c.author_is_owner), earlier: earlier.get(c.id) ?? [],
+    editable: editable.has(c.id) });
   return threads;
 }
 

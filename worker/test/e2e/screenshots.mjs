@@ -6,6 +6,9 @@
 import puppeteer from "puppeteer-core";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+// A form sent in place (ui.js, "afterwrd-inplace" when it's done) or the old way, with a new page: whichever happens.
+const settled = (page, options) => Promise.race([page.waitForNavigation(options),
+  page.evaluate(() => new Promise((r) => document.addEventListener("afterwrd-inplace", () => r(), { once: true }))).catch(() => new Promise(() => {}))]);
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
 const OUT = process.env.OUT ?? fileURLToPath(new URL("./out/", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -228,7 +231,7 @@ for (const fields of [
   await Promise.all([ann.waitForNavigation({ timeout: 30_000 }), ann.click("form.event-form button.primary")]);
 }
 await ben.goto(`${B}${benGroupHref}/calendar`);
-await Promise.all([ben.waitForNavigation({ timeout: 30_000 }), ben.click(".answers button[value=going]")]);
+await Promise.all([settled(ben, { timeout: 30_000 }), ben.click(".answers button[value=going]")]);
 step("a group, with events");
 
 // The pictures.

@@ -10,6 +10,8 @@
 //   - The small V menus (Edit, Delete) on posts, comments and messages: one open at a time, closed by a tap elsewhere,
 //     a choice, or Escape. Edit opens the words (the page's #target) with the cursor at the end, ready to change.
 //   - The look: the Dark / Light / Auto switch behind your picture, kept in this browser (nav.js LOOK applies it).
+//   - What you're writing: comments, posts, messages and edits are kept on the device until they're sent.
+//   - In place: comments, edits, deletes, poll and event answers, and notices put away, without a new page.
 //   - Drop-downs you can type into. A <select data-search> becomes a box that narrows its list as you type; the
 //     select itself stays (hidden) in the form, so what's sent, and any onchange, are as before.
 (() => {
@@ -105,6 +107,152 @@
       });
     });
   }, true);
+
+  // --- what you're writing --------------------------------------------------------------------------------------
+  // A box marked data-draft="<key>" (a comment, a post, a message, an edit) keeps its words in this browser until
+  // they're sent, so losing signal, the app being closed, or a tap elsewhere doesn't lose them: they're back in the
+  // box next time. Kept for a week at most, and all gone on Sign out (this may be a shared phone or computer).
+  // Whatever sends them calls afterwrdSent(box) once the site has them: compose.js, messages.js, and "in place" below.
+  const DRAFT = "afterwrd-draft:";
+  const WEEK = 7 * 24 * 3600 * 1000;
+  const drafts = {
+    get(key) { try { return JSON.parse(localStorage.getItem(DRAFT + key) || "null"); } catch { return null; } },
+    keep(key, text) { try { localStorage.setItem(DRAFT + key, JSON.stringify({ text, at: Date.now() })); } catch {} },
+    drop(key) { try { localStorage.removeItem(DRAFT + key); } catch {} },
+    all() { try { return Object.keys(localStorage).filter((k) => k.startsWith(DRAFT)).map((k) => k.slice(DRAFT.length)); } catch { return []; } },
+  };
+  drafts.all().forEach((key) => { if (!(Date.now() - (drafts.get(key)?.at ?? 0) < WEEK)) drafts.drop(key); });
+  const restoreDrafts = (within) => within.querySelectorAll("textarea[data-draft]").forEach((box) => {
+    const kept = drafts.get(box.dataset.draft);
+    // Only into a box that's as the page made it: never over words the browser itself has put back.
+    if (typeof kept?.text === "string" && kept.text !== box.defaultValue && box.value === box.defaultValue) box.value = kept.text;
+  });
+  restoreDrafts(document);
+  document.addEventListener("input", (e) => {
+    const box = e.target;
+    if (!box.matches?.("textarea[data-draft]")) return;
+    if (box.value.trim() && box.value !== box.defaultValue) drafts.keep(box.dataset.draft, box.value);
+    else drafts.drop(box.dataset.draft);
+  });
+  window.afterwrdSent = (box) => { if (box?.dataset.draft) drafts.drop(box.dataset.draft); };
+  document.addEventListener("submit", (e) => {
+    if (new URL(e.target.action, location.href).pathname === "/_auth/logout") drafts.all().forEach(drafts.drop);
+  });
+
+  // --- in place ----------------------------------------------------------------------------------------------------
+  // The things you do while reading (a comment, changing or deleting one, answering a poll or an event, editing or
+  // deleting a post, putting a notice away) happen where you are: no new page, so nothing jumps, and Home doesn't ask
+  // every friend's site again because you commented. A form marked data-inplace is sent from here; when the site has
+  // it, the part of the page it's in (the nearest data-region: a post, a photo's comments) is swapped for a fresh copy
+  // of that part, drawn by the site as always, from this page; on Home, which asks every friend's site, from the page
+  // named in data-region instead (the post's own page, or a friend's posts). data-inplace="remove" takes that part away
+  // (a deleted post, a notice put away), unless it's the post this page is about: then the site's answer is followed.
+  // Without scripts, the forms send themselves and the page reloads, as before.
+  const OFFLINE = "You're not connected just now, so that hasn't been sent. Try again once you're back online.";
+  const sayUnder = (form, words) => {
+    let note = form.nextElementSibling?.matches(".form-error") ? form.nextElementSibling : null;
+    if (!words) { note?.remove(); return; }
+    if (!note) {
+      note = Object.assign(document.createElement("p"), { className: "form-error" });
+      note.setAttribute("role", "alert");
+      form.after(note);
+    }
+    note.textContent = words;
+  };
+  /** What the site said when it refused (its short "message" page), or a plain line if there's nothing to show. */
+  async function refusal(res) {
+    if (res.status === 401) return "You've been signed out. Sign in again (in another tab, so this page stays as it is) and try again.";
+    try {
+      const page = new DOMParser().parseFromString(await res.text(), "text/html");
+      const words = (page.querySelector("main > p:not(.brand)") ?? page.body)?.textContent.trim(); // after the logo
+      if (words && words.length < 300) return words;
+    } catch {}
+    return `That didn't work (the site said ${res.status}). Try again.`;
+  }
+  /** A fresh copy of `region`, from `source`; false if it couldn't be had (the caller then loads the whole page). */
+  async function refresh(region, source) {
+    try {
+      const res = await fetch(source, { cache: "no-store" });
+      if (!res.ok) return false;
+      const fresh = new DOMParser().parseFromString(await res.text(), "text/html").getElementById(region.id);
+      if (!fresh) return false;
+      // The browser would scroll to keep whatever's below still as the post grows (scroll anchoring), so the new
+      // comment would seem to push everything up: not while swapping. What's above stays put, and it shows where
+      // its box was.
+      const root = document.documentElement;
+      root.style.overflowAnchor = "none";
+      region.replaceWith(document.adoptNode(fresh));
+      void fresh.offsetHeight; // laid out now, with anchoring off
+      requestAnimationFrame(() => { root.style.overflowAnchor = ""; });
+      restoreDrafts(fresh);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  document.addEventListener("submit", async (e) => {
+    const form = e.target;
+    if (e.defaultPrevented || !form.matches("form[data-inplace]")) return;
+    const region = form.closest("[data-region]");
+    const removing = form.dataset.inplace === "remove";
+    const here = location.pathname + location.search;
+    const source = (location.pathname === "/" && region?.dataset.region) || here;
+    if (!region || (!removing && !region.id) || (removing && region.dataset.region === location.pathname)) return;
+    e.preventDefault();
+    if (form.dataset.busy) return;
+    form.dataset.busy = "1";
+    const buttons = [...form.querySelectorAll("button")].filter((b) => !b.disabled);
+    buttons.forEach((b) => { b.disabled = true; });
+    sayUnder(form, "");
+    const body = new FormData(form);
+    if (e.submitter?.name) body.append(e.submitter.name, e.submitter.value); // a poll's choice is the button pressed
+    const done = () => { delete form.dataset.busy; buttons.forEach((b) => { b.disabled = false; }); };
+    let res;
+    try {
+      res = await fetch(e.submitter?.getAttribute("formaction") || form.action, { method: "POST", body, redirect: "manual" });
+    } catch {
+      done();
+      sayUnder(form, OFFLINE); // and any words stay in their box, kept on this device
+      finished(false);
+      return;
+    }
+    // The site answers a form that worked by sending you on (a redirect, which isn't followed here).
+    if (res.type !== "opaqueredirect" && !res.ok) {
+      done();
+      sayUnder(form, await refusal(res));
+      finished(false);
+      return;
+    }
+    form.querySelectorAll("textarea[data-draft]").forEach((box) => window.afterwrdSent(box));
+    if (removing) region.remove();
+    else if (!(await refresh(region, source))) {
+      location.reload();
+      return;
+    }
+    // The page's address may still point at the edit box that was open (#edit-c12): it's done with.
+    if (location.hash) history.replaceState(history.state, "", location.pathname + location.search);
+    finished(true);
+  });
+  // Said when one's done, for anything that wants to know (the tests do).
+  const finished = (sent) => document.dispatchEvent(new CustomEvent("afterwrd-inplace", { detail: { sent } }));
+
+  // --- arriving at something -------------------------------------------------------------------------------------
+  // A page opened at something (#c12, from Notifications say) shows it just below the site's header, however tall
+  // the header is on this screen (two rows on a phone), and keeps it there while pictures load, until you scroll.
+  const header = document.querySelector("header.site");
+  const fitHeader = () => { if (header) document.documentElement.style.scrollPaddingTop = `${header.offsetHeight + 12}px`; };
+  fitHeader();
+  addEventListener("resize", fitHeader);
+  const target = location.hash.length > 1 ? document.getElementById(decodeURIComponent(location.hash.slice(1))) : null;
+  if (target && !target.matches("div.edit") && performance.getEntriesByType?.("navigation")[0]?.type === "navigate") {
+    let touched = false; // once you scroll yourself, the page is yours
+    ["wheel", "touchstart", "keydown", "mousedown"].forEach((type) => addEventListener(type, () => { touched = true; }, { once: true, passive: true }));
+    const put = () => { if (!touched) target.scrollIntoView({ block: "start" }); };
+    // Once every script has had its say (the Add to home screen note can appear above), and again when pictures
+    // have loaded.
+    document.addEventListener("DOMContentLoaded", put, { once: true });
+    addEventListener("load", put, { once: true });
+  }
 
   // --- drop-downs you can type into ------------------------------------------------------------------------------
   let made = 0;

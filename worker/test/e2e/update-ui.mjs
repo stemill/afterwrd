@@ -33,6 +33,9 @@ await new Promise((r) => tokenServer.listen(8799, "127.0.0.1", r));
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
 const page = await browser.newPage();
+// These check the site's own answers (a 400, the "being updated" page), which the test browser can't always see when
+// the service worker (public/static/app/push-sw.js) passes a page on; it's tested in comments.mjs.
+await page.setBypassServiceWorker(true);
 page.on("pageerror", (e) => errors.push(e.message));
 page.on("dialog", (d) => { errors.push(`a browser dialog: ${d.message()}`); d.dismiss(); });
 // afterwrd asks in its own box (ui.js): say yes, as a person would.

@@ -10,6 +10,9 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
+// A form sent in place (ui.js, "afterwrd-inplace" when it's done) or the old way, with a new page: whichever happens.
+const settled = (page, options) => Promise.race([page.waitForNavigation(options),
+  page.evaluate(() => new Promise((r) => document.addEventListener("afterwrd-inplace", () => r(), { once: true }))).catch(() => new Promise(() => {}))]);
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const BASE = "http://localhost:8787";
@@ -139,6 +142,9 @@ await new Promise((r) => server.listen(8799, "127.0.0.1", r));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
 const context = await browser.createBrowserContext();
 const owner = await context.newPage();
+// These check the site's own answers (a 400, the "being updated" page), which the test browser can't always see when
+// the service worker (public/static/app/push-sw.js) passes a page on; it's tested in comments.mjs.
+await owner.setBypassServiceWorker(true);
 owner.on("pageerror", (e) => errors.push(e.message));
 owner.on("dialog", (d) => { errors.push(`dialog: ${d.message()}`); d.dismiss(); });
 const cdp = await owner.createCDPSession();
@@ -184,7 +190,7 @@ async function dailyRun() {
 // --- off, offered once on Home -----------------------------------------------------------------------------------
 await owner.goto(`${BASE}/`);
 check("Home offers automatic updates while they're off", (await text()).includes("afterwrd can keep itself up to date"));
-await Promise.all([owner.waitForNavigation(), owner.click("form[action='/_admin/update/auto-later'] button")]);
+await Promise.all([settled(owner), owner.click("form[action='/_admin/update/auto-later'] button")]);
 check("…and \"Not now\" puts the offer away", !(await text()).includes("afterwrd can keep itself up to date"));
 await owner.goto(`${BASE}/_admin/update`);
 check("the Update page still offers it", (await text("#auto")).includes("Turn on automatic updates"));

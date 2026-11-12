@@ -9,6 +9,9 @@
 import { execFileSync } from "node:child_process";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
+// A form sent in place (ui.js, "afterwrd-inplace" when it's done) or the old way, with a new page: whichever happens.
+const settled = (page, options) => Promise.race([page.waitForNavigation(options),
+  page.evaluate(() => new Promise((r) => document.addEventListener("afterwrd-inplace", () => r(), { once: true }))).catch(() => new Promise(() => {}))]);
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
 const OUT = process.env.OUT ?? fileURLToPath(new URL("./out/", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -62,9 +65,16 @@ async function postInGroup(page, words, files = []) {
   if (files.length) await (await page.$("#composer input[type=file]")).uploadFile(...files);
   await Promise.all([page.waitForNavigation({ timeout: 60_000 }), page.click("#composer button.post")]);
 }
+let inPlaceChecked = false;
 async function comment(page, card, words) {
   await page.type(`#${card} form.say textarea`, words);
-  await Promise.all([page.waitForNavigation({ timeout: 30_000 }), page.click(`#${card} form.say button`)]);
+  await page.evaluate(() => { window.samePage = true; });
+  await Promise.all([settled(page, { timeout: 30_000 }), page.click(`#${card} form.say button`)]);
+  if (!inPlaceChecked) {
+    inPlaceChecked = true;
+    check("a comment in a group is sent without a new page", await page.evaluate((id) => window.samePage === true
+      && [...document.querySelectorAll(`#${id} .comment .said`)].some((s) => s.textContent.length > 0), card));
+  }
 }
 // Joining the way the page suggests (pasting the link into Groups on your own site), or by opening the link and
 // typing your site's address.
@@ -94,7 +104,7 @@ async function addEvent(page, fields) {
   await Promise.all([page.waitForNavigation({ timeout: 30_000 }), page.click("form.event-form button.primary")]);
 }
 async function answer(page, card, value) {
-  await Promise.all([page.waitForNavigation({ timeout: 30_000 }), page.click(`#${card} .answers button[value=${value}]`)]);
+  await Promise.all([settled(page, { timeout: 30_000 }), page.click(`#${card} .answers button[value=${value}]`)]);
 }
 const pressed = (page, card) => page.$eval(`#${card} .answers [aria-pressed=true]`, (b) => b.value).catch(() => null);
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -197,7 +207,7 @@ const edit = async (page, item, v, words) => {
   await page.click(`${item} ${v} details.more summary`);
   await page.click(`${item} ${v} details.more a[href^="#edit"]`);
   await page.$eval(`${item} div.edit textarea`, (t, w) => { t.value = w; }, words);
-  await Promise.all([page.waitForNavigation(), page.click(`${item} div.edit button`)]);
+  await Promise.all([settled(page), page.click(`${item} div.edit button`)]);
 };
 await bob.goto(`${B}/groups/${bobGroup}`);
 check("Bob's new post offers Edit", Boolean(await bob.$(`#gp${bobPost} > div.edit`)));
@@ -311,13 +321,13 @@ check("Bob, an admin, can remove Cat but not Ann, nor make admins", bobControls.
 await bob.goto(`${B}/groups/${bobGroup}/posts/${bobPost}`);
 const before = n(stateG, "group_comments");
 await bob.click("article.in-group .comment:nth-of-type(3) .under details.more summary");
-await Promise.all([bob.waitForNavigation(), bob.click("article.in-group .comment:nth-of-type(3) .under .delete")]);
+await Promise.all([settled(bob), bob.click("article.in-group .comment:nth-of-type(3) .under .delete")]);
 check("Bob deletes his own comment", n(stateG, "group_comments") === before - 1);
 await ann.goto(`${A}/groups/${annGroup}`);
 annCards = await cards(ann);
 check("Ann, its owner, can delete anything in the group", annCards.every((c) => c.canDelete && c.comments.every((x) => x.canDelete)));
 await ann.click(`#gp${bobPost} .comment .under details.more summary`);
-await Promise.all([ann.waitForNavigation(), ann.click(`#gp${bobPost} .comment .under .delete`)]);
+await Promise.all([settled(ann), ann.click(`#gp${bobPost} .comment .under .delete`)]);
 check("…and does: Cat's first comment", !sql(stateG, "SELECT text FROM group_comments").some((c) => c.text === "Which book was it?")
   && n(stateG, "group_comment_versions") === 0);
 await ann.goto(`${A}/groups/${annGroup}/members`);
@@ -426,7 +436,7 @@ await addEvent(bob, { title: "Pub quiz", start_date: "2027-07-01", start_time: "
 const quiz = sql(stateG, "SELECT * FROM group_events WHERE title = 'Pub quiz'")[0];
 check("Bob adds an all-day event", quiz?.all_day === 1 && (await text(bob)).includes("Thu 1 Jul 2027"), JSON.stringify(quiz));
 await ann.goto(`${A}/groups/${annGroup}/posts/${quiz.post_id}`);
-await Promise.all([ann.waitForNavigation(), ann.click(".event form[action$='/cancel'] button")]);
+await Promise.all([settled(ann), ann.click(".event form[action$='/cancel'] button")]);
 check("Ann calls it off", Boolean(sql(stateG, `SELECT cancelled_at FROM group_events WHERE post_id = ${quiz.post_id}`)[0].cancelled_at)
   && (await text(ann)).includes("Called off"));
 check("…and Bob is told", await waitFor(() => notes(stateB) === 2));

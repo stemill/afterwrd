@@ -99,7 +99,8 @@ function openChat(list) {
   }
 
   async function post(path, body) {
-    const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) });
+    const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) })
+      .catch(() => { throw new Error("You're not connected just now, so that hasn't been sent. It's kept here: try again once you're back online."); });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "That didn't work. Try again.");
     return data;
@@ -116,6 +117,7 @@ function openChat(list) {
       try {
         const { message } = await post(form.action, { text });
         form.elements.text.value = "";
+        window.afterwrdSent?.(form.elements.text); // sent: no need to keep it on this device (ui.js)
         show(message);
       } catch (err) {
         error.textContent = err.message;

@@ -7,6 +7,9 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
+// A form sent in place (ui.js, "afterwrd-inplace" when it's done) or the old way, with a new page: whichever happens.
+const settled = (page, options) => Promise.race([page.waitForNavigation(options),
+  page.evaluate(() => new Promise((r) => document.addEventListener("afterwrd-inplace", () => r(), { once: true }))).catch(() => new Promise(() => {}))]);
 const OUT = process.env.OUT ?? fileURLToPath(new URL("./out/", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const [stage, fixtures, zipPath] = process.argv.slice(2);
@@ -21,7 +24,7 @@ await page.evaluateOnNewDocument(() => new MutationObserver(() => document.query
   .observe(document, { childList: true, subtree: true }));
 const say = async (scope, text) => {
   await page.type(`${scope} .say textarea`, text);
-  await Promise.all([page.waitForNavigation(), page.click(`${scope} .say button`)]);
+  await Promise.all([settled(page), page.click(`${scope} .say button`)]);
 };
 const said = (scope) => page.$$eval(`${scope} .comment .said`, (l) => l.map((c) => c.textContent));
 const own = "main article.card.own";
@@ -66,7 +69,7 @@ if (stage === "before") {
     body: JSON.stringify({ text: "Tea or coffee?", poll: { options: ["Tea", "Coffee"], multiple: false } }) }));
   await page.goto(`${BASE}/posts`);
   const poll = Boolean(await page.$(`${own}:first-of-type .poll-form`));
-  if (poll) await Promise.all([page.waitForNavigation(), page.click(`${own}:first-of-type .poll-form button.poll-option`)]);
+  if (poll) await Promise.all([settled(page), page.click(`${own}:first-of-type .poll-form button.poll-option`)]);
 
   // An album of their own, and a profile picture.
   await page.goto(`${BASE}/_admin/photos/add`);
@@ -107,7 +110,7 @@ if (stage === "before") {
     await page.goto(`${BASE}/posts`);
     const poll = await page.$$eval(`${own} .poll-option`, (l) => l.map((o) => ({ text: o.textContent.trim(), chosen: o.classList.contains("chosen") })));
     check("the poll keeps its answer", poll.length === 2 && poll[0].chosen && poll[0].text.startsWith("Tea"), JSON.stringify(poll));
-    await Promise.all([page.waitForNavigation(), page.click(`${own} .poll-form button.poll-option:nth-of-type(2)`)]);
+    await Promise.all([settled(page), page.click(`${own} .poll-form button.poll-option:nth-of-type(2)`)]);
     check("…and can still be answered", await page.$eval(`${own} .poll-option:nth-of-type(2)`, (o) => o.classList.contains("chosen")).catch(() => false));
   } else console.log(`SKIP  [${stage}] no polls on that release`);
 
@@ -135,7 +138,7 @@ if (stage === "before") {
   await page.click("main article.card .comment .under details.more summary");
   await page.click("main article.card .comment .under details.more a[href^='#edit']");
   await page.$eval("main article.card .comment div.edit textarea", (t) => { t.value = "Still here, after the upgrade"; });
-  await Promise.all([page.waitForNavigation(), page.click("main article.card .comment div.edit button")]);
+  await Promise.all([settled(page), page.click("main article.card .comment div.edit button")]);
   check("a comment from before the upgrade can be changed", (await said("main article.card")).join() === "Still here, after the upgrade"
     && (await page.$eval("main article.card .comment details.edited", (d) => d.textContent).catch(() => "")).includes("Still here?"));
 }

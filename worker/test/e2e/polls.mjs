@@ -7,6 +7,9 @@
 import { execFileSync } from "node:child_process";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
+// A form sent in place (ui.js, "afterwrd-inplace" when it's done) or the old way, with a new page: whichever happens.
+const settled = (page, options) => Promise.race([page.waitForNavigation(options),
+  page.evaluate(() => new Promise((r) => document.addEventListener("afterwrd-inplace", () => r(), { once: true }))).catch(() => new Promise(() => {}))]);
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
 const OUT = process.env.OUT ?? fileURLToPath(new URL("./out/", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -88,7 +91,7 @@ const pollIn = (page, card) => page.$eval(`${card} .poll`, (p) => (p.querySelect
 const counts = (poll) => poll?.options.map((o) => o.count).join(",");
 const chosen = (poll) => poll?.options.filter((o) => o.chosen).map((o) => o.name).join(",");
 async function choose(page, card, i) {
-  await Promise.all([page.waitForNavigation({ timeout: 30_000 }), page.click(`${card} .poll button.poll-option:nth-of-type(${i + 1})`)]);
+  await Promise.all([settled(page, { timeout: 30_000 }), page.click(`${card} .poll button.poll-option:nth-of-type(${i + 1})`)]);
 }
 
 const ann = await owner(A, "Ann Example");
@@ -129,7 +132,7 @@ check("…kept with the post", n(stateA, "polls") === 1);
 await choose(ann, "article.own", 0);
 annPoll = await pollIn(ann, "article.own");
 check("one tap answers it", counts(annPoll) === "1,0,0" && chosen(annPoll) === "Sat 5th" && annPoll.facts.includes("1 person answered"), JSON.stringify(annPoll));
-check("…and lands back on the poll", new URL(ann.url()).hash === `#poll-${sql(stateA, "SELECT id FROM posts WHERE source = 'afterwrd'")[0].id}`, ann.url());
+check("…without a new page", !new URL(ann.url()).hash, ann.url());
 
 // Bob answers from his Home; he sees the totals and his own choice, never who.
 await bob.goto(`${B}/`);
@@ -173,7 +176,7 @@ await vote([2]);
 
 // Closing.
 await ann.goto(`${A}/`);
-await Promise.all([ann.waitForNavigation(), ann.click("article.own .poll form:not(.poll-form) button")]);
+await Promise.all([settled(ann), ann.click("article.own .poll form:not(.poll-form) button")]);
 annPoll = await pollIn(ann, "article.own");
 check("Ann closes her poll: the totals stay, the buttons go", counts(annPoll) === "1,1,1" && annPoll.buttons === 0 && annPoll.facts.includes("Closed") && !annPoll.canClose, JSON.stringify(annPoll));
 check("…and no answer is taken after, or taken back", (await vote([0])).status === 400 && (await vote([])).status === 400
@@ -192,7 +195,7 @@ check("a poll that takes several shows ticks, and when it closes", bobPoll?.tick
   && bobPoll.facts.includes("Closes"), JSON.stringify(bobPoll));
 await bob.click("article.from-friend .poll-option:nth-of-type(1) input");
 await bob.click("article.from-friend .poll-option:nth-of-type(3) input");
-await Promise.all([bob.waitForNavigation(), bob.click("article.from-friend .poll-form button.chip")]);
+await Promise.all([settled(bob), bob.click("article.from-friend .poll-form button.chip")]);
 bobPoll = await pollIn(bob, "article.from-friend");
 check("Bob picks two", counts(bobPoll) === "1,0,1" && chosen(bobPoll) === "Sandwiches,Flask of tea", JSON.stringify(bobPoll));
 const multiPost = sql(stateA, "SELECT post_id FROM polls WHERE multiple = 1")[0].post_id;
@@ -206,7 +209,7 @@ const rows = await ann.evaluate(() => fetch("/_admin/export/rows?table=poll_vote
 check("Download everything includes polls and answers", rows.rows?.length === 4, JSON.stringify(rows).slice(0, 200));
 await ann.goto(`${A}/posts`);
 await ann.click("article.own header details.more summary");
-await Promise.all([ann.waitForNavigation(), ann.click("article.own header .delete")]);
+await Promise.all([settled(ann), ann.click("article.own header .delete")]);
 check("deleting a post deletes its poll and answers", n(stateA, `polls WHERE post_id = ${multiPost}`) === 0 && n(stateA, `poll_votes WHERE post_id = ${multiPost}`) === 0
   && n(stateA, "polls") === 1);
 await ann.screenshot({ path: `${OUT}/poll-own.png`, fullPage: true });
@@ -264,7 +267,7 @@ check("only its writer can close it", (await call(G, `/_group/polls/${gPost}/clo
 check("forged answers are refused", (await call(G, `/_group/polls/${gPost}/vote`, catKey, { "afterwrd:choices": [0, 1] })).status === 400
   && (await call(G, `/_group/polls/${gPost}/vote`, catKey, { "afterwrd:choices": [5] })).status === 400);
 await bob.goto(`${B}/groups/${bobGroup}`);
-await Promise.all([bob.waitForNavigation(), bob.click(`#gp${gPost} .poll form:not(.poll-form) button`)]);
+await Promise.all([settled(bob), bob.click(`#gp${gPost} .poll form:not(.poll-form) button`)]);
 check("Bob closes it", (await pollIn(bob, `#gp${gPost}`))?.facts.includes("Closed"));
 check("…and no answer is taken after", (await call(G, `/_group/polls/${gPost}/vote`, catKey, { "afterwrd:choices": [0] })).status === 400);
 await cat.goto(`${C}/groups/${catGroup}/members`);

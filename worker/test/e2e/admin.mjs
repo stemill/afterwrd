@@ -3,6 +3,9 @@
 import { execFileSync } from "node:child_process";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
+// A form sent in place (ui.js, "afterwrd-inplace" when it's done) or the old way, with a new page: whichever happens.
+const settled = (page, options) => Promise.race([page.waitForNavigation(options),
+  page.evaluate(() => new Promise((r) => document.addEventListener("afterwrd-inplace", () => r(), { once: true }))).catch(() => new Promise(() => {}))]);
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
 const OUT = process.env.OUT ?? fileURLToPath(new URL("./out/", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -113,7 +116,7 @@ check("the new device hears of the next one, but can't confirm it", onLaptop.len
 check("…even by asking directly", (await fromLaptop("/_admin/devices/seen")).status === 403);
 const onPhone = await alerts(phone);
 check("the phone lists both new devices", onPhone.length === 1 && onPhone[0].startsWith("2 new devices were added"), onPhone.join(" | "));
-await Promise.all([phone.waitForNavigation(), phone.click(".notice.alert button")]);
+await Promise.all([settled(phone), phone.click(".notice.alert button")]);
 check("\"They were all me\" on the phone clears it", new URL(phone.url()).pathname === "/" && (await alerts(phone)).length === 0);
 // Put things back as they were: the spare passkey goes (the laptop's stays for the checks below).
 const spareKey = sql("SELECT id FROM credentials ORDER BY rowid DESC LIMIT 1")[0].id;

@@ -19,10 +19,13 @@ async function sha256(blob) {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** Said when the site can't be reached at all (fetch itself fails: no signal, no Wi-Fi). */
+export const OFFLINE = "You're not connected just now, so that hasn't been sent. Try again once you're back online.";
+
 export async function call(path, body, { method = "POST", type = "application/json" } = {}) {
   const response = await fetch(path, {
     method, headers: { "Content-Type": type }, body: type === "application/json" ? JSON.stringify(body) : body,
-  });
+  }).catch(() => { throw new Error(OFFLINE); });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `The site said ${response.status}. Try again.`);
   return data;

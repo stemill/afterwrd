@@ -7,6 +7,9 @@ import { createHash } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
+// A form sent in place (ui.js, "afterwrd-inplace" when it's done) or the old way, with a new page: whichever happens.
+const settled = (page, options) => Promise.race([page.waitForNavigation(options),
+  page.evaluate(() => new Promise((r) => document.addEventListener("afterwrd-inplace", () => r(), { once: true }))).catch(() => new Promise(() => {}))]);
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
 const OUT = process.env.OUT ?? fileURLToPath(new URL("./out/", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -152,7 +155,9 @@ check("Ann's Connections lists Bob", (await ann.$eval("table.numbers tbody", (t)
 // Ann comments on Bob's post from her Feed; it's stored on Bob's site.
 await ann.goto(`${A}/`);
 await ann.type("article.from-friend .say textarea", "Looks great, Bob!");
-await Promise.all([ann.waitForNavigation(), ann.click("article.from-friend .say button")]);
+await ann.evaluate(() => { window.samePage = true; });
+await Promise.all([settled(ann), ann.click("article.from-friend .say button")]);
+check("…sent without a new page (Home isn't loaded again)", await ann.evaluate(() => window.samePage === true));
 annFeed = await feedCards(ann);
 check("Ann's comment shows in her Feed, deletable", annFeed[0].comments.length === 1 && annFeed[0].comments[0].name === "Ann Example"
   && annFeed[0].comments[0].canDelete, JSON.stringify(annFeed[0].comments));
@@ -172,7 +177,7 @@ check("Ann's own comment offers Edit", Boolean(await ann.$(`${annComment} div.ed
 await ann.click(`${annComment} .under details.more summary`);
 await ann.click(`${annComment} .under details.more a[href^="#edit"]`);
 await ann.$eval(`${annComment} div.edit textarea`, (t) => { t.value = "Looks great, Bob! Where was it?"; });
-await Promise.all([ann.waitForNavigation(), ann.click(`${annComment} div.edit button`)]);
+await Promise.all([settled(ann), ann.click(`${annComment} div.edit button`)]);
 check("…changed on Bob's site, keeping what it said before", sql(stateB, "SELECT text, edited_at FROM comments WHERE origin != 'site'")
   .some((c) => c.text === "Looks great, Bob! Where was it?" && c.edited_at)
   && sql(stateB, "SELECT text FROM comment_versions").map((v) => v.text).join() === "Looks great, Bob!");
@@ -186,7 +191,7 @@ check("Bob sees it Edited too", (await bob.$eval("main article.card:first-of-typ
 
 // Bob replies on his own site; Ann sees the reply in her Feed but can't delete it.
 await bob.type("main article.card:first-of-type .say textarea", "Thanks Ann");
-await Promise.all([bob.waitForNavigation(), bob.click("main article.card:first-of-type .say button")]);
+await Promise.all([settled(bob), bob.click("main article.card:first-of-type .say button")]);
 await ann.goto(`${A}/`);
 annFeed = await feedCards(ann);
 check("Ann sees Bob's reply, not deletable by her", annFeed[0].comments.map((c) => c.text).join("|") === "Looks great, Bob! Where was it?|Thanks Ann"
@@ -223,7 +228,7 @@ check("friends see the whole thread, visitors' comments included (as when visiti
 
 // Ann deletes her comment from her Feed.
 await ann.click("article.from-friend .comment .under details.more summary");
-await Promise.all([ann.waitForNavigation(), ann.click("article.from-friend .comment .under .delete")]);
+await Promise.all([settled(ann), ann.click("article.from-friend .comment .under .delete")]);
 check("Ann's comment deleted on Bob's site", sql(stateB, "SELECT COUNT(*) AS n FROM comments WHERE origin != 'site'")[0].n === 0
   && sql(stateA, "SELECT COUNT(*) AS n FROM comments_elsewhere")[0].n === 0);
 
@@ -314,7 +319,7 @@ await ann.goto(`${A}/_admin/update`);
 await ann.click(`button[data-ask="${bobId}"]`);
 await ann.waitForFunction(() => document.getElementById("ask-result").textContent, { timeout: 10_000 });
 await bob.goto(`${B}/`);
-await Promise.all([bob.waitForNavigation(), bob.click(".check-request form button")]);
+await Promise.all([settled(bob), bob.click(".check-request form button")]);
 check("\"Not now\" puts a request away", (await bob.$(".check-request")) === null && sql(stateB, "SELECT COUNT(*) AS n FROM check_requests")[0].n === 0);
 check("only a friend's site can ask for a check", (await fetch(`${B}/_peer/check-request`, { method: "POST",
   headers: { Authorization: `Bearer ${"x".repeat(43)}`, "Content-Type": "application/json" }, body: JSON.stringify({ type: "CheckRequest" }) })).status === 401);
@@ -339,7 +344,7 @@ await ann.goto(A + bobAlbums.find((a) => a.name === "Posted on afterwrd").href);
 const ownTile = await ann.$eval(".justified a.tile", (a) => a.getAttribute("href"));
 await ann.goto(A + ownTile);
 await ann.type(".info .say textarea", "What a view");
-await Promise.all([ann.waitForNavigation(), ann.click(".info .say button")]);
+await Promise.all([settled(ann), ann.click(".info .say button")]);
 check("Ann comments on a photo Bob posted, from her site", new URL(ann.url()).pathname === ownTile
   && (await ann.$$eval(".info .comment", (l) => l.map((c) => ({ t: c.querySelector(".said").textContent, d: Boolean(c.querySelector(".under .delete")) })))).some((c) => c.t === "What a view" && c.d));
 check("…stored on Bob's site against that photo", sql(stateB, "SELECT target, origin FROM comments WHERE text = 'What a view'")
@@ -408,7 +413,7 @@ check("…and the old Visit link is gone", (await ann.goto(`${A}/_feed/visit?to=
 // Download everything, on both sites: Ann's copy of her comment and Bob's copy share one address.
 await ann.goto(`${A}/`);
 await ann.type("article.from-friend .say textarea", "Kept forever");
-await Promise.all([ann.waitForNavigation(), ann.click("article.from-friend .say button")]);
+await Promise.all([settled(ann), ann.click("article.from-friend .say button")]);
 async function download(page, site, label) {
   const dir = `${OUT}/downloads/${label}`;
   rmSync(dir, { recursive: true, force: true });
@@ -469,7 +474,7 @@ await bob.goto(`${B}/posts`);
 await bob.click("main article.card:first-of-type > header details.more summary");
 await bob.click("main article.card:first-of-type > header details.more a[href^='#edit']");
 await bob.$eval("main article.card:first-of-type > div.edit textarea", (t) => { t.value = "Off to the coast tomorrow"; });
-await Promise.all([bob.waitForNavigation(), bob.click("main article.card:first-of-type > div.edit button")]);
+await Promise.all([settled(bob), bob.click("main article.card:first-of-type > div.edit button")]);
 await ann.goto(`${A}/`);
 const edited = await ann.$$eval("article.from-friend", (l) => l.map((a) => ({ text: a.querySelector(".text")?.textContent,
   was: a.querySelector(":scope > details.edited")?.textContent ?? "" })).find((p) => p.text === "Off to the coast tomorrow"));

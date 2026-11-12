@@ -156,9 +156,12 @@ export function moreMenu(items) {
   <div class="menu">${shown}</div></details>`;
 }
 export const menuEdit = (id) => html`<a href="#${id}">Edit</a>`;
-/** A Delete in the menu: asks first (ui.js). `fields` are extra hidden fields, `back` where to go afterwards. */
-export function menuDelete(action, confirm, { back = null, label = "Delete", fields = {} } = {}) {
-  return html`<form method="post" action="${action}" data-confirm="${confirm}" data-confirm-ok="Delete">
+/**
+ * A Delete in the menu: asks first (ui.js). `fields` are extra hidden fields, `back` where to go afterwards. `inplace`:
+ * done without a new page (ui.js), "refresh" (what it's in is drawn again: a comment's post) or "remove" (a post).
+ */
+export function menuDelete(action, confirm, { back = null, label = "Delete", fields = {}, inplace = null } = {}) {
+  return html`<form method="post" action="${action}" data-confirm="${confirm}" data-confirm-ok="Delete"${inplace && raw(inplace === "remove" ? ' data-inplace="remove"' : " data-inplace")}>
     ${back !== null && html`<input type="hidden" name="back" value="${back}">`}
     ${Object.entries(fields).map(([k, v]) => html`<input type="hidden" name="${k}" value="${v}">`)}
     <button class="delete">${label}</button></form>`;
@@ -170,20 +173,23 @@ export function menuDelete(action, confirm, { back = null, label = "Delete", fie
  */
 function editBox(id, home, action, text, back, max, { required = true, post = null } = {}) {
   return html`<div class="edit" id="${id}">
-  <form method="post" action="${action}">
+  <form method="post" action="${action}" data-inplace>
     <input type="hidden" name="back" value="${back}">
     ${post !== null && html`<input type="hidden" name="post" value="${post}">`}
-    <textarea name="text" rows="3" maxlength="${max}" ${required && "required"} aria-label="New words">${text ?? ""}</textarea>
+    <textarea name="text" data-draft="${action}" rows="3" maxlength="${max}" ${required && "required"} aria-label="New words">${text ?? ""}</textarea>
     <div class="edit-buttons"><button class="chip primary">Save</button><a class="chip" href="#${home}">Cancel</a></div>
     <span class="meta">Anyone who can see it can see what it said before.</span>
   </form>
 </div>`;
 }
 
-/** The comments written here on a post or photo, then a box to add one. Forms work without JavaScript. */
-function thread(ctx, key, comments) {
+/**
+ * The comments written here on a post or photo, then a box to add one. Forms work without JavaScript; with it, they
+ * work in place (ui.js), redrawing the post they're in, or, with `region` (a photo's page), just the comments.
+ */
+function thread(ctx, key, comments, { region = false } = {}) {
   const back = ctx.url.pathname + ctx.url.search;
-  return html`<section class="thread" id="t-${key}" aria-label="Comments">
+  return html`<section class="thread" id="t-${key}" aria-label="Comments"${region && raw(' data-region=""')}>
   ${comments.map((c) => html`<div class="comment" id="c${c.id}">
     ${c.author_is_owner ? ownerFace(ctx)
       : c.origin && c.origin !== "site" && ctx.friendFaces?.[c.origin] ? html`<img class="who" src="${ctx.friendFaces[c.origin]}" alt="" aria-hidden="true">`
@@ -192,15 +198,15 @@ function thread(ctx, key, comments) {
     <div class="under">
       <time title="${fmtDatetime(c.created_at)}">${fmtAgo(c.created_at)}</time>
       ${moreMenu([c.author_is_owner && c.editable && menuEdit(`edit-c${c.id}`),
-        menuDelete(`/_comments/${c.id}/delete`, "Delete this comment?", { back })])}
+        menuDelete(`/_comments/${c.id}/delete`, "Delete this comment?", { back, inplace: "refresh" })])}
     </div>
     ${edited(c)}
     ${c.author_is_owner && c.editable && editBox(`edit-c${c.id}`, `c${c.id}`, `/_comments/${c.id}/edit`, c.text, back, MAX_COMMENT)}
   </div>`)}
-  <form class="say" method="post" action="/_comments">
+  <form class="say" method="post" action="/_comments" data-inplace>
     <input type="hidden" name="target" value="${key}">
     <input type="hidden" name="back" value="${back}">
-    <textarea name="text" rows="1" maxlength="${MAX_COMMENT}" required placeholder="Write a comment…" aria-label="Write a comment"></textarea>
+    <textarea name="text" data-draft="comment:${key}" rows="1" maxlength="${MAX_COMMENT}" required placeholder="Write a comment…" aria-label="Write a comment"></textarea>
     <button>Post</button>
   </form>
 </section>`;
@@ -234,13 +240,13 @@ function pollBlock(ctx, poll, { id, action, hidden = {}, closeAction = null, who
   if (!poll.open) {
     options = poll.options.map((o) => html`<div class="poll-option${o.chosen ? " chosen" : ""}" style="--share: ${share(o)}%">${inside(o)}</div>`);
   } else if (poll.multiple) {
-    options = html`<form method="post" action="${action}" class="poll-form">${fields}
+    options = html`<form method="post" action="${action}" class="poll-form" data-inplace>${fields}
       ${poll.options.map((o, i) => html`<label class="poll-option${o.chosen ? " chosen" : ""}" style="--share: ${share(o)}%">
         <input type="checkbox" name="choice" value="${i}" ${o.chosen && "checked"}>${inside(o)}</label>`)}
       <button class="chip">${poll.answered ? "Change my answer" : "Answer"}</button>
     </form>`;
   } else {
-    options = html`<form method="post" action="${action}" class="poll-form">${fields}
+    options = html`<form method="post" action="${action}" class="poll-form" data-inplace>${fields}
       ${poll.options.map((o, i) => html`<button class="poll-option${o.chosen ? " chosen" : ""}" style="--share: ${share(o)}%"
         name="choice" value="${i}" aria-pressed="${o.chosen ? "true" : "false"}">${inside(o)}</button>`)}
     </form>`;
@@ -254,7 +260,7 @@ function pollBlock(ctx, poll, { id, action, hidden = {}, closeAction = null, who
     <p class="meta">${whoNote}</p>
     <dl>${poll.options.filter((o) => o.voters?.length).map((o) => html`<dt>${o.name}</dt><dd>${o.voters.map(who).join(", ")}</dd>`)}</dl>
   </details>` : whoLink && poll.voters > 0 && html`<p class="meta"><a href="${whoLink}">See who chose what</a></p>`}
-  ${closeAction && poll.open && html`<form method="post" action="${closeAction}" data-confirm="Close this poll? Nobody will be able to answer any more." data-confirm-ok="Close it">
+  ${closeAction && poll.open && html`<form method="post" action="${closeAction}" data-inplace data-confirm="Close this poll? Nobody will be able to answer any more." data-confirm-ok="Close it">
     <input type="hidden" name="back" value="${back}"><button class="chip">Close poll</button></form>`}
 </div>`;
 }
@@ -265,14 +271,14 @@ function postCard(ctx, p) {
   if (p.source === "afterwrd") {
     const did = p.title && p.title !== "Posted on afterwrd." ? p.title : "";
     const back = ctx.url.pathname + ctx.url.search;
-    return html`<article class="card social own" id="p-${p.key}">
+    return html`<article class="card social own" id="p-${p.key}" data-region="/posts/${p.key}">
   <header>
     ${ownerFace(ctx)}
     <span class="what"><strong>You</strong>${did && html`<span class="meta">${did}</span>`}</span>
     ${p.thread !== undefined ? html`<a class="when" href="/posts/${p.key}" title="${fmtDatetime(p.created_at)}"><time>${fmtAgo(p.created_at)}</time></a>`
       : html`<time title="${fmtDatetime(p.created_at)}">${fmtAgo(p.created_at)}</time>`}
     ${p.thread !== undefined && moreMenu([p.editable && menuEdit(`edit-p-${p.key}`),
-      menuDelete(`/_admin/posts/${p.id}/delete`, "Delete this post, its photos and its comments? This can’t be undone.")])}
+      menuDelete(`/_admin/posts/${p.id}/delete`, "Delete this post, its photos and its comments? This can’t be undone.", { inplace: "remove" })])}
   </header>
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
   ${edited(p)}
@@ -438,7 +444,7 @@ ${pager(ctx, paging)}`);
 /** Write a post, with photos. In a group, `action` is where it goes, and `max` how many photos it takes. */
 function composer({ action = null, max = null, placeholder = "Write something, or add photos" } = {}) {
   return html`<form class="card composer" id="composer" ${action && html`data-action="${action}" data-max="${max}"`}>
-  <textarea name="text" rows="2" maxlength="5000" placeholder="${placeholder}" aria-label="New post"></textarea>
+  <textarea name="text" data-draft="post:${action ?? "here"}" rows="2" maxlength="5000" placeholder="${placeholder}" aria-label="New post"></textarea>
   <ul class="picked" hidden></ul>
   <fieldset class="poll-maker" hidden>
     <legend class="hidden">Poll</legend>
@@ -662,7 +668,7 @@ export function photoPage(ctx, { m, setKey, setTitle, prev, next, index, total, 
       ${m.source === "afterwrd" && html`<form method="post" action="/_admin/photos/${m.id}/delete"
         data-confirm="Delete this photo and its comments? This can’t be undone." data-confirm-ok="Delete"><button class="chip danger">Delete photo</button></form>`}
     </div>`}
-    ${key && html`<h2>Comments</h2>${thread(ctx, key, comments)}`}
+    ${key && html`<h2>Comments</h2>${thread(ctx, key, comments, { region: true })}`}
     ${post && html`<h2>Posted with</h2>${postCard(ctx, post)}`}
     ${comment && html`<h2>Attached to your comment</h2>${commentCard(ctx, comment)}`}
 
@@ -832,26 +838,26 @@ function remoteMedia(m, { full = false } = {}) {
 }
 
 /** Comments on a friend's post or photo; yours are sent to their site (feed.js), which keeps them. */
-function remoteThread(ctx, c, target, comments) {
+function remoteThread(ctx, c, target, comments, { region = false } = {}) {
   if (!comments) return ""; // from their Facebook download: no comments
   const back = ctx.url.pathname + ctx.url.search;
-  return html`<section class="thread" id="t-${target}" aria-label="Comments">
+  return html`<section class="thread" id="t-${target}" aria-label="Comments"${region && raw(' data-region=""')}>
   ${comments.map((r) => html`<div class="comment" id="r${c.id}-${r.id}">
     ${r.mine ? ownerFace(ctx) : r.from ? faceFor(ctx, r.from, r.name, r.id) : friendFace(ctx, c)}
     <div class="bubble"><strong>${r.mine ? ctx.user.name : r.name}</strong>${!r.mine && notFriend(ctx, r.from)}<span class="said">${linkify(r.text)}</span></div>
     <div class="under">
       <time title="${fmtDatetime(r.created_at)}">${fmtAgo(r.created_at)}</time>
       ${r.mine && moreMenu([r.editable && menuEdit(`edit-r${c.id}-${r.id}`),
-        menuDelete(`/_feed/comments/${c.id}/${r.id}/delete`, "Delete this comment?", { back })])}
+        menuDelete(`/_feed/comments/${c.id}/${r.id}/delete`, "Delete this comment?", { back, inplace: "refresh" })])}
     </div>
     ${edited(r)}
     ${r.mine && r.editable && editBox(`edit-r${c.id}-${r.id}`, `r${c.id}-${r.id}`, `/_feed/comments/${c.id}/${r.id}/edit`, r.text, back, MAX_COMMENT)}
   </div>`)}
-  <form class="say" method="post" action="/_feed/comments">
+  <form class="say" method="post" action="/_feed/comments" data-inplace>
     <input type="hidden" name="connection" value="${c.id}">
     <input type="hidden" name="target" value="${target}">
     <input type="hidden" name="back" value="${back}">
-    <textarea name="text" rows="1" maxlength="${MAX_COMMENT}" required placeholder="Write a comment…" aria-label="Write a comment"></textarea>
+    <textarea name="text" data-draft="comment:${c.id}:${target}" rows="1" maxlength="${MAX_COMMENT}" required placeholder="Write a comment…" aria-label="Write a comment"></textarea>
     <button>Post</button>
   </form>
 </section>`;
@@ -879,7 +885,7 @@ function faceFor(ctx, origin, name, n, fresh = null) {
 function remoteCard(ctx, c, p, { thread = true } = {}) {
   const n = p.photos.length;
   const what = p.title && p.title !== "Posted on afterwrd." ? summary(p.title, c.name) : "";
-  return html`<article class="card social from-friend" id="f${c.id}-${p.key}">
+  return html`<article class="card social from-friend" id="f${c.id}-${p.key}" data-region="${friendBase(c)}/posts">
   <header>
     ${friendFace(ctx, c)}
     <span class="what"><a href="${friendBase(c)}/posts"><strong>${c.name}</strong></a>
@@ -1199,7 +1205,7 @@ export function friendPhotoPage(ctx, { friend: c, photo: m }) {
     <p class="meta"><a href="${friendBase(c)}/posts">${c.name}</a></p>
     ${m.description && !(m.post && m.post.text === m.description) && html`<div class="caption">${linkify(m.description)}</div>`}
     <h2>Comments</h2>
-    ${remoteThread(ctx, c, `photo-${m.hash}`, m.comments)}
+    ${remoteThread(ctx, c, `photo-${m.hash}`, m.comments, { region: true })}
     ${m.post && html`<h2>Posted with</h2>${remoteCard(ctx, c, m.post, { thread: false })}`}
   </aside>
 </main>
@@ -1479,15 +1485,15 @@ function groupThread(ctx, g, p) {
     <div class="under">
       <time title="${fmtDatetime(c.created_at)}">${fmtAgo(c.created_at)}</time>
       ${moreMenu([c.mine && c.editable && menuEdit(`edit-g${p.id}-${c.id}`),
-        mayDelete(g, c) && menuDelete(`/_groups/${g.id}/comments/${c.id}/delete`, "Delete this comment?", { back })])}
+        mayDelete(g, c) && menuDelete(`/_groups/${g.id}/comments/${c.id}/delete`, "Delete this comment?", { back, inplace: "refresh" })])}
     </div>
     ${edited(c)}
     ${c.mine && c.editable && editBox(`edit-g${p.id}-${c.id}`, `g${p.id}-${c.id}`, `/_groups/${g.id}/comments/${c.id}/edit`, c.text, back, MAX_COMMENT, { post: p.id })}
   </div>`)}
-  <form class="say" method="post" action="/_groups/${g.id}/comments" data-group="${g.id}" data-post="${p.id}">
+  <form class="say" method="post" action="/_groups/${g.id}/comments" data-group="${g.id}" data-post="${p.id}" data-inplace>
     <input type="hidden" name="post" value="${p.id}">
     <input type="hidden" name="back" value="${back}">
-    <textarea name="text" rows="1" maxlength="${MAX_COMMENT}" required placeholder="Write a comment…" aria-label="Write a comment"></textarea>
+    <textarea name="text" data-draft="comment:/_groups/${g.id}:${p.id}" rows="1" maxlength="${MAX_COMMENT}" required placeholder="Write a comment…" aria-label="Write a comment"></textarea>
     <button>Post</button>
   </form>
 </section>`;
@@ -1496,14 +1502,14 @@ function groupThread(ctx, g, p) {
 /** A post in a group. Its photos come by signed links from the group's site. */
 function groupCard(ctx, g, p) {
   const n = p.photos.length;
-  return html`<article class="card social in-group" id="gp${p.id}">
+  return html`<article class="card social in-group" id="gp${p.id}" data-region="${groupBase(g)}/posts/${p.id}">
   <header>
     ${groupFace(ctx, p)}
     <span class="what"><strong>${p.mine ? "You" : p.name}</strong>${!p.mine && notFriend(ctx, p.from, "meta")}</span>
     <a class="when" href="${groupBase(g)}/posts/${p.id}" title="${fmtDatetime(p.created_at)}"><time>${fmtAgo(p.created_at)}</time></a>
     ${moreMenu([p.mine && p.editable && menuEdit(`edit-gp${p.id}`),
       mayDelete(g, p) && menuDelete(`/_groups/${g.id}/posts/${p.id}/delete`,
-        "Delete this post, its photos and its comments? This can’t be undone.", { back: groupBase(g) })])}
+        "Delete this post, its photos and its comments? This can’t be undone.", { back: groupBase(g), inplace: "remove" })])}
   </header>
   ${p.event && eventBlock(ctx, g, p, { full: ctx.url.pathname.includes("/posts/") })}
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
@@ -1570,7 +1576,7 @@ function eventBlock(ctx, g, p, { full = false } = {}) {
       ${counts && html`<p class="meta">${counts}</p>`}
     </div>
   </div>
-  ${!e.cancelled_at && !over && html`<form method="post" action="/_groups/${g.id}/events/${p.id}/answer" class="answers" aria-label="Are you going?">
+  ${!e.cancelled_at && !over && html`<form method="post" action="/_groups/${g.id}/events/${p.id}/answer" class="answers" aria-label="Are you going?" data-inplace>
     <input type="hidden" name="back" value="${back}">
     ${ANSWER_LABELS.map(([value, label]) => html`<button class="chip${e.answer === value ? " primary" : ""}" name="answer" value="${value}"
       aria-pressed="${e.answer === value ? "true" : "false"}">${label}</button>`)}
@@ -1582,7 +1588,7 @@ function eventBlock(ctx, g, p, { full = false } = {}) {
   <div class="actions-row">
     ${!e.cancelled_at && html`<a class="chip" href="${groupBase(g)}/posts/${p.id}/event.ics" download>${raw(icon("calendar"))}<span>Add to my calendar</span></a>`}
     ${p.mine && !e.cancelled_at && html`<a class="chip" href="${groupBase(g)}/posts/${p.id}/edit">Change it</a>`}
-    ${mayDelete(g, p) && !e.cancelled_at && !over && html`<form method="post" action="/_groups/${g.id}/events/${p.id}/cancel"
+    ${mayDelete(g, p) && !e.cancelled_at && !over && html`<form method="post" action="/_groups/${g.id}/events/${p.id}/cancel" data-inplace
       data-confirm="Call this event off? Everyone going will be told." data-confirm-ok="Call it off">
       <input type="hidden" name="back" value="${back}"><button class="chip">Call it off</button></form>`}
   </div>`}
@@ -1623,7 +1629,7 @@ export function groupCalendarPage(ctx, { membership: g, outdated, group: info, u
     if (months.at(-1)?.[0] !== d.monthKey) months.push([d.monthKey, d.monthName, []]);
     months.at(-1)[2].push(p);
   }
-  const card = (p) => html`<article class="card social in-group" id="gp${p.id}">${eventBlock(ctx, g, p)}</article>`;
+  const card = (p) => html`<article class="card social in-group" id="gp${p.id}" data-region="">${eventBlock(ctx, g, p)}</article>`;
   return page(ctx, `${info?.name ?? g.name}: calendar`, html`
 ${groupHead(ctx, g, info, "calendar")}
 ${outdated ? html`<p class="notice">This group's site needs updating before it can have a calendar. ${g.role === "owner"
@@ -1824,7 +1830,7 @@ export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { de
         : auto.last.result === "kept" ? html`afterwrd ${auto.last.version} failed its checks after updating your site's database, so it was kept.`
         : html`afterwrd ${auto.last.version} didn't work on this site, so it was put back as it was.`}
       <a href="/_admin/update#auto">See what happened</a>.</p>`}
-    ${!auto.on && !auto.later && !auto.problem && html`<form class="notice" method="post" action="/_admin/update/auto-later">
+    ${!auto.on && !auto.later && !auto.problem && html`<form class="notice" method="post" action="/_admin/update/auto-later" data-region="" data-inplace="remove">
       afterwrd can keep itself up to date, so you never have to update it, and let your friends' afterwrd sites check it
       now and then, so you'd hear if anything were ever wrong with it. Cloudflare asks you to allow each.
       <a href="/_cloudflare/auto-start?then=checks" id="auto-offer">Turn them on</a>
@@ -1832,7 +1838,7 @@ export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { de
     ${checkFailure && html`<p class="notice alert" id="check-failure"><strong>${checkFailure.name}'s site checked yours</strong> on
       ${fmtDate(checkFailure.checked_at)} and found something that needs a look: ${checkFailure.problems[0]}
       <a href="/_admin/update#check">See what it found</a>.</p>`}
-    ${friendChecks.map((f) => html`<form class="notice alert friend-check" method="post" action="/_admin/checks/found/${f.id}/seen">
+    ${friendChecks.map((f) => html`<form class="notice alert friend-check" method="post" action="/_admin/checks/found/${f.id}/seen" data-region="" data-inplace="remove">
       ${f.verdict === "needs a look"
         ? html`<span>Your site checked <strong>${f.name}'s site</strong> and found something that needs a look. It's told their
           site too, but it's worth telling ${f.name}.</span>`
@@ -1841,10 +1847,10 @@ export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { de
       <a href="/_admin/update#checking">See what it found</a> <button class="link">Put it away</button></form>`)}
     ${checkGrant.problem && html`<p class="notice alert">Your friends' sites can't check yours by themselves any more:
       ${checkGrant.problem} <a href="/_admin/update#check">Let them again</a>.</p>`}
-    ${auto.on && !checkGrant.on && !checkGrant.later && !checkGrant.problem && html`<form class="notice" id="checks-offer" method="post" action="/_admin/checks/let-later">
+    ${auto.on && !checkGrant.on && !checkGrant.later && !checkGrant.problem && html`<form class="notice" id="checks-offer" method="post" action="/_admin/checks/let-later" data-region="" data-inplace="remove">
       Let your friends' afterwrd sites check yours by themselves now and then, so you'd hear if anything were ever wrong with it.
       <a href="/_admin/update#check">Let them</a> <button class="link">Not now</button></form>`}
-    ${newDevices.devices.length > 0 && html`<form class="notice alert" method="post" action="/_admin/devices/seen">
+    ${newDevices.devices.length > 0 && html`<form class="notice alert" method="post" action="/_admin/devices/seen" data-region="" data-inplace="remove">
       ${newDevices.devices.length === 1
         ? html`A new device was added to your site on ${fmtDate(newDevices.devices[0].created_at)}.`
         : html`${newDevices.devices.length} new devices were added to your site, on ${listed([...new Set(newDevices.devices.map((d) => fmtDate(d.created_at)))])}.`}
@@ -1852,7 +1858,7 @@ export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { de
       ${newDevices.canConfirm
         ? html`<button class="link">${newDevices.devices.length === 1 ? "That was me" : "They were all me"}</button>`
         : html`If it was you, say so from one of your older devices.`}</form>`}
-    ${newNotifying.length > 0 && html`<form class="notice alert" method="post" action="/_admin/notifications/seen">
+    ${newNotifying.length > 0 && html`<form class="notice alert" method="post" action="/_admin/notifications/seen" data-region="" data-inplace="remove">
       Notifications about your messages were turned on for ${newNotifying.length === 1
         ? html`a new device (${newNotifying[0].name}) on ${fmtDate(newNotifying[0].created_at)}`
         : html`${newNotifying.length} new devices, on ${listed([...new Set(newNotifying.map((d) => fmtDate(d.created_at)))])}`}.
@@ -1872,10 +1878,10 @@ export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { de
         <a class="chip primary" href="/app" data-install-how>Show me how</a>
         <button class="chip" data-install-later>Not now</button></span>
     </div>
-    ${checkRequests.map((r) => html`<div class="notice check-request">
+    ${checkRequests.map((r) => html`<div class="notice check-request" data-region="">
       <span><strong>${r.name}</strong> asks you to check their afterwrd site. Make a link, and send it to them by message.</span>
       <span class="row actions-row"><button class="chip primary" data-check-request="${r.id}">Make a check link</button>
-        <form method="post" action="/_admin/checks/requests/${r.id}/dismiss" class="inline"><button class="chip">Not now</button></form></span>
+        <form method="post" action="/_admin/checks/requests/${r.id}/dismiss" class="inline" data-inplace="remove"><button class="chip">Not now</button></form></span>
       <span class="check-share row actions-row" hidden><button class="chip primary" data-share>Send it to ${r.name}…</button>
         <button class="chip" data-copy>Copy the link</button></span>
       <span class="error" role="alert"></span>

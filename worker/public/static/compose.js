@@ -89,6 +89,7 @@ form.addEventListener("submit", async (event) => {
     const photos = await uploadPhotos(picked.map((p) => p.file), (message) => { status.textContent = message; });
     status.textContent = "Posting…";
     await call(ACTION, { text, photos, ...(question && { poll: question }) });
+    window.afterwrdSent?.(form.text); // it's posted: no need to keep the words on this device (ui.js)
     location.href = location.pathname; // back to the page it was written on (Home or Posts), showing the new post
   } catch (err) {
     error.textContent = err.message;
