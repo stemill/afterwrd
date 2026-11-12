@@ -44,8 +44,34 @@ export const icon = (name) =>
 // name reads whole. On its own, the bubble on an ember tile is the site's icon.
 const BUBBLE = "M12 4a8 8 0 1 1-4.7 14.5L3.8 20l1.2-3.6A8 8 0 0 1 12 4z";
 export const LOGO = `<span class="wordmark">afterw<svg class="o" viewBox="0 0 24 24" aria-hidden="true"><path d="${BUBBLE}" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>rd</span>`;
-// The icon in the browser's tab, and the home-screen app's manifest and icon (public/static/app/), for every page.
-export const FAVICON = `<link rel="manifest" href="/static/app/manifest.webmanifest">
+// Dark or light. The choice (Dark, Light, or Auto: as this device is set) is kept in this browser, and set on the page
+// before anything shows, so a light page never flashes dark. ui.js changes it from the switch behind your picture
+// and sends "afterwrd-look"; another tab changing it, or the device switching, applies at once too.
+export const LOOK = `<script>
+(() => {
+  const root = document.documentElement, light = matchMedia("(prefers-color-scheme: light)");
+  const apply = () => {
+    let choice = null;
+    try { choice = localStorage.getItem("afterwrd-look"); } catch {}
+    if (choice !== "light" && choice !== "auto") choice = "dark";
+    const look = choice === "light" || (choice === "auto" && light.matches) ? "light" : "dark";
+    root.dataset.look = look;
+    root.dataset.lookChoice = choice;
+    const bar = document.querySelector('meta[name="theme-color"]');
+    if (bar) bar.content = look === "light" ? "#f6f1e8" : "#16201b";
+  };
+  apply();
+  light.addEventListener("change", apply);
+  addEventListener("storage", (e) => { if (e.key === "afterwrd-look") apply(); });
+  addEventListener("afterwrd-look", apply);
+  document.addEventListener("DOMContentLoaded", apply);
+})();
+</script>`;
+
+// The icon in the browser's tab, and the home-screen app's manifest and icon (public/static/app/), for every page;
+// with them, the look (LOOK), as every page's head has this.
+export const FAVICON = `${LOOK}
+<link rel="manifest" href="/static/app/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/static/app/icon-180.png">
 <meta name="apple-mobile-web-app-title" content="afterwrd">
 <link rel="icon" href="data:image/svg+xml,${encodeURIComponent(
@@ -76,6 +102,10 @@ export function siteHeader({ main, menu, current, face = {}, updateKnown = true 
     <div class="menu">
       ${menu.map(link).join("")}
       ${menu.length ? "<hr>" : ""}
+      <div class="look" role="radiogroup" aria-labelledby="look-name"><span class="name" id="look-name">Look</span><span class="options">
+        <label><input type="radio" name="look" value="dark">Dark</label><label><input type="radio" name="look" value="light">Light</label><label title="Dark or light, as this device is set"><input type="radio" name="look" value="auto">Auto</label>
+      </span></div>
+      <hr>
       <form method="post" action="/_auth/logout"><button>${icon("signout")}<span>Sign out</span></button></form>
       <p class="about">afterwrd ${escape(pkg.version)} · free software ·
         <a href="https://github.com/${escape(pkg.afterwrd.releases)}/tree/v${escape(pkg.version)}" target="_blank" rel="noopener">Source</a> ·

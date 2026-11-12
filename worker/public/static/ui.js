@@ -9,6 +9,7 @@
 //     now") uses the browser's own Install where it has one (Chrome), and shows how where it hasn't (Safari).
 //   - The small V menus (Edit, Delete) on posts, comments and messages: one open at a time, closed by a tap elsewhere,
 //     a choice, or Escape. Edit opens the words (the page's #target) with the cursor at the end, ready to change.
+//   - The look: the Dark / Light / Auto switch behind your picture, kept in this browser (nav.js LOOK applies it).
 //   - Drop-downs you can type into. A <select data-search> becomes a box that narrows its list as you type; the
 //     select itself stays (hidden) in the form, so what's sent, and any onchange, are as before.
 (() => {
@@ -44,6 +45,22 @@
     });
   }
   window.askFirst = askFirst;
+
+  // --- the look --------------------------------------------------------------------------------------------------
+  const looks = document.querySelectorAll('input[name="look"]');
+  const showChoice = () => looks.forEach((r) => { r.checked = r.value === document.documentElement.dataset.lookChoice; });
+  showChoice();
+  looks.forEach((r) => r.addEventListener("change", () => {
+    try { localStorage.setItem("afterwrd-look", r.value); } catch {}
+    dispatchEvent(new Event("afterwrd-look"));
+    // If this browser won't keep it (some private windows), show it for this page anyway.
+    if (document.documentElement.dataset.lookChoice !== r.value) {
+      const light = r.value === "light" || (r.value === "auto" && matchMedia("(prefers-color-scheme: light)").matches);
+      document.documentElement.dataset.look = light ? "light" : "dark";
+      document.documentElement.dataset.lookChoice = r.value;
+    }
+  }));
+  addEventListener("storage", (e) => { if (e.key === "afterwrd-look") showChoice(); });
 
   // --- the small V menus ---------------------------------------------------------------------------------------
   const openMenus = () => document.querySelectorAll("details.more[open]");

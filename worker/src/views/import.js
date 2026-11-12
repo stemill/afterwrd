@@ -43,7 +43,7 @@ ${FAVICON}
   #steps li { margin: 0.2rem 0; }
   #steps li.done { color: var(--muted); }
   #notes { color: var(--muted); font-size: 0.85rem; }
-  #error { color: #d93025; }
+  #error { color: var(--danger); }
   #error:empty { display: none; }
 </style>
 </head>

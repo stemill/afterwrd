@@ -50,6 +50,32 @@ let second = "";
 try { cli(`Second ${Date.now()}`); } catch (e) { second = String(e.stderr); }
 check("the terminal won't make a second owner", second.includes("already has an owner"), second.trim());
 check("the menu has Your devices", (await navLabels(phone)) === "Home,Messages,Photos,Friends,Groups,Notifications,Your profile,Your devices,Add to home screen,Import,Download everything,Update", await navLabels(phone));
+// The look: dark unless chosen, picked behind the picture, kept in this browser (also for the sign-in page), and Auto
+// as the device is set.
+const look = (page) => page.evaluate(() => `${document.documentElement.dataset.look}/${document.querySelector('input[name="look"]:checked')?.value}`);
+check("the look starts dark", (await look(phone)) === "dark/dark", await look(phone));
+await phone.click("details.me summary");
+await phone.click('input[name="look"][value="light"]');
+check("choosing Light changes the page at once", (await phone.evaluate(() => document.documentElement.dataset.look)) === "light");
+await phone.goto(`${BASE}/posts`);
+check("…and it's remembered on the next page", (await look(phone)) === "light/light", await look(phone));
+check("…and on the sign-in page", await (async () => {
+  const other = await phone.browserContext().newPage();
+  await other.goto(`${BASE}/_auth/login`);
+  const it = await other.evaluate(() => document.documentElement.dataset.look);
+  await other.close();
+  return it === "light";
+})());
+await phone.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "dark" }]);
+await phone.click("details.me summary");
+await phone.click('input[name="look"][value="auto"]');
+check("Auto follows a dark device", (await look(phone)) === "dark/auto", await look(phone));
+await phone.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
+await phone.reload();
+check("…and a light one", (await look(phone)) === "light/auto", await look(phone));
+await phone.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "" }]);
+await phone.evaluate(() => localStorage.removeItem("afterwrd-look"));
+
 await phone.goto(`${BASE}/_admin`);
 check("Your devices lists one passkey, which can't be removed", (await phone.$eval("h1", (h) => h.textContent)) === "Your devices"
   && JSON.stringify((await passkeys(phone)).map((k) => k.disabled)) === "[true]");

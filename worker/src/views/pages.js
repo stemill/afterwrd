@@ -8,8 +8,13 @@ const STYLE = `
   @font-face { font-family: "Nunito"; src: url("/static/fonts/nunito.woff2") format("woff2"); font-weight: 200 1000; font-display: swap; }
   @font-face { font-family: "Nunito Sans"; src: url("/static/fonts/nunito-sans.woff2") format("woff2"); font-weight: 200 1000; font-display: swap; }
   :root { --bg: #16201b; --surface: #1f2b25; --sunken: #121a16; --text: #ede6da; --muted: #a9a092; --border: #2e3d35;
-          --accent: #ff8a3d; --accent-strong: #ffab73; --on-accent: #16201b; --button: #ede6da; --on-button: #16201b; color-scheme: dark;
+          --accent: #ff8a3d; --accent-strong: #ffab73; --on-accent: #16201b; --button: #ede6da; --button-hover: #ffffff;
+          --on-button: #16201b; --moss: #a8d49a; --danger: #ff8070; color-scheme: dark;
           --round: "Nunito", ui-rounded, system-ui, sans-serif; }
+  /* The light look, as in style.css (nav.js LOOK picks it). */
+  :root[data-look="light"] { --bg: #f6f1e8; --surface: #fffdf8; --sunken: #f1ebe0; --text: #1f2a24; --muted: #6b6458; --border: #e0d6c6;
+          --accent-strong: #a8480c; --button: #24332b; --button-hover: #16201b; --on-button: #fffdf8; --moss: #3f7334; --danger: #b3352b;
+          color-scheme: light; }
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: var(--bg);
          color: var(--text); font: 16px/1.55 "Nunito Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
@@ -22,10 +27,10 @@ const STYLE = `
   a { color: var(--accent-strong); }
   button, .button { display: block; width: 100%; min-height: 3rem; padding: 12px; border: 0; border-radius: 999px; background: var(--button);
            color: var(--on-button); font: 900 1rem var(--round); text-align: center; text-decoration: none; cursor: pointer; }
-  button:hover, .button:hover { background: #ffffff; }
+  button:hover, .button:hover { background: var(--button-hover); }
   button:disabled { opacity: 0.6; cursor: default; }
   :focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 2px; }
-  #error { color: #ff8070; margin: 12px 0 0; min-height: 1.5em; }
+  #error { color: var(--danger); margin: 12px 0 0; min-height: 1.5em; }
   input { width: 100%; font: inherit; min-height: 3rem; padding: 11px 18px; border: 1px solid var(--border); border-radius: 999px;
           background: var(--sunken); color: var(--text); }
 `;
@@ -183,7 +188,7 @@ export function messagePage(message, link = { href: "/_auth/login", label: "Go t
 // Cloudflare. `result` is what a finished check found, and `by` the site that checked.
 export function checkLinkPage({ owner, checker, site, fixed, result, by = null, reading = false }) {
   const style = `<style>
-  .check-good { color: #a8d49a; } .check-bad { color: #ff8070; }
+  .check-good { color: var(--moss); } .check-bad { color: var(--danger); }
   .check-good, .check-bad { margin: 0 0 14px; } .check-good b, .check-bad b { color: var(--text); }
   .check-files { margin: -6px 0 16px; padding-left: 1.2rem; color: var(--muted); font-size: 0.9rem; word-break: break-word; }
   .meta { font-size: 0.9rem; } main { max-width: 520px; }

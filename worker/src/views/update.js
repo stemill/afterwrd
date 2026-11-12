@@ -143,7 +143,7 @@ ${FAVICON}
   #go:disabled, #groups-go:disabled { opacity: 0.6; cursor: default; }
   #token { width: 100%; font: inherit; padding: 0.5rem; margin-top: 0.3rem; border: 1px solid var(--border); border-radius: 999px;
     background: var(--bg); color: var(--text); -webkit-text-security: disc; }
-  #error, #group-error, #forget-error { color: #d93025; }
+  #error, #group-error, #forget-error { color: var(--danger); }
   .security { padding: 0.6rem 0.9rem; border-left: 3px solid var(--danger); border-radius: 10px; background: var(--tint-4); }
   #done[hidden], #done [hidden] { display: none; }
   .notes h2, #check h2, #auto h2 { margin: 0 0 0.4rem; font-size: 1rem; }
