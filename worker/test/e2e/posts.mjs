@@ -5,9 +5,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
-// A form sent in place (ui.js, "afterwrd-inplace" when it's done) or the old way, with a new page: whichever happens.
-const settled = (page, options) => Promise.race([page.waitForNavigation(options),
-  page.evaluate(() => new Promise((r) => document.addEventListener("afterwrd-inplace", () => r(), { once: true }))).catch(() => new Promise(() => {}))]);
+import { settled } from "./helpers.mjs";
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
 const OUT = process.env.OUT ?? fileURLToPath(new URL("./out/", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -159,6 +157,17 @@ check("photos appear in a 'Posted on afterwrd' album", albums.includes("Posted o
 await owner.goto(`${BASE}/photos/${stored[0].id}`);
 check("photo page shows it, with the post", (await owner.$eval(".info .album-link", (a) => a.textContent)) === "Posted on afterwrd"
   && (await owner.$eval(".info article.card .text", (t) => t.textContent)) === "Two photos");
+// Opened from the post, a photo is among the post's photos (not in the middle of "Posted on afterwrd"), and ✕ goes
+// back to the post where it was.
+await owner.goto(`${BASE}/posts`);
+await Promise.all([owner.waitForNavigation(), owner.click("main article.card:first-of-type .collage a.tile:nth-of-type(2)")]);
+const inPost = await owner.evaluate(() => ({ counter: document.querySelector(".counter").textContent, album: document.querySelector(".info .album-link").textContent,
+  close: document.getElementById("close").getAttribute("href"), prev: document.getElementById("prev")?.getAttribute("href"), next: Boolean(document.getElementById("next")) }));
+check("a photo opened from its post is among that post's photos", inPost.counter === "2 / 2" && inPost.album === "Your post" && !inPost.next
+  && /^\/photos\/\d+\?in=post&back=/.test(inPost.prev), JSON.stringify(inPost));
+check("…and ✕ goes back to the post where it was", /^\/posts#p-post-\d+-[0-9a-f]{8}$/.test(inPost.close), inPost.close);
+await owner.goto(`${BASE}/photos/${stored[1].id}?in=post&back=${encodeURIComponent("//evil.example/")}`);
+check("…but never to another site", (await owner.$eval("#close", (a) => a.getAttribute("href"))) === "/");
 
 // Comments on the post and on a photo; everything survives a re-import.
 await owner.goto(`${BASE}/posts`);

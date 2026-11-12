@@ -100,6 +100,7 @@ function openChat(list) {
 
   async function post(path, body) {
     const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) })
+      // As ui.js OFFLINE, and saying the words stay in the box (ui.js keeps them on this device too).
       .catch(() => { throw new Error("You're not connected just now, so that hasn't been sent. It's kept here: try again once you're back online."); });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "That didn't work. Try again.");

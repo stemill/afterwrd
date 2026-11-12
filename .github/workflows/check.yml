@@ -1,11 +1,11 @@
-# Checks the Worker's code on every push and pull request: `npm run check` (type checks; see worker/tsconfig.json).
+# Checks the Worker's code on pushes to main and on pull requests: `npm run check` (type checks; see worker/tsconfig.json).
 # It only reads the code, so it has no write access to anything.
 name: Check
 
 on:
   push:
-    branches: ["**"]
-  pull_request:
+    branches: [main]
+  pull_request: # other branches, once there's a pull request for them
 
 permissions:
   contents: read

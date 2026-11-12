@@ -114,13 +114,17 @@ function justified(items) {
 </div>`;
 }
 
-/** Facebook-style layout for the photos attached to a post or comment. */
-function collage(items) {
+/**
+ * Facebook-style layout for the photos attached to a post or comment. A post's (`back`: where the post is shown) open
+ * among that post's photos, and ✕ comes back here; a comment's open in their album.
+ */
+function collage(items, { back = null } = {}) {
   if (!items?.length) return "";
   const n = items.length;
+  const stay = back ? `?${new URLSearchParams({ in: "post", back })}` : "";
   return html`<div class="collage collage-${Math.min(n, 4)}">
     ${items.slice(0, 4).map((m, i) => html`
-      <a href="/photos/${m.id}" class="tile" ${n === 1 && m.kind === "photo" && html`style="--bg-img: url('${thumbUrl(m)}')"`}>
+      <a href="/photos/${m.id}${stay}" class="tile" ${n === 1 && m.kind === "photo" && html`style="--bg-img: url('${thumbUrl(m)}')"`}>
         ${mediaImg(m)}
         ${i === 3 && n > 4 && html`<span class="more">+${n - 4}</span>`}
       </a>`)}
@@ -285,7 +289,7 @@ function postCard(ctx, p) {
   ${p.editable && p.thread !== undefined && editBox(`edit-p-${p.key}`, `p-${p.key}`, `/_admin/posts/${p.id}/edit`, p.text, back, MAX_POST_TEXT,
     { required: Boolean(p.poll) || !p.media?.length })}
   ${p.poll && pollBlock(ctx, p.poll, { id: `poll-${p.id}`, action: `/_admin/posts/${p.id}/vote`, closeAction: `/_admin/posts/${p.id}/close` })}
-  ${collage(p.media)}
+  ${collage(p.media, { back: `${back}#p-${p.key}` })}
   ${p.thread && thread(ctx, p.key, p.thread)}
 </article>`;
   }
@@ -301,7 +305,7 @@ function postCard(ctx, p) {
       : html`<time>${fmtDatetime(p.created_at)}</time>`}
   </header>
   ${p.text && html`<div class="text">${linkify(p.text)}</div>`}
-  ${collage(p.media)}
+  ${collage(p.media, { back: ctx.url.pathname + ctx.url.search })}
   ${safeUrl(p.link_url) && !(p.text || "").includes(p.link_url) &&
     html`<p class="link"><a href="${p.link_url}" target="_blank" rel="noopener noreferrer">${p.link_url}</a></p>`}
   ${p.place_name && html`<p class="meta">📍 ${p.place_name}${p.place_address && `, ${p.place_address}`}</p>`}
@@ -629,8 +633,8 @@ export function taggedPage(ctx, { tagged, paging }) {
 ${pager(ctx, paging)}`);
 }
 
-export function photoPage(ctx, { m, setKey, setTitle, prev, next, index, total, albumPage, post, comment, key, thread: comments }) {
-  const back = `/photos/album/${setKey}${albumPage > 1 ? `?page=${albumPage}` : ""}`;
+export function photoPage(ctx, { m, setKey, setTitle, prev, next, index, total, albumPage, post, comment, key, thread: comments, back: from = null, stay = "" }) {
+  const back = from ?? `/photos/album/${setKey}${albumPage > 1 ? `?page=${albumPage}` : ""}`;
   const main = html`
 <main class="theatre">
   <section class="stage">
@@ -638,10 +642,10 @@ export function photoPage(ctx, { m, setKey, setTitle, prev, next, index, total, 
       : html`<img src="${mediaUrl(m)}" alt="${m.description || ""}" ${m.width && html`width="${Number(m.width)}" height="${Number(m.height)}"`}
            style="background-image: url('${thumbUrl(m)}')">`}
 
-    <a class="close" id="close" href="${back}" title="Back to ${setTitle} (Esc)" aria-label="Back to album">✕</a>
+    <a class="close" id="close" href="${back}" title="Back to ${setTitle} (Esc)" aria-label="Back to ${from ? "the post" : "album"}">✕</a>
     <span class="counter">${index} / ${total}</span>
-    ${prev && html`<a class="nav prev" id="prev" href="/photos/${prev.id}" title="Previous (←)" aria-label="Previous"></a>`}
-    ${next && html`<a class="nav next" id="next" href="/photos/${next.id}" title="Next (→)" aria-label="Next"></a>`}
+    ${prev && html`<a class="nav prev" id="prev" href="/photos/${prev.id}${stay}" title="Previous (←)" aria-label="Previous"></a>`}
+    ${next && html`<a class="nav next" id="next" href="/photos/${next.id}${stay}" title="Next (→)" aria-label="Next"></a>`}
   </section>
 
   <aside class="info">
@@ -1989,10 +1993,12 @@ also tell you when a friend sends you a message: turn that on in <a href="/messa
 <section class="card" data-device="iphone">
   <h2>iPhone or iPad (Safari)</h2>
   <ol>
-    <li>Tap <strong>⋯</strong> (three dots), next to the address at the bottom of the screen, then tap
-      <strong>Share</strong>. If you can already see <strong>Share</strong> (a square with an arrow pointing up), just
-      tap that.</li>
-    <li>Scroll down the list and tap <strong>Add to Home Screen</strong>.</li>
+    <li>Tap <strong>Share</strong>: a square with an arrow pointing up. Where it is depends on how Safari is set out:
+      <ul>
+        <li>With a row of buttons along the bottom of the screen, it's the one in the middle.</li>
+        <li>Otherwise, tap <strong>⋯</strong> (three dots) next to the address, then <strong>Share</strong>.</li>
+      </ul></li>
+    <li>Under the row of apps, scroll down the list and tap <strong>Add to Home Screen</strong>.</li>
     <li>If you see <strong>Open as Web App</strong>, leave it switched on. Tap <strong>Add</strong>.</li>
     <li>Open afterwrd from its new icon on your home screen, and sign in once more: the app keeps its own sign-in,
       separate from Safari's.</li>

@@ -6,9 +6,7 @@
 import { execFileSync } from "node:child_process";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
-// A form sent in place (ui.js, "afterwrd-inplace" when it's done) or the old way, with a new page: whichever happens.
-const settled = (page, options) => Promise.race([page.waitForNavigation(options),
-  page.evaluate(() => new Promise((r) => document.addEventListener("afterwrd-inplace", () => r(), { once: true }))).catch(() => new Promise(() => {}))]);
+import { settled } from "./helpers.mjs";
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
 const OUT = process.env.OUT ?? fileURLToPath(new URL("./out/", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -100,7 +98,8 @@ check("post has its own page with the thread", (await bubbles(owner, "article.ca
 
 // A comment on the photo posted here.
 await owner.goto(`${BASE}/posts`);
-const photoHref = await owner.$eval(`${firstCard} .collage a.tile`, (a) => a.getAttribute("href"));
+// The photo's own address (from a post, its link also says which post it came from: ?in=post&back=…).
+const photoHref = await owner.$eval(`${firstCard} .collage a.tile`, (a) => new URL(a.href).pathname);
 await owner.goto(BASE + photoHref);
 await say(owner, ".info", "Great photo");
 check("photo comment shows in the info panel", (await bubbles(owner, ".info")).map((c) => c.text).join() === "Great photo");
@@ -204,7 +203,7 @@ await owner.evaluate(() => navigator.serviceWorker.ready);
 await owner.reload(); // so the service worker looks after the page
 const box = `${firstCard} .say textarea`;
 await owner.type(box, "Half-written");
-await owner.reload();
+await owner.goto(`${BASE}/posts`); // a fresh visit: a reload could have the browser put the words back by itself
 check("a comment that isn't sent is still there after a reload", (await owner.$eval(box, (t) => t.value)) === "Half-written");
 const worker = await (await browser.waitForTarget((t) => t.type() === "service_worker" && t.url().startsWith(BASE))).createCDPSession();
 await worker.send("Network.enable"); // without it, the worker's own requests ignore "offline"
@@ -220,6 +219,11 @@ check("sending with no connection says so, on the same page, words still in the 
   (await owner.evaluate(() => window.samePage)) && (await owner.$eval(box, (t) => t.value)) === "Half-written"
   && /not connected/.test(await owner.$eval(`${firstCard} .say + .form-error`, (p) => p.textContent).catch(() => "")));
 check("…and nothing was sent", sql("SELECT COUNT(*) AS n FROM comments")[0].n === countBefore);
+await owner.click(`${firstCard} .comment:first-of-type .under details.more summary`);
+await Promise.all([settled(owner), owner.click(`${firstCard} .comment:first-of-type .under .delete`)]);
+check("a Delete that can't go says so where it can be seen, not in its closed menu",
+  await owner.$eval(`${firstCard} .comment:first-of-type .under details.more + .form-error`, (p) => p.checkVisibility() && /not connected/.test(p.textContent)).catch(() => false));
+check("…and the post's buttons and boxes work again", !(await owner.$(`${firstCard} button:disabled`)) && !(await owner.$(`${firstCard} textarea[readonly]`)));
 await offline(false);
 await Promise.all([settled(owner), owner.click(`${firstCard} .say button`)]);
 check("sent once connected, still on the same page, with no note left", (await owner.evaluate(() => window.samePage))
@@ -259,6 +263,8 @@ for (const where of ["/posts", "/"]) {
   });
   check(`a new comment shows where its box was, and the page doesn't move (${where})`, landed.samePage && landed.scrollY === before
     && landed.text === `Where it lands ${where}` && Math.abs(landed.top - box.top) <= 4, `box at ${box.top}, comment at ${landed.top}, scrolled ${landed.scrollY - before}`);
+  if (where === "/") check("…and on Home, the fresh copy's links still come back to Home", await owner.$$eval("article.card:first-of-type input[name=back]",
+    (l) => l.length > 0 && l.every((i) => i.value === "/")));
 }
 const linked = sql("SELECT id FROM comments WHERE text = 'Where it lands /posts'")[0].id;
 await owner.goto(`${BASE}/posts#c${linked}`);

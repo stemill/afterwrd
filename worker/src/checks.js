@@ -321,6 +321,7 @@ function client(token, env, here, fetcher) {
  * @param {any} env
  * @param {string} here
  * @param {{ latest?: ReleaseInfo, signed?: any, tie?: boolean, files?: boolean }} [options]
+ * @param {typeof fetch} [fetcher] what calls Cloudflare (a stand-in, in the tests)
  */
 export async function checkSite(token, site, env, here, { latest = {}, signed = null, tie = false, files: lookAtFiles = true } = {}, fetcher = fetch) {
   const { call, getJSON } = client(token, env, here, fetcher);

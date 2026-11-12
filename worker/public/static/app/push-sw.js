@@ -1,9 +1,10 @@
 // The service worker for the home-screen app: the small script the phone or computer keeps for this site. It's what
 // lets the site be installed as an app, and the phone wakes it, even while asleep, when the site sends a notification
 // about a message (src/push.js). It shows the notification, and opens that chat when it's tapped.
-// It also stands between a page and the site, but only to say when the site can't be reached: pages come straight from
-// the site as always, and nothing is kept on the device (a phone may be shared, and pages are private). With no signal
-// or Wi-Fi, it answers with a short page of its own (offlinePage) in place of the browser's error.
+// It also says when the site can't be reached: with no signal or Wi-Fi, a page that won't load gets a short page of its
+// own (offlinePage) in place of the browser's error. No pages are kept on the device (a phone may be shared, and pages
+// are private), and it never fetches a page itself: the browser does (navigation preload), as it would with no
+// service worker, so the site sees exactly where a request came from (its Origin and Sec-Fetch-Site checks).
 // A notification is encrypted for this device by its own site (src/webpush.js): { title, body, url, tag, quiet, badge }.
 // tag: which chat it's about. quiet: more from a chat that's just made a sound, which bring its notification up to
 // date without another.
@@ -17,28 +18,28 @@ self.addEventListener("activate", (event) => event.waitUntil(Promise.all([
 ])));
 
 self.addEventListener("fetch", (event) => {
-  if (event.request.mode !== "navigate") return; // everything a page asks for itself goes as normal
+  // Only opening a page. Not forms being sent (a POST), nor anything a page asks for itself, and nothing at all in a
+  // browser without navigation preload: those go to the site as normal, untouched.
+  const { request } = event;
+  if (request.mode !== "navigate" || request.method !== "GET" || !self.registration.navigationPreload) return;
   event.respondWith((async () => {
     try {
-      return (await event.preloadResponse) || (await fetch(event.request));
+      // The page as the browser fetched it. Preload is switched on before this worker handles anything (activate),
+      // so it's always there; if it somehow isn't, this says offline (and loads by itself) rather than fetch the page
+      // from here, which would send it as from this site.
+      return (await event.preloadResponse) ?? offlinePage();
     } catch {
-      return offlinePage(event.request.method !== "GET");
+      return offlinePage();
     }
   })());
 });
 
 /**
- * Said when a page can't be reached at all. `sending`: it was a form being sent (a comment, a delete), which didn't
- * go. Comments and the like are sent by the page itself (ui.js) and never come here; anything else that was being
- * written is kept by the page (ui.js), so going back finds it again. Its own words and
- * colours, as the site's stylesheet may not be on the device; the look (dark or light) as chosen on the site.
+ * Said when a page can't be reached at all, with its own words and colours (the site's stylesheet may not be on the
+ * device), in the look (dark or light) chosen on the site. It tries again by itself until the site answers.
+ * Its colours copy style.css's :root and its look script nav.js LOOK: change them together.
  */
-function offlinePage(sending) {
-  const said = sending
-    ? `<p>That hasn't been sent. Go back and send it again once you're connected: anything you were writing is still there.</p>
-<button type="button" onclick="history.back()">Go back</button>`
-    : `<p>Check you've got signal or Wi-Fi. This page will load by itself once you're connected.</p>
-<button type="button" onclick="location.reload()">Try again</button>`;
+function offlinePage() {
   const page = `<!doctype html>
 <html lang="en-GB">
 <head>
@@ -55,9 +56,9 @@ function offlinePage(sending) {
   if (light) document.querySelector('meta[name="theme-color"]').content = "#f6f1e8";
   // Loading by itself: when the phone says it's back online, and, as it can't always tell (Wi-Fi with no internet),
   // by asking the site for a tiny public file every few seconds while this is on screen.
-  ${sending ? "" : `const retry = () => fetch("/static/app/manifest.webmanifest", { cache: "no-store" }).then(() => location.reload(), () => {});
+  const retry = () => fetch("/static/app/manifest.webmanifest", { cache: "no-store" }).then(() => location.reload(), () => {});
   addEventListener("online", retry);
-  setInterval(() => { if (document.visibilityState === "visible") retry(); }, 5000);`}
+  setInterval(() => { if (document.visibilityState === "visible") retry(); }, 5000);
 })();
 </script>
 <style>
@@ -81,11 +82,15 @@ button { font: 800 1rem "Nunito", system-ui, sans-serif; background: var(--butto
 <main>
 <span class="wordmark" aria-label="afterwrd">afterw<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 1-4.7 14.5L3.8 20l1.2-3.6A8 8 0 0 1 12 4z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>rd</span>
 <h1>You're offline</h1>
-${said}
+<p>Check you've got signal or Wi-Fi. This page will load by itself once you're connected.</p>
+<button type="button" onclick="location.reload()">Try again</button>
 </main>
 </body>
 </html>`;
-  return new Response(page, { status: 503, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+  // The same protections as the site's own pages (src/index.js), as this one never passes through it.
+  return new Response(page, { status: 503, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store",
+    "Content-Security-Policy": "connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'",
+    "X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin" } });
 }
 
 self.addEventListener("push", (event) => {

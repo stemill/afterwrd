@@ -21,6 +21,7 @@ import { securityFixWaiting, waitingRelease } from "../update.js";
 import { autoState } from "../auto.js";
 import { checkGrant, friendCheckAlerts, lastFailure } from "../friendchecks.js";
 import { now, pageData, withoutKeys } from "../util.js";
+import { safeNext } from "../auth.js";
 import { fmtDate, fmtMonth } from "../views/format.js";
 import * as views from "../views/archive.js";
 import { chatPage, friendMessage, groupChat, messagesIndex, unreadChats } from "../messages.js";
@@ -431,12 +432,17 @@ async function tagged(ctx, params) {
   return { tagged: rows, paging };
 }
 
+/**
+ * A photo or video, among the rest of its album; or, opened from a post (?in=post), among that post's photos, with
+ * ✕ going back to where the post was (?back=, a page on this site), not into the middle of an album.
+ */
 async function photo(ctx, params, id) {
   const { db } = ctx;
   const m = await first(db, "SELECT * FROM media WHERE id = ?", [Number(id)]);
   if (!m) return null;
   const setKey = m.album_id ? String(m.album_id) : m.kind === "video" ? "videos" : "other";
-  const { where, params: setParams, title } = mediaSet(setKey);
+  const inPost = params.get("in") === "post" && m.post_id != null;
+  const { where, params: setParams, title } = inPost ? { where: "post_id = ?", params: [m.post_id], title: "Post" } : mediaSet(setKey);
   const setTitle = title ?? (await first(db, "SELECT name FROM albums WHERE id = ?", setParams)).name;
   const order = "(COALESCE(created_at, 0), id)";
   const position = [m.created_at ?? 0, m.id];
@@ -452,9 +458,13 @@ async function photo(ctx, params, id) {
     ? (await loadPosts(db, await all(db, `${POST_SQL} WHERE p.id = ?`, [m.post_id]), { threads: false }))[0] : null;
   const comment = m.comment_id
     ? (await loadComments(db, await all(db, `${COMMENT_SQL} WHERE c.id = ?`, [m.comment_id])))[0] : null;
+  // From a post: back where it was, and the post's other photos keep to the post too.
+  const postPage = post && /^post-\d+-[0-9a-f]{8}$/.test(post.key) ? `/posts/${post.key}` : "/posts";
+  const back = inPost ? (params.get("back") ? safeNext(params.get("back"), ctx.url) : postPage) : null;
   return {
-    m, setKey, setTitle, prev: prev.results[0], next: next.results[0], index: before + 1,
-    total: (await setStats(db, where, setParams)).count, albumPage: Math.floor(before / PHOTO_PAGE_SIZE) + 1, post, comment,
+    m, setKey, setTitle: inPost && post?.source === "afterwrd" ? "Your post" : setTitle, prev: prev.results[0], next: next.results[0],
+    index: before + 1, total: (await setStats(db, where, setParams)).count, albumPage: Math.floor(before / PHOTO_PAGE_SIZE) + 1,
+    post, comment, back, stay: inPost ? `?${new URLSearchParams({ in: "post", back })}` : "",
     ...await photoThread(db, m),
   };
 }

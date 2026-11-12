@@ -10,9 +10,7 @@ import { createDecipheriv, createECDH, createHash, createPublicKey, hkdfSync, ra
 import { createServer } from "node:http";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
-// A form sent in place (ui.js, "afterwrd-inplace" when it's done) or the old way, with a new page: whichever happens.
-const settled = (page, options) => Promise.race([page.waitForNavigation(options),
-  page.evaluate(() => new Promise((r) => document.addEventListener("afterwrd-inplace", () => r(), { once: true }))).catch(() => new Promise(() => {}))]);
+import { settled } from "./helpers.mjs";
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 

@@ -57,7 +57,7 @@ await Promise.all([page.waitForNavigation({ timeout: 60_000 }), page.click("#com
 check("post appears", (await texts())[0] === "My very first post");
 const tile = await page.$eval("main .collage a.tile", (a) => a.getAttribute("href"));
 await page.goto(BASE + tile);
-check("its photo opens", (await page.$eval(".info .album-link", (a) => a.textContent)) === "Posted on afterwrd");
+check("its photo opens, as one of the post's", (await page.$eval(".info .album-link", (a) => a.textContent)) === "Your post");
 await page.goto(`${BASE}/photos`);
 check("Photos shows the afterwrd album", (await albums()).join() === "Posted on afterwrd", (await albums()).join());
 

@@ -121,6 +121,9 @@ export function loginPage(next) {
 <p>This is a private afterwrd site. Sign in with your passkey.</p>
 <button id="go">Sign in with a passkey</button>
 <p id="error" role="alert"></p>`, `
+  // Words kept on this device while they were being written (ui.js) go once it's signed out, however that happened:
+  // Sign out here, from another device, or the session running out. This may be a shared phone or computer.
+  try { Object.keys(localStorage).filter((k) => k.startsWith("afterwrd-draft:")).forEach((k) => localStorage.removeItem(k)); } catch {}
   const next = ${JSON.stringify(next).replace(/</g, "\\u003c")};
   run(document.getElementById("go"), async () => {
     const options = await post("/_auth/login/options");

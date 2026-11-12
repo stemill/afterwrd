@@ -27,6 +27,14 @@ interface CheckGrant {
   problem?: string | null;
 }
 
+/** A link in the header's menus (src/views/nav.js): badge is a count, or true for a dot. */
+interface MenuItem {
+  key: string;
+  label: string;
+  href: string;
+  badge?: number | boolean | null;
+}
+
 /** A release's details from its manifest, as far as the checks need them. */
 interface ReleaseInfo {
   version?: string;

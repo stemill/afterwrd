@@ -82,7 +82,7 @@ export const FAVICON = `${LOOK}
  * The header. `main`: [{ key, label, href, badge? }] (badge: a count, or true for a dot); `menu`: the same, shown
  * behind the person's picture, with Sign out last (a small form, so another site can't sign people out with a link);
  * `current`: the key of the page you're on; `face`: { initial, picture? } for the picture.
- * @param {{ main?: any, menu: any[], current?: string, face?: { picture?: string, initial?: string }, updateKnown?: boolean }} options
+ * @param {{ main: MenuItem[], menu: MenuItem[], current?: string, face?: { picture?: string, initial?: string }, updateKnown?: boolean }} options
  */
 export function siteHeader({ main, menu, current, face = {}, updateKnown = true }) {
   const badge = (b) => (b === true ? '<span class="dot" aria-hidden="true"></span>'

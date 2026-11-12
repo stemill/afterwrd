@@ -79,8 +79,16 @@
     if (e.key !== "Escape") return;
     openMenus().forEach((d) => { d.open = false; d.querySelector("summary").focus(); });
   });
+  /** What the address points at (#c12), if anything; nothing for a mangled address (a stray "%"). */
+  const pointedAt = () => {
+    try {
+      return location.hash.length > 1 ? document.getElementById(decodeURIComponent(location.hash.slice(1))) : null;
+    } catch {
+      return null;
+    }
+  };
   function editing() {
-    const box = location.hash.length > 1 ? document.getElementById(decodeURIComponent(location.hash.slice(1))) : null;
+    const box = pointedAt();
     const words = box?.matches("div.edit") ? box.querySelector("textarea") : null;
     if (!words) return;
     words.focus({ preventScroll: true });
@@ -148,14 +156,19 @@
   // named in data-region instead (the post's own page, or a friend's posts). data-inplace="remove" takes that part away
   // (a deleted post, a notice put away), unless it's the post this page is about: then the site's answer is followed.
   // Without scripts, the forms send themselves and the page reloads, as before.
+  // The same words as the composer's (upload.js OFFLINE); messages.js says it its own way, as its words stay in the box.
   const OFFLINE = "You're not connected just now, so that hasn't been sent. Try again once you're back online.";
+  // Said when one's done, for anything that wants to know (the tests do).
+  const finished = (sent) => document.dispatchEvent(new CustomEvent("afterwrd-inplace", { detail: { sent } }));
+  /** A note under what was pressed (a menu's Delete: under its menu, which has closed), or none, without words. */
   const sayUnder = (form, words) => {
-    let note = form.nextElementSibling?.matches(".form-error") ? form.nextElementSibling : null;
+    const under = form.closest("details.more") ?? form;
+    let note = under.nextElementSibling?.matches(".form-error") ? under.nextElementSibling : null;
     if (!words) { note?.remove(); return; }
     if (!note) {
       note = Object.assign(document.createElement("p"), { className: "form-error" });
       note.setAttribute("role", "alert");
-      form.after(note);
+      under.after(note);
     }
     note.textContent = words;
   };
@@ -169,13 +182,27 @@
     } catch {}
     return `That didn't work (the site said ${res.status}). Try again.`;
   }
-  /** A fresh copy of `region`, from `source`; false if it couldn't be had (the caller then loads the whole page). */
-  async function refresh(region, source) {
+  /**
+   * A part drawn for another page (Home's posts come from their own page) says to go back there: the forms' "back",
+   * and a post's photos' ✕ (?back=, keeping its #anchor). Made to come back to `here` instead.
+   */
+  function backHere(fresh, here) {
+    fresh.querySelectorAll('input[name="back"]').forEach((input) => { input.value = here; });
+    fresh.querySelectorAll('a[href*="back="]').forEach((a) => {
+      const url = new URL(a.getAttribute("href"), location.href);
+      const was = url.searchParams.get("back") ?? "";
+      url.searchParams.set("back", here + (was.includes("#") ? was.slice(was.indexOf("#")) : ""));
+      a.setAttribute("href", url.pathname + url.search);
+    });
+  }
+  /** `region` swapped for a fresh copy from `source`; the copy, or null if it couldn't be had. */
+  async function refresh(region, source, here) {
     try {
       const res = await fetch(source, { cache: "no-store" });
-      if (!res.ok) return false;
+      if (!res.ok) return null;
       const fresh = new DOMParser().parseFromString(await res.text(), "text/html").getElementById(region.id);
-      if (!fresh) return false;
+      if (!fresh) return null;
+      if (source !== here) backHere(fresh, here);
       // The browser would scroll to keep whatever's below still as the post grows (scroll anchoring), so the new
       // comment would seem to push everything up: not while swapping. What's above stays put, and it shows where
       // its box was.
@@ -185,56 +212,75 @@
       void fresh.offsetHeight; // laid out now, with anchoring off
       requestAnimationFrame(() => { root.style.overflowAnchor = ""; });
       restoreDrafts(fresh);
-      return true;
+      return fresh;
     } catch {
-      return false;
+      return null;
     }
+  }
+  /**
+   * Focus went with the old copy: put it on the same form's button in the new one (the comment box's Post, say), or
+   * the part itself, so a keyboard or screen reader carries on from here. Not into a box: that opens a phone's keyboard.
+   */
+  function focusAgain(fresh, form) {
+    if (document.activeElement && document.activeElement !== document.body) return;
+    const twin = [...fresh.querySelectorAll("form")].find((f) => f.getAttribute("action") === form.getAttribute("action"));
+    const button = twin?.querySelector("button:not([disabled])");
+    if (button) { button.focus({ preventScroll: true }); return; }
+    fresh.tabIndex = -1;
+    fresh.focus({ preventScroll: true });
   }
   document.addEventListener("submit", async (e) => {
     const form = e.target;
     if (e.defaultPrevented || !form.matches("form[data-inplace]")) return;
     const region = form.closest("[data-region]");
     const removing = form.dataset.inplace === "remove";
-    const here = location.pathname + location.search;
-    const source = (location.pathname === "/" && region?.dataset.region) || here;
-    if (!region || (!removing && !region.id) || (removing && region.dataset.region === location.pathname)) return;
+    const nothingToRedraw = !removing && !region?.id;
+    const thisPagesPost = removing && region?.dataset.region === location.pathname; // deleted: the site says where next
+    if (!region || nothingToRedraw || thisPagesPost) return; // sent the ordinary way
     e.preventDefault();
-    if (form.dataset.busy) return;
-    form.dataset.busy = "1";
-    const buttons = [...form.querySelectorAll("button")].filter((b) => !b.disabled);
-    buttons.forEach((b) => { b.disabled = true; });
-    sayUnder(form, "");
+    // One thing at a time in each part: each send redraws it, so a second would land on a copy that's gone.
+    if (region.dataset.sending) return;
+    const here = location.pathname + location.search;
+    const source = (location.pathname === "/" && region.dataset.region) || here;
     const body = new FormData(form);
     if (e.submitter?.name) body.append(e.submitter.name, e.submitter.value); // a poll's choice is the button pressed
-    const done = () => { delete form.dataset.busy; buttons.forEach((b) => { b.disabled = false; }); };
+    // Meanwhile the part waits: its buttons off, and its boxes not taking words that the redraw would lose.
+    region.dataset.sending = "1";
+    const held = [...region.querySelectorAll("button, textarea")].filter((el) => !el.disabled && !el.readOnly);
+    const hold = (on) => held.forEach((el) => { if (el.matches("textarea")) el.readOnly = on; else el.disabled = on; });
+    hold(true);
+    sayUnder(form, "");
+    const failed = (words) => {
+      delete region.dataset.sending;
+      hold(false);
+      sayUnder(form, words); // and any words stay in their box, kept on this device
+      finished(false);
+    };
     let res;
     try {
       res = await fetch(e.submitter?.getAttribute("formaction") || form.action, { method: "POST", body, redirect: "manual" });
     } catch {
-      done();
-      sayUnder(form, OFFLINE); // and any words stay in their box, kept on this device
-      finished(false);
+      failed(OFFLINE);
       return;
     }
     // The site answers a form that worked by sending you on (a redirect, which isn't followed here).
     if (res.type !== "opaqueredirect" && !res.ok) {
-      done();
-      sayUnder(form, await refusal(res));
-      finished(false);
+      failed(await refusal(res));
       return;
     }
     form.querySelectorAll("textarea[data-draft]").forEach((box) => window.afterwrdSent(box));
+    let fresh = null;
     if (removing) region.remove();
-    else if (!(await refresh(region, source))) {
+    else if (!(fresh = await refresh(region, source, here))) {
       location.reload();
       return;
     }
-    // The page's address may still point at the edit box that was open (#edit-c12): it's done with.
-    if (location.hash) history.replaceState(history.state, "", location.pathname + location.search);
+    // An edit box opens as the address's #target (#edit-c12). Off the address now it's done with, so Edit there
+    // again changes the address, and opens it afresh.
+    if (location.hash) history.replaceState(history.state, "", here);
+    if (fresh) focusAgain(fresh, form);
     finished(true);
   });
-  // Said when one's done, for anything that wants to know (the tests do).
-  const finished = (sent) => document.dispatchEvent(new CustomEvent("afterwrd-inplace", { detail: { sent } }));
 
   // --- arriving at something -------------------------------------------------------------------------------------
   // A page opened at something (#c12, from Notifications say) shows it just below the site's header, however tall
@@ -243,7 +289,7 @@
   const fitHeader = () => { if (header) document.documentElement.style.scrollPaddingTop = `${header.offsetHeight + 12}px`; };
   fitHeader();
   addEventListener("resize", fitHeader);
-  const target = location.hash.length > 1 ? document.getElementById(decodeURIComponent(location.hash.slice(1))) : null;
+  const target = pointedAt();
   if (target && !target.matches("div.edit") && performance.getEntriesByType?.("navigation")[0]?.type === "navigate") {
     let touched = false; // once you scroll yourself, the page is yours
     ["wheel", "touchstart", "keydown", "mousedown"].forEach((type) => addEventListener(type, () => { touched = true; }, { once: true, passive: true }));

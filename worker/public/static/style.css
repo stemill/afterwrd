@@ -243,6 +243,7 @@ a.badge:hover { text-decoration: none; }
 .composer .post:hover { background: var(--button-hover); }
 .composer .post:disabled { opacity: 0.6; cursor: progress; }
 .composer .error { margin: 0; color: var(--danger); font-weight: 700; }
+.form-error { margin: 0.4rem 0 0; color: var(--danger); font-weight: 700; font-size: 0.92rem; } /* a form sent in place that didn't go (ui.js) */
 .composer .error:empty { display: none; }
 
 /* people's faces: a picture, or their initial on one of six warm colours */
@@ -732,7 +733,6 @@ details.edited summary:hover { text-decoration: underline; }
 .versions li { margin-bottom: 0.35rem; }
 .versions .was { display: block; color: var(--text); font-size: 0.9rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 div.edit { scroll-margin-top: 0.5rem; }
-.form-error { margin: 0.4rem 0 0; color: var(--danger); font-weight: 700; font-size: 0.92rem; } /* a form sent in place that didn't go (ui.js) */
 div.edit:not(:target) { display: none; }
 div.edit form { display: grid; gap: 0.4rem; margin-top: 0.4rem; }
 div.edit textarea { width: 100%; font: inherit; font-size: 0.95rem; color: var(--text); }
