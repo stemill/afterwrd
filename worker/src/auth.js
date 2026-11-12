@@ -104,7 +104,7 @@ async function registerOptions(env, url, { token }) {
     rpName: "afterwrd",
     rpID: url.hostname,
     userName: link.name,
-    userID: new TextEncoder().encode(String(link.user_id)),
+    userID: /** @type {Uint8Array<ArrayBuffer>} */ (new TextEncoder().encode(String(link.user_id))),
     attestationType: "none",
     excludeCredentials: existing.map((c) => ({ id: c.id, transports: JSON.parse(c.transports) })),
     // The device checks it's you (face, fingerprint or PIN), not just that someone pressed it; the checks below insist too.

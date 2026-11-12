@@ -141,25 +141,25 @@ export async function handleFeed(request, env, url) {
         connection: form.get("connection"), target: String(form.get("target") ?? ""), text: String(form.get("text") ?? ""),
       });
       if (made) back.hash = `r${made.connection}-${made.id}`;
-      return Response.redirect(back, 303);
+      return Response.redirect(back.href, 303);
     }
     if (url.pathname === "/_feed/vote") {
       const connection = String(form.get("connection") ?? "");
       const target = String(form.get("target") ?? "");
       await voteOnFriend(env, { connection, target, choices: form.getAll("choice").map(String) });
       back.hash = `f${Number(connection) || 0}-${TARGET_RE.test(target) ? target : ""}`;
-      return Response.redirect(back, 303);
+      return Response.redirect(back.href, 303);
     }
     const change = /^\/_feed\/comments\/(\d+)\/(\d+)\/edit$/.exec(url.pathname);
     if (change) {
       await editFriendComment(env, { connection: change[1], id: Number(change[2]), text: String(form.get("text") ?? "") });
       back.hash = `r${Number(change[1])}-${Number(change[2])}`;
-      return Response.redirect(back, 303);
+      return Response.redirect(back.href, 303);
     }
     const del = /^\/_feed\/comments\/(\d+)\/(\d+)\/delete$/.exec(url.pathname);
     if (del) {
       await deleteFriendComment(env, { connection: del[1], id: Number(del[2]) });
-      return Response.redirect(back, 303);
+      return Response.redirect(back.href, 303);
     }
   } catch (error) {
     if (error instanceof Refusal) return problem(error.message, back);

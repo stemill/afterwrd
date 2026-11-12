@@ -316,6 +316,11 @@ function client(token, env, here, fetcher) {
  * also give `signed` (the signed list: the release must be in it, its manifest exactly as signed), `tie` (the
  * account's workers.dev name must be the address's, so a token for some other account can't stand in), and
  * `files: false` (the site files are looked at in a step of their own, siteFiles()).
+ * @param {string} token
+ * @param {string} site
+ * @param {any} env
+ * @param {string} here
+ * @param {{ latest?: ReleaseInfo, signed?: any, tie?: boolean, files?: boolean }} [options]
  */
 export async function checkSite(token, site, env, here, { latest = {}, signed = null, tie = false, files: lookAtFiles = true } = {}, fetcher = fetch) {
   const { call, getJSON } = client(token, env, here, fetcher);
@@ -602,7 +607,10 @@ export async function askForCheck(env, connection) {
   return { name: friend.name };
 }
 
-/** A friend's site asking for a check (POST /_peer/check-request). Returns [body, status]. */
+/**
+ * A friend's site asking for a check (POST /_peer/check-request). Returns [body, status].
+ * @returns {Promise<import("./util.js").Answer>}
+ */
 export async function receiveCheckRequest(env, peer, body) {
   if (body?.type !== "CheckRequest") return [{ error: "That isn't a request for a check." }, 400];
   const at = now();
@@ -644,6 +652,7 @@ async function tellChecked(env, site, result) {
 /**
  * A friend's site saying it checked this one and found it genuine (POST /_peer/checked). Returns [body, status].
  * It's their word, as a friend: it only changes what this site suggests to its owner, and says who it came from.
+ * @returns {Promise<import("./util.js").Answer>}
  */
 export async function receiveChecked(env, url, peer, body) {
   if (body?.type !== "Checked" || body.site !== url.origin) return [{ error: "That isn't a check of this site." }, 400];

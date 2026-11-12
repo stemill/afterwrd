@@ -133,7 +133,7 @@ export class Outbox extends DurableObject {
     const due = this.sql.exec(`SELECT * FROM ${table} WHERE due <= ? ORDER BY id LIMIT ?`, at, limit).toArray();
     const ids = [...new Set(due.map((n) => n[column]))];
     const { results } = ids.length ? await this.env.DB.prepare(`${sql} (${ids.map(() => "?").join(",")})`).bind(...ids).all() : { results: [] };
-    const recipients = new Map(results.map((c) => [c.id, c]));
+    const recipients = new Map(results.map((c) => /** @type {[any, any]} */ ([c.id, c])));
     // A message the owner has deleted here since (or that's been delivered after all) isn't sent.
     const waiting = !KINDS[table].track ? null : due.length ? new Set((await this.env.DB.prepare(
       `SELECT id FROM messages WHERE delivered_at IS NULL AND id IN (${due.map(() => "?").join(",")})`)

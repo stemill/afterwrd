@@ -55,6 +55,7 @@ const PERSON_TABS = {
 // data and returns it as plain data (no HTML, and never a key: util.js pageData), or a Response (a redirect, a file),
 // or null for 404; the view (views/archive.js) turns the data into the page. A loader that can't reach a friend's or
 // group's site throws a Problem, shown by that view instead.
+/** @type {Array<[RegExp, string | string[] | null, (ctx: any, params: URLSearchParams, ...match: string[]) => any, ((frame: any, data: any) => any) | null]>} */
 const ROUTES = [
   [/^\/$/, null, home, views.homePage],
   [/^\/overview$/, "overview", overview, views.overviewPage],
@@ -99,7 +100,8 @@ const ROUTES = [
 class Problem extends Error {
   constructor(view, data) {
     super(data.message);
-    Object.assign(this, { view, data });
+    this.view = view;
+    this.data = data;
   }
 }
 

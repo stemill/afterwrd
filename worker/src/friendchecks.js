@@ -125,7 +125,10 @@ export async function letOff(env) {
   await saveSetting(env.DB, GRANT_KEY, { on: false, problem: null });
 }
 
-/** A friend's site asking for a token to check this one (POST /_peer/check-token). Returns [body, status]. */
+/**
+ * A friend's site asking for a token to check this one (POST /_peer/check-token). Returns [body, status].
+ * @returns {Promise<import("./util.js").Answer>}
+ */
 export async function giveCheckToken(env, url, peer, body) {
   if (body?.type !== "CheckToken") return [{ error: "That isn't a request for a check." }, 400];
   if (!(await checkGrant(env.DB)).on) return [{ error: "This site doesn't let friends' sites check it by themselves.", off: true }, 409];
@@ -199,7 +202,10 @@ const FOUND = {
   files: "Cloudflare hands out some of your site's files without its code checking them first.",
 };
 
-/** A friend's check of this site that found something (POST /_peer/check-failed). Returns [body, status]. */
+/**
+ * A friend's check of this site that found something (POST /_peer/check-failed). Returns [body, status].
+ * @returns {Promise<import("./util.js").Answer>}
+ */
 export async function receiveCheckFailed(env, url, peer, body) {
   if (body?.type !== "CheckFailed" || body.site !== url.origin) return [{ error: "That isn't a check of this site." }, 400];
   const problems = [...new Set((Array.isArray(body.found) ? body.found : []).filter((code) => Object.hasOwn(FOUND, code)))]
@@ -234,7 +240,10 @@ export async function lastFailure(db) {
 
 // --- the checking site --------------------------------------------------------------------------------------------
 
-/** A friend's site saying it was just updated (POST /_peer/check-soon). Returns [body, status]. */
+/**
+ * A friend's site saying it was just updated (POST /_peer/check-soon). Returns [body, status].
+ * @returns {Promise<import("./util.js").Answer>}
+ */
 export async function receiveCheckSoon(env, peer, body) {
   if (body?.type !== "CheckSoon") return [{ error: "That isn't a request for a check." }, 400];
   if ((await setting(env.DB, CHECKING_KEY)).off) return [{ ok: true }, 200];

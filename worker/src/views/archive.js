@@ -1595,7 +1595,10 @@ function eventBlock(ctx, g, p, { full = false } = {}) {
 </div>`;
 }
 
-/** Adding or changing an event. Its times are in `values.zone`, or, for a new one, the browser's own time zone. */
+/**
+ * Adding or changing an event. Its times are in `values.zone`, or, for a new one, the browser's own time zone.
+ * @param {{ action: string, back: string, values?: Record<string, string>, text?: string, submit: string }} options
+ */
 function eventForm({ action, back, values = {}, text = "", submit }) {
   return html`<form class="stack event-form" method="post" action="${action}">
   <input type="hidden" name="back" value="${back}">
@@ -1809,10 +1812,14 @@ function onThisDayCard(ctx, memories) {
 
 const SIDE_FRIENDS = 12; // on Home; the rest are on Friends
 
-/** The owner's Home: write something, then your posts and your friends' together, newest first. */
 /** "a", "a and b", "a, b and c". */
 const listed = (items) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
 
+/**
+ * The owner's Home: write something, then your posts and your friends' together, newest first.
+ * @param {any} ctx
+ * @param {Record<string, any> & { auto?: AutoState, checkGrant?: CheckGrant }} data
+ */
 export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { devices: [], canConfirm: false }, newNotifying = [], securityFix = null, asking = [], introductions = [], unchecked = false, checkRequests = [], auto = { on: false }, checkFailure = null, friendChecks = [], checkGrant = {} }) {
   const stream = [
     ...own.map((p) => ({ at: p.created_at, card: postCard(ctx, p) })),

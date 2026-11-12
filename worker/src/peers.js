@@ -65,7 +65,14 @@ export async function ownerName(db) {
   return owner?.name ?? "Someone";
 }
 
-/** Calls another site, JSON both ways; throws with a message fit to show the owner. */
+/**
+ * Calls another site, JSON both ways; throws with a message fit to show the owner, and `status`: what their site
+ * answered (0: no answer).
+ * @param {string} origin
+ * @param {string} path
+ * @param {{ key?: string, body?: object, timeout?: number }} [options]
+ * @returns {Promise<Record<string, any>>}
+ */
 export async function callSite(origin, path, { key, body, timeout = TIMEOUT_MS } = {}) {
   let response;
   try {
@@ -86,9 +93,8 @@ export async function callSite(origin, path, { key, body, timeout = TIMEOUT_MS }
   // Whatever else a site answers (null, a list, a number) counts as saying nothing.
   if (!data || typeof data !== "object" || Array.isArray(data)) data = {};
   if (!response.ok) {
-    const error = new Error(typeof data.error === "string" ? data.error.slice(0, 300) : `${host(origin)} answered ${response.status}.`);
-    error.status = response.status;
-    throw error;
+    throw Object.assign(new Error(typeof data.error === "string" ? data.error.slice(0, 300) : `${host(origin)} answered ${response.status}.`),
+      { status: response.status });
   }
   return data;
 }

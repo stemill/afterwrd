@@ -111,19 +111,19 @@ export async function handleComments(request, env, url, user) {
     if (url.pathname === "/_comments") {
       const made = await addComment(env, url.origin, user, { target: String(form.get("target") ?? ""), text: String(form.get("text") ?? "") });
       if (made) back.hash = `c${made.id}`;
-      return Response.redirect(back, 303);
+      return Response.redirect(back.href, 303);
     }
     const change = /^\/_comments\/(\d+)\/edit$/.exec(url.pathname);
     if (change) {
       await editComment(env, Number(change[1]), { owner: true }, String(form.get("text") ?? ""), MAX_COMMENT);
       back.hash = `c${change[1]}`;
-      return Response.redirect(back, 303);
+      return Response.redirect(back.href, 303);
     }
     const del = /^\/_comments\/(\d+)\/delete$/.exec(url.pathname);
     if (del) {
       const gone = await deleteComment(env, Number(del[1]));
       if (gone) back.hash = `t-${gone.target}`;
-      return Response.redirect(back, 303);
+      return Response.redirect(back.href, 303);
     }
   } catch (error) {
     if (error instanceof Refusal) return message(error.message, back, error.status);

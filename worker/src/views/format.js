@@ -12,9 +12,10 @@ const URL_RE = /https?:\/\/[^\s<>"]+/g;
 
 export const EMOJI = { Like: "👍", Love: "❤️", Haha: "😆", Wow: "😮", Sad: "😢", Angry: "😠", Care: "🤗" };
 
+/** @returns {{ year: number, month: number, day: number, hour: number, minute: number, weekday: number }} */
 function local(ts) {
   const p = Object.fromEntries(LONDON.formatToParts(new Date(ts * 1000)).map(({ type, value }) => [type, Number(value)]));
-  return { ...p, weekday: new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay() };
+  return { year: p.year, month: p.month, day: p.day, hour: p.hour, minute: p.minute, weekday: new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay() };
 }
 
 const pad = (n) => String(n).padStart(2, "0");

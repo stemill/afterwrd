@@ -114,7 +114,7 @@ export async function handlePosts(request, env, url) {
       if (poll[2] === "edit") {
         const { key } = await editPost(env, Number(poll[1]), String(form.get("text") ?? ""));
         back.hash = `p-${key}`;
-        return Response.redirect(back, 303);
+        return Response.redirect(back.href, 303);
       }
       if (poll[2] === "vote") await answerPoll(env, Number(poll[1]), form.getAll("choice").map(String));
       else await closePoll(env, Number(poll[1]));
@@ -125,7 +125,7 @@ export async function handlePosts(request, env, url) {
       throw error;
     }
     back.hash = `poll-${poll[1]}`;
-    return Response.redirect(back, 303);
+    return Response.redirect(back.href, 303);
   }
   return new Response("Not found", { status: 404 });
 }

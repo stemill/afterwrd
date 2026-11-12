@@ -310,7 +310,7 @@ async function finishSwitch(env, origin, state) {
   if (live !== was.versionId) return; // it never went live, or was already put back
   const check = healthCheck(env, origin);
   for (let i = 0; i < 5; i++) {
-    if ((await check(was.versionId).catch(() => ({}))).healthy) return;
+    if ((await check(was.versionId).catch(() => null))?.healthy) return;
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }
   // (Thrown, so the run stops here and the Update page and Home say it.)

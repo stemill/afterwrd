@@ -2,6 +2,8 @@
 
 export const now = () => Math.floor(Date.now() / 1000);
 
+/** A reply to another site: its JSON body and HTTP status, for json(). @typedef {[object, number]} Answer */
+
 export function json(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 }

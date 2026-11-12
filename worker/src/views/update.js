@@ -132,6 +132,7 @@ function checkingPart(auto, checking, results) {
 </section>`;
 }
 
+/** @param {Record<string, any> & { auto?: AutoState, checkGrant?: CheckGrant }} data */
 export function updatePage({ owner, version: VERSION, latest, available, securityFix, site, connected, oldToken, groups, go, checked = null, friends = [], checkWait = 0, auto = { on: false }, history = [], problem = null, madeGroups = 0, checkGrant = {}, checkFailure = null, checking = true, friendChecks = [] }) {
   // While automatic updates are on, they're the one way to update (signed releases only), unless a release has to be
   // installed by hand (a new kind of store): then the steps below, with their access.

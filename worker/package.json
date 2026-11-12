@@ -10,16 +10,19 @@
     "owner": "node scripts/owner.mjs",
     "release": "node scripts/release.mjs",
     "notices": "node scripts/notices.mjs",
-    "test:e2e": "test/e2e/run.sh"
+    "test:e2e": "test/e2e/run.sh",
+    "check": "wrangler types types/worker-configuration.d.ts > /dev/null && tsc -p tsconfig.json"
   },
   "dependencies": {
     "@simplewebauthn/server": "14.0.3",
     "@zip.js/zip.js": "2.24.0"
   },
   "devDependencies": {
+    "@types/node": "26.6.6",
     "esbuild": "0.28.2",
     "lz-string": "1.5.0",
     "puppeteer-core": "25.16.0",
+    "typescript": "7.0.2",
     "wrangler": "4.156.2"
   },
   "afterwrd": {

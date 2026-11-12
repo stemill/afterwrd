@@ -1,0 +1,21 @@
+{
+  // Type checks for the Worker's own code (src/, and the installer's in central/), which is plain JavaScript:
+  // `npm run check`. Nothing is built from this; wrangler bundles the code as it is. Notes on what a function takes or
+  // gives back are JSDoc comments in the code; shapes several files share are in types/afterwrd.d.ts, and
+  // types/worker-configuration.d.ts (Cloudflare's own, made by `wrangler types`) is made afresh by each check.
+  // The browser scripts (public/static) aren't checked yet.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023"],
+    "types": [],
+    "resolveJsonModule": true,
+    "strict": false,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.js", "central/**/*.js", "types/*.d.ts"]
+}

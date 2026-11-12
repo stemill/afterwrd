@@ -63,7 +63,10 @@ function keyOn(origin, address) {
   return null;
 }
 
-/** A note from a connected (approved) site: kept, ignored, or refused. Returns [body, status]. */
+/**
+ * A note from a connected (approved) site: kept, ignored, or refused. Returns [body, status].
+ * @returns {Promise<import("./util.js").Answer>}
+ */
 export async function receiveNote(db, peer, note) {
   const object = note?.type === "Create" && note.object?.type === "Note" ? note.object : null;
   const isComment = typeof object?.inReplyTo === "string";
@@ -121,6 +124,7 @@ export async function notifyEventChange(env, site, group, post, event, { kind, n
 /**
  * A group's note that an event the owner here is going to (or might) has changed or been called off: their copy of
  * it is brought up to date, and the note kept. Ignored if they've no plans for it.
+ * @returns {Promise<import("./util.js").Answer>}
  */
 async function receiveEventNote(db, group, note) {
   const prefix = groupPostId(group.origin, group.remote_id, "");
@@ -155,7 +159,10 @@ async function receiveEventNote(db, group, note) {
   return row ? [{ ok: true }, 202] : [{ error: "That's a lot of notes for now." }, 429];
 }
 
-/** A note from a group the owner here is in: kept, ignored, or refused. Returns [body, status]. */
+/**
+ * A note from a group the owner here is in: kept, ignored, or refused. Returns [body, status].
+ * @returns {Promise<import("./util.js").Answer>}
+ */
 export async function receiveGroupNote(db, group, note) {
   if (note?.type === "Update" && note.object?.type === "Note") return receiveEventNote(db, group, note);
   const object = note?.type === "Create" && note.object?.type === "Note" ? note.object : null;

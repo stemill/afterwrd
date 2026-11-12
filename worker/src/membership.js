@@ -701,7 +701,7 @@ export async function handleGroupActions(request, env, url) {
     if (error instanceof Refusal) return problem(error.message, back, error.status);
     throw error;
   }
-  return Response.redirect(back, 303);
+  return Response.redirect(back.href, 303);
 }
 
 const problem = (message, back, status = 400) =>

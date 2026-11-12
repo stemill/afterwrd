@@ -32,9 +32,9 @@ export function pushEndpoint(text, { local = false } = {}) {
 
 /** A new signing key pair for this site: the public half (as devices are given it) and the private half as a JWK. */
 export async function makeVapidKeys() {
-  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  const pair = /** @type {CryptoKeyPair} */ (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]));
   return {
-    publicKey: toBase64Url(new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey))),
+    publicKey: toBase64Url(new Uint8Array(/** @type {ArrayBuffer} */ (await crypto.subtle.exportKey("raw", pair.publicKey)))),
     privateJwk: await crypto.subtle.exportKey("jwk", pair.privateKey),
   };
 }
@@ -54,6 +54,9 @@ export async function vapidAuthorization(endpoint, vapid, subject, at = now()) {
  * `auth` are the device's keys from its subscription. `padTo`: padded to at least that many bytes, so the push
  * service can't tell long messages from short ones. `serverKeys` and `salt` are made fresh each time; they're only
  * passed in to check this against the RFC's worked example.
+ * @param {Uint8Array | string} message
+ * @param {{ p256dh: string, auth: string }} keys
+ * @param {{ serverKeys?: CryptoKeyPair, salt?: Uint8Array, padTo?: number }} [options]
  */
 export async function encryptMessage(message, { p256dh, auth }, { serverKeys, salt, padTo = 0 } = {}) {
   const uaPublic = fromBase64Url(String(p256dh));
@@ -61,12 +64,13 @@ export async function encryptMessage(message, { p256dh, auth }, { serverKeys, sa
   if (uaPublic.length !== 65 || uaPublic[0] !== 4 || authSecret.length !== 16) throw new Error("That device's keys aren't right.");
   const plain = typeof message === "string" ? enc.encode(message) : message;
   if (plain.length > MAX_MESSAGE) throw new Error("That message is too long to send.");
-  serverKeys ??= await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  serverKeys ??= /** @type {CryptoKeyPair} */ (await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]));
   salt ??= crypto.getRandomValues(new Uint8Array(16));
-  const asPublic = new Uint8Array(await crypto.subtle.exportKey("raw", serverKeys.publicKey));
+  const asPublic = new Uint8Array(/** @type {ArrayBuffer} */ (await crypto.subtle.exportKey("raw", serverKeys.publicKey)));
 
   const device = await crypto.subtle.importKey("raw", uaPublic, { name: "ECDH", namedCurve: "P-256" }, false, []);
-  const shared = await crypto.subtle.deriveBits({ name: "ECDH", public: device }, serverKeys.privateKey, 256);
+  // Cloudflare's type descriptions call it "$public"; the runtime, like the standard, wants "public".
+  const shared = await crypto.subtle.deriveBits(/** @type {any} */ ({ name: "ECDH", public: device }), serverKeys.privateKey, 256);
   const ikm = await hkdf(authSecret, shared, join(enc.encode("WebPush: info\0"), uaPublic, asPublic), 32);
   const cek = await hkdf(salt, ikm, enc.encode("Content-Encoding: aes128gcm\0"), 16);
   const nonce = await hkdf(salt, ikm, enc.encode("Content-Encoding: nonce\0"), 12);

@@ -269,6 +269,7 @@ export async function chatSince(env, chatId, after, pending) {
  * A message from a connected, approved friend's site (peers.js): kept, or refused. Returns [body, status]. Once it's
  * kept, the owner's devices are told (push.js), after answering, through `work` (the request's waitUntil). `site` is
  * this site's address.
+ * @returns {Promise<import("./util.js").Answer>}
  */
 export async function receiveMessage(env, peer, note, { site, work }) {
   const db = env.DB;
@@ -313,6 +314,7 @@ export async function receiveMessage(env, peer, note, { site, work }) {
  *     attributedTo: {id: "<member's site>/", name}, content, published}}
  *   {type: "Delete", object: "<member's site>/messages/<uid>"}
  * The group vouches for who wrote it, as it does for posts; but never for the owner here, who speaks for themselves.
+ * @returns {Promise<import("./util.js").Answer>}
  */
 export async function receiveGroupMessage(env, group, note, { site, work }) {
   const db = env.DB;
@@ -459,6 +461,7 @@ export async function groupChat(ctx, params, id) {
 
 // --- the web side (/_messages/…): the chat page's script, and its forms without one -------------------------------
 
+/** @type {Array<[RegExp, (a: any) => Promise<object>, string?]>} */
 const ROUTES = [
   [/^\/_messages\/(\d+)\/send$/, (a) => sendMessage(a.env, a.url.origin, a.m[1], a.body.text)],
   [/^\/_messages\/(\d+)\/(\d+)\/retry$/, (a) => retryMessage(a.env, a.url.origin, a.m[1], a.m[2])],
@@ -489,7 +492,12 @@ export async function handleMessages(request, env, url) {
   return new Response("Not found", { status: 404 });
 }
 
-/** An action's result as JSON, or, for a form, back to the page; a refusal as {error} or a plain message. */
+/**
+ * An action's result as JSON, or, for a form, back to the page; a refusal as {error} or a plain message.
+ * @param {() => Promise<object>} act
+ * @param {boolean} asJson
+ * @param {string} [back] the whole address to go back to, for a form
+ */
 async function answer(act, asJson, back) {
   try {
     const result = await act();

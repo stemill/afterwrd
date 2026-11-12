@@ -192,7 +192,10 @@ async function reasonFor(env, origin, via) {
   return origins.includes(origin) ? { kind: "group", name: info.name } : null;
 }
 
-/** A friend's site introducing the owner here to someone else: kept to show on Friends and Home. Returns [body, status]. */
+/**
+ * A friend's site introducing the owner here to someone else: kept to show on Friends and Home. Returns [body, status].
+ * @returns {Promise<import("./util.js").Answer>}
+ */
 export async function receiveIntroduction(env, url, peer, body) {
   const db = env.DB;
   const origin = siteOrigin(body?.origin, env);

@@ -18,6 +18,7 @@ worker/.wrangler/
 worker/central/.wrangler/
 worker/release/
 worker/generated/
+worker/types/worker-configuration.d.ts
 
 # Local secrets for wrangler dev
 worker/.dev.vars

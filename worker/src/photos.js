@@ -63,7 +63,7 @@ export async function handlePhotos(request, env, url) {
   const back = new URL(safeNext(String(form.get("back") ?? "/photos"), url), url.origin);
   if (url.pathname === "/_admin/profile") {
     await choosePicture(env, { role: String(form.get("role")), hash: String(form.get("hash") ?? "") });
-    return Response.redirect(back, 303);
+    return Response.redirect(back.href, 303);
   }
 
   const album = /^\/_admin\/albums\/(\d+)\/(edit|delete)$/.exec(url.pathname);
@@ -71,15 +71,15 @@ export async function handlePhotos(request, env, url) {
     const id = Number(album[1]);
     if (album[2] === "edit") {
       const edited = await editAlbum(env, id, { name: form.get("name"), description: form.get("description") });
-      return Response.redirect(edited ? `${url.origin}/photos/album/${id}` : back, 303);
+      return Response.redirect(edited ? `${url.origin}/photos/album/${id}` : back.href, 303);
     }
-    return Response.redirect(await deleteAlbum(env, id) ? `${url.origin}/photos` : back, 303);
+    return Response.redirect(await deleteAlbum(env, id) ? `${url.origin}/photos` : back.href, 303);
   }
 
   const photo = /^\/_admin\/photos\/(\d+)\/delete$/.exec(url.pathname);
   if (photo) {
     const gone = await deletePhoto(env, Number(photo[1]));
-    if (!gone) return Response.redirect(back, 303);
+    if (!gone) return Response.redirect(back.href, 303);
     const to = gone.album !== null ? `/photos/album/${gone.album}` : gone.inPost ? "/posts" : "/photos";
     return Response.redirect(`${url.origin}${to}`, 303);
   }
