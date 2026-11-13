@@ -12,6 +12,7 @@
 import { actorId, iso, seconds } from "../public/static/activity.js";
 import { siteOrigin } from "./peers.js";
 import { now } from "./util.js";
+import { ALLOWED_SQL, answerAllowance, TOO_MANY_ANSWERS, wasAllowed } from "./limits.js";
 
 export const MAX_OPTIONS = 10;
 export const MAX_OPTION = 100;
@@ -158,9 +159,10 @@ export async function sitePolls(db, ids, viewer) {
 }
 
 /**
- * Someone answers a poll in the owner's posts: the owner here (`voter` 'site') or a friend's site. `list`: the options
- * they chose (none takes their answer back). Post ids are never used twice, so an answer meant for a post deleted
- * just now can't land on another. Returns null if that went, or the reason it didn't.
+ * Someone answers a poll in the owner's posts: the owner here (`voter` 'site') or a friend's site, within their
+ * allowance of answers (limits.js; the owner has none). `list`: the options they chose (none takes their answer back).
+ * Post ids are never used twice, so an answer meant for a post deleted just now can't land on another. Returns null
+ * if that went, or the reason it didn't (TOO_MANY_ANSWERS, if that's why).
  */
 export async function answerHere(db, postId, voter, name, list) {
   const row = await db.prepare("SELECT * FROM polls WHERE post_id = ?").bind(postId).first();
@@ -169,17 +171,23 @@ export async function answerHere(db, postId, voter, name, list) {
   const mask = choicesMask(list, row);
   if (mask === null) return row.multiple ? "Those aren't options in this poll." : "Pick one of the options.";
   const at = now();
-  const binds = [postId, at, voter, name, mask];
+  // A friend's answer counts towards their allowance; the owner's own doesn't (its SQL holds: "1").
+  const allowance = voter === "site" ? null : answerAllowance(db, voter, at);
+  const allowed = allowance ? ALLOWED_SQL("?6") : "1";
+  // D1 wants exactly as many values as a statement uses: the token only when it's asked about.
+  const binds = [postId, at, voter, name, mask, ...(allowance ? [allowance.token] : [])];
+  const tooMany = async () => (allowance && !(await wasAllowed(db, allowance.token)) ? TOO_MANY_ANSWERS : null);
   if (!mask) {
     // Taking an answer back, too, only while it's open: an answer still there afterwards means it had closed.
-    await db.prepare(`DELETE FROM poll_votes WHERE post_id = ?1 AND voter = ?3 AND ${OPEN_SQL("polls")}`)
-      .bind(postId, at, voter).run();
+    await db.batch([...(allowance?.statements ?? []),
+      db.prepare(`DELETE FROM poll_votes WHERE post_id = ?1 AND voter = ?3 AND ${OPEN_SQL("polls")} AND ${allowed}`)
+        .bind(...(allowance ? binds : binds.slice(0, 3)))]);
     const left = await db.prepare("SELECT 1 FROM poll_votes WHERE post_id = ? AND voter = ?").bind(postId, voter).first();
-    return left ? "That poll has closed." : null;
+    return left ? (await tooMany()) ?? "That poll has closed." : null;
   }
-  const done = await db.prepare(`INSERT INTO poll_votes (post_id, voter, name, choices, voted_at)
-    SELECT ?1, ?3, ?4, ?5, ?2 WHERE ${OPEN_SQL("polls")}
+  const results = await db.batch([...(allowance?.statements ?? []), db.prepare(`INSERT INTO poll_votes (post_id, voter, name, choices, voted_at)
+    SELECT ?1, ?3, ?4, ?5, ?2 WHERE ${OPEN_SQL("polls")} AND ${allowed}
     ON CONFLICT (post_id, voter) DO UPDATE SET name = excluded.name, choices = excluded.choices, voted_at = excluded.voted_at
-    RETURNING post_id`).bind(...binds).first();
-  return done ? null : "That poll has closed.";
+    RETURNING post_id`).bind(...binds)]);
+  return results.at(-1).results.length ? null : (await tooMany()) ?? "That poll has closed.";
 }

@@ -562,6 +562,8 @@ The caller's owner answers the poll in a post here (6.3, `afterwrd:poll`):
   closed: `400`.
 - One answer per calling origin; a new one replaces it. The answer is kept under the name this site stores for the
   connection. Answers notify no one.
+- Answers (to polls and events, 5.19, together) are limited per calling site: 30 per 600 s and 200 a day (afterwrd
+  0.46.1), checked in the same transaction as the answer. Over that: `429 {"error": "That's a lot of answers for now. Try again later."}`.
 - On success: `200 {"afterwrd:poll": { …the Question as the caller now sees it… }}`.
 - Older sites answer `404`.
 
@@ -629,6 +631,7 @@ The caller's owner answers the event in a post here (5.20) that they're invited 
 - Any other `type`, a post without an event, an event called off, or one that's over: `400`. Invitation, event and
   answer are checked in the same statement that keeps the answer, so one sent as the invitation is taken back fails.
 - One answer per caller; a new one replaces it. Answers notify no one.
+- It shares the limit on answers in 5.15: over it, `429`. An event that's off or over still answers `400` first.
 - On success: `200`, the post as `GET /_peer/posts/<post key>` returns it, so the caller's site can update its copy.
 - Older sites answer `404 "Not found."`.
 
@@ -1302,6 +1305,7 @@ dates, which it must have. A one-off event takes no `date` (or `""`).
 
 It answers `400` if the answer isn't one of those, if the event is gone, called off or over, if a repeating event's
 answer has no `date` or a date it doesn't have, if that date is called off or over, or if a one-off's has a `date`.
+A member's answers (to events and polls, together) are limited as in 5.15: over it, `429` (afterwrd 0.46.1).
 
 #### `POST /_group/events/<m>/edit`
 
@@ -1317,6 +1321,7 @@ Body: `{}`, or `{"date": "YYYY-MM-DD"}` to call off one date of a repeating even
 only those going to it, or who might, are told (the note carries `afterwrd:date`).
 
 - Who may cancel is the same as for deleting. Anyone else gets `400`.
+- One date at a time, at most 10 dates of an event a day (afterwrd 0.46.1): over that, `400`.
 - Calling off an event that is already off does nothing.
 - Calling off an event that is over gets `400 "That event is over."`.
 - Otherwise an event-cancelled note goes out. Only the first of several requests sent together sends it.

@@ -1773,24 +1773,24 @@ function eventForm({ action, back, values = {}, text = "", submit, guests = "", 
   return html`<form class="stack event-form" method="post" action="${action}">
   <input type="hidden" name="back" value="${back}">
   <input type="hidden" name="zone" value="${values.zone ?? ""}" data-zone>
-  <label>What's happening<input name="title" required maxlength="200" value="${values.title ?? ""}"></label>
+  <label><span class="field">What's happening</span><input name="title" required maxlength="200" value="${values.title ?? ""}"></label>
   <div class="when-row">
-    <label>Day<input type="date" name="start_date" required value="${values.start_date ?? ""}"></label>
-    <label>Time <span class="meta">(none for all day)</span><input type="time" name="start_time" value="${values.start_time ?? ""}"></label>
+    <label><span class="field">Day</span><input type="date" name="start_date" required value="${values.start_date ?? ""}"></label>
+    <label><span class="field">Time <span class="meta">(none for all day)</span></span><input type="time" name="start_time" value="${values.start_time ?? ""}"></label>
   </div>
   <div class="when-row">
-    <label>Ends <span class="meta">(if it runs on)</span><input type="date" name="end_date" value="${values.end_date ?? ""}"></label>
-    <label>Until <span class="meta">(optional)</span><input type="time" name="end_time" value="${values.end_time ?? ""}"></label>
+    <label><span class="field">Ends <span class="meta">(if it runs on)</span></span><input type="date" name="end_date" value="${values.end_date ?? ""}"></label>
+    <label><span class="field">Until <span class="meta">(optional)</span></span><input type="time" name="end_time" value="${values.end_time ?? ""}"></label>
   </div>
-  <label>Where <span class="meta">(optional)</span><input name="place" maxlength="300" value="${values.place ?? ""}"></label>
+  <label><span class="field">Where <span class="meta">(optional)</span></span><input name="place" maxlength="300" value="${values.place ?? ""}"></label>
   ${repeats && html`<div class="when-row repeat-row">
-    <label>Repeats<select name="repeat">
+    <label><span class="field">Repeats</span><select name="repeat">
       <option value="">Doesn't repeat</option>
       ${repeatChoices(values.start_date ?? "").map(([value, words]) => html`<option value="${value}" ${values.repeat === value && raw("selected")}>${words}</option>`)}
     </select></label>
-    <label>Until <span class="meta">(a year if blank)</span><input type="date" name="repeat_until" value="${values.repeat_until ?? ""}"></label>
+    <label><span class="field">Until <span class="meta">(a year if blank)</span></span><input type="date" name="repeat_until" value="${values.repeat_until ?? ""}"></label>
   </div>`}
-  <label>More about it <span class="meta">(optional)</span><textarea name="text" rows="3" maxlength="5000">${text}</textarea></label>
+  <label><span class="field">More about it <span class="meta">(optional)</span></span><textarea name="text" rows="3" maxlength="5000">${text}</textarea></label>
   ${guests}
   <div class="actions-row"><button class="chip primary">${submit}</button></div>
 </form>

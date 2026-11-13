@@ -23,6 +23,7 @@ import { callSite, siteOrigin } from "./peers.js";
 import { parseNote } from "./friends.js";
 import { safeNext } from "./auth.js";
 import { outbox } from "./outbox.js";
+import { ALLOWED_SQL, answerAllowance, TOO_MANY_ANSWERS, wasAllowed } from "./limits.js";
 import { html, now, Refusal } from "./util.js";
 import { MAX_POST_TEXT } from "./edits.js";
 import { messagePage } from "./views/pages.js";
@@ -270,20 +271,26 @@ export async function eventGone(env, origin, post) {
 // --- a guest answers, from their site ------------------------------------------------------------------------------------
 
 /**
- * Friend `peer` answers the event in the owner's post `postId`: going, maybe or no. Only while they're invited and
- * it's neither off nor over, checked in the same statement as the answer. Returns null, or why it didn't go.
+ * Friend `peer` answers the event in the owner's post `postId`: going, maybe or no. Only while they're invited, it's
+ * neither off nor over, and they're within their allowance of answers (limits.js), checked in the same transaction as
+ * the answer. Returns null, or { error, status }.
  */
 export async function answerFromFriend(db, postId, peer, answer) {
-  if (!ANSWERS.includes(answer)) return "Answer going, maybe or no.";
+  if (!ANSWERS.includes(answer)) return { error: "Answer going, maybe or no.", status: 400 };
   const at = now();
-  const done = await db.prepare(`INSERT INTO event_answers (post_id, connection_id, answer, answered_at)
+  const allowance = answerAllowance(db, peer.origin, at);
+  const results = await db.batch([...allowance.statements, db.prepare(`INSERT INTO event_answers (post_id, connection_id, answer, answered_at)
     SELECT ?1, ?2, ?3, ?4 FROM events e WHERE e.post_id = ?1 AND e.cancelled_at IS NULL AND ${FINISHED_SQL} > ?4
-      AND EXISTS (SELECT 1 FROM post_audience a WHERE a.post_id = ?1 AND a.connection_id = ?2)
+      AND EXISTS (SELECT 1 FROM post_audience a WHERE a.post_id = ?1 AND a.connection_id = ?2) AND ${ALLOWED_SQL("?5")}
     ON CONFLICT (post_id, connection_id) DO UPDATE SET answer = excluded.answer, answered_at = excluded.answered_at
-    RETURNING post_id`).bind(postId, peer.id, answer, at).first();
-  if (done) return null;
+    RETURNING post_id`).bind(postId, peer.id, answer, at, allowance.token)]);
+  if (results.at(-1).results.length) return null;
+  // Why not: the event first (gone, off or over), then the allowance.
   const e = await db.prepare("SELECT * FROM events WHERE post_id = ?").bind(postId).first();
-  return !e ? "That isn't an event." : e.cancelled_at ? "That event's been called off." : "That event is over.";
+  if (!e || e.cancelled_at || finishedAt(e) <= at) {
+    return { error: !e ? "That isn't an event." : e.cancelled_at ? "That event's been called off." : "That event is over.", status: 400 };
+  }
+  return { error: TOO_MANY_ANSWERS, status: 429 };
 }
 
 // --- the owner's forms ------------------------------------------------------------------------------------------------
