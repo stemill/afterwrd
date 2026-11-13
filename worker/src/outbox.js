@@ -26,6 +26,8 @@ const KINDS = {
   // A message in a group's chat, to the group's site; and, in a group's Worker, passed on to its members' sites.
   group_messages: { column: "group_id", more: "message_id INTEGER NOT NULL,", path: "/_group/chat", track: true,
     sql: "SELECT id, origin, their_key FROM groups WHERE joined_at IS NOT NULL AND origin IS NOT NULL AND id IN" },
+  // Invitations to the owner's events (events.js): what becomes of each is kept with whoever it's for (post_audience).
+  invites: { column: "connection_id", more: "post_id INTEGER NOT NULL,", path: "/_peer/notify", sql: FRIENDS, invite: true },
   notes: { column: "connection_id", path: "/_peer/notify", sql: FRIENDS },
   member_notes: { column: "member_id", path: "/_member/notify", sql: MEMBERS },
   // Last, so a busy chat can't hold up a group's comments and event changes, which are few.
@@ -72,6 +74,14 @@ export class Outbox extends DurableObject {
   /** Queues `body` for each connection id (friends' sites), and sees that the alarm will send it. */
   send(connectionIds, body) {
     return this.queue("notes", connectionIds, body);
+  }
+
+  /** Queues an invitation to the event in post `postId` (events.js) for each connection id, noting what becomes of it. */
+  async sendInvites(connectionIds, postId, body) {
+    const text = JSON.stringify(body);
+    const at = Date.now();
+    for (const id of connectionIds) this.sql.exec("INSERT INTO invites (connection_id, post_id, body, due) VALUES (?, ?, ?, ?)", id, postId, text, at);
+    await this.wake(at);
   }
 
   /** Queues `body` for each group member id (in a group's Worker, members' sites). */
@@ -134,13 +144,17 @@ export class Outbox extends DurableObject {
     const ids = [...new Set(due.map((n) => n[column]))];
     const { results } = ids.length ? await this.env.DB.prepare(`${sql} (${ids.map(() => "?").join(",")})`).bind(...ids).all() : { results: [] };
     const recipients = new Map(results.map((c) => /** @type {[any, any]} */ ([c.id, c])));
+    // An invitation taken back since (or whose event has gone) isn't sent: only those still invited are.
+    const invited = !KINDS[table].invite || !due.length ? null : new Set((await this.env.DB.prepare(
+      `SELECT post_id || ':' || connection_id AS k FROM post_audience WHERE post_id IN (SELECT value FROM json_each(?))`)
+      .bind(JSON.stringify([...new Set(due.map((n) => n.post_id))])).all()).results.map((r) => r.k));
     // A message the owner has deleted here since (or that's been delivered after all) isn't sent.
     const waiting = !KINDS[table].track ? null : due.length ? new Set((await this.env.DB.prepare(
       `SELECT id FROM messages WHERE delivered_at IS NULL AND id IN (${due.map(() => "?").join(",")})`)
       .bind(...due.map((n) => n.message_id)).all()).results.map((m) => m.id)) : new Set();
 
     await Promise.all(due.map(async (note) => {
-      if (waiting && !waiting.has(note.message_id)) {
+      if ((waiting && !waiting.has(note.message_id)) || (invited && !invited.has(`${note.post_id}:${note.connection_id}`))) {
         this.sql.exec(`DELETE FROM ${table} WHERE id = ?`, note.id);
         return;
       }
@@ -163,6 +177,10 @@ export class Outbox extends DurableObject {
       const finished = delivered || !again || note.tries >= RETRY_SECONDS.length;
       if (finished) this.sql.exec(`DELETE FROM ${table} WHERE id = ?`, note.id);
       else this.sql.exec(`UPDATE ${table} SET tries = tries + 1, due = ? WHERE id = ?`, at + RETRY_SECONDS[note.tries] * 1000, note.id);
+      if (KINDS[table].invite && finished) {
+        await this.env.DB.prepare("UPDATE post_audience SET delivery = ? WHERE post_id = ? AND connection_id = ?")
+          .bind(delivered ? "delivered" : again ? "unreachable" : "refused", note.post_id, note.connection_id).run();
+      }
       if (waiting && finished) {
         const when = Math.floor(Date.now() / 1000);
         await (delivered

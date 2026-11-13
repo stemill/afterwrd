@@ -1,8 +1,9 @@
 // The site's pages for the owner: their posts and photos (made on afterwrd, and from their Facebook download, in the
 // same tables, told apart by `source`), Facebook's record of their life there (facebook_*), friends, groups and
 // messages. Of the Facebook download, only the sections chosen when importing are served.
-import { groupPostId } from "../../public/static/activity.js";
-import { FINISHED_SQL, icsFile } from "../calendar.js";
+import { groupPostId, postId as postAddress } from "../../public/static/activity.js";
+import { eventsFor, invitable, keepFriendEvents, oldEventsGone } from "../events.js";
+import { datesOf, FINISHED_SQL, finishedAt, icsFile, monthSpan, readDay, readMonth, readWeek, weekSpan } from "../calendar.js";
 import { connectedToken } from "../cloudflare.js";
 import { commentable, findTarget, latestComments, loadThreads, newCount, photoKey } from "./comments.js";
 import { sitePolls } from "../polls.js";
@@ -64,6 +65,8 @@ const ROUTES = [
   [/^\/timeline$/, "timeline", timeline, views.timelinePage],
   [/^\/posts$/, "posts", posts, views.postsPage],
   [/^\/posts\/(post-\d+-[0-9a-f]{8})$/, ["posts", "timeline", "friends"], post, views.postPage],
+  [/^\/posts\/(post-\d+-[0-9a-f]{8})\/event$/, null, ownEventEdit, views.ownEventEditPage],
+  [/^\/posts\/(post-\d+-[0-9a-f]{8})\/event\.ics$/, null, ownEventFile, null],
   [/^\/comments$/, "comments", comments, views.commentsPage],
   [/^\/likes$/, "likes", likes, views.likesPage],
   [/^\/photos$/, "photos", photos, views.photosPage],
@@ -77,6 +80,8 @@ const ROUTES = [
   [/^\/friend$/, null, friendsIndex, views.friendsIndexPage],
   [/^\/friend\/(\d+)$/, null, friendHome, null],
   [/^\/friend\/(\d+)\/posts$/, null, friendPosts, views.friendPostsPage],
+  [/^\/friend\/(\d+)\/posts\/(post-\d+-[0-9a-f]{8})$/, null, friendPost, views.friendPostPage],
+  [/^\/friend\/(\d+)\/posts\/(post-\d+-[0-9a-f]{8})\/event\.ics$/, null, friendEventFile, null],
   [/^\/friend\/(\d+)\/photos$/, null, friendPhotos, views.friendPhotosPage],
   [/^\/friend\/(\d+)\/photos\/album\/(\d+|other|videos)$/, null, friendAlbum, views.friendAlbumPage],
   [/^\/friend\/(\d+)\/photos\/([0-9a-f]{64})$/, null, friendPhoto, views.friendPhotoPage],
@@ -87,6 +92,7 @@ const ROUTES = [
   [/^\/groups\/(\d{1,15})\/chat$/, null, groupChat, null], // the group's chat, made if it's new
   [/^\/app$/, null, () => ({}), views.appPage], // Add to home screen
   [/^\/groups$/, null, groupsIndex, views.groupsIndexPage],
+  [/^\/events$/, null, eventsIndex, views.eventsPage],
   [/^\/groups\/new$/, null, groupNew, views.groupNewPage],
   [/^\/groups\/join$/, null, groupJoin, views.groupJoinPage],
   [/^\/groups\/(\d{1,15})$/, null, groupHome, views.groupPage],
@@ -237,9 +243,11 @@ async function loadPosts(db, rows, { threads = true } = {}) {
   // Edits (edits.js): what posts written here said before, and which can still be changed.
   const earlier = await postVersions(db, own.filter((p) => p.edited_at).map((p) => p.id));
   const editable = await editablePosts(db, own.map((p) => p.id));
+  // The owner's events (events.js), with everyone invited and their answers: this is the host's own site.
+  const events = await eventsFor(db, own.map((p) => p.id));
   return posts.map((p) => ({
     ...p, tags: tags.filter((t) => t.post_id === p.id), thread: comments ? comments.get(p.key) ?? null : undefined,
-    poll: polls.get(p.id) ?? null, earlier: earlier.get(p.id) ?? [], editable: editable.has(p.id),
+    poll: polls.get(p.id) ?? null, earlier: earlier.get(p.id) ?? [], editable: editable.has(p.id), event: events.get(p.id) ?? null,
   }));
 }
 
@@ -513,7 +521,31 @@ async function post(ctx, params, key) {
   const found = await findTarget(ctx.db, key);
   if (!found) return null;
   const [p] = await loadPosts(ctx.db, await all(ctx.db, `${POST_SQL} WHERE p.id = ?`, [found.post.id]));
+  if (p.event) {
+    // Friends who could still be invited.
+    const asked = new Set([...p.event.going, ...p.event.maybe, ...p.event.cantGo, ...p.event.waiting].map((g) => g.id));
+    p.invitable = (await invitable(ctx.db)).filter((f) => !asked.has(f.id)).map(({ id, name }) => ({ id, name }));
+  }
   return { post: p };
+}
+
+/** Changing the owner's own event. */
+async function ownEventEdit(ctx, params, key) {
+  const found = await findTarget(ctx.db, key);
+  if (found?.post?.source !== "afterwrd") return null;
+  const event = (await eventsFor(ctx.db, [found.post.id])).get(found.post.id);
+  return event ? { post: { id: found.post.id, key, text: found.post.text, event } } : null;
+}
+
+/** The owner's own event as a calendar file. */
+async function ownEventFile(ctx, params, key) {
+  const found = await findTarget(ctx.db, key);
+  const e = found?.post && await first(ctx.db, "SELECT * FROM events WHERE post_id = ?", [found.post.id]);
+  if (!e) return null;
+  const page = `${ctx.url.origin}/posts/${key}`;
+  return new Response(icsFile(e, { uid: postAddress(ctx.url.origin, key), url: page, about: [found.post.text, page].filter(Boolean).join("\n\n") }), {
+    headers: { "Content-Type": "text/calendar; charset=utf-8", "Content-Disposition": 'attachment; filename="event.ics"',
+      "Cache-Control": "private, no-store" } });
 }
 
 /** The newest comments from everyone, marking what's new since this person last looked. */
@@ -543,7 +575,7 @@ const INTRODUCTIONS_SQL = `SELECT i.id, i.origin, i.name, i.note, c.name AS by_n
 async function home(ctx, params) {
   const { db } = ctx;
   const own = await loadPosts(db, await all(db, `${POST_SQL} WHERE p.source = 'afterwrd' ORDER BY p.created_at DESC LIMIT 30`));
-  const friendsFeed = await loadFeed(db, ctx.url.origin);
+  const friendsFeed = await loadFeed(db, ctx.url.origin, ctx.env);
   return {
     own, feed: friendsFeed, onThisDay: await onThisDay(ctx, 2), friends: friendsFeed.connections,
     newDevices: await newDevices(db, ctx.user), newNotifying: await newPushDevices(db), securityFix: await securityFixWaiting(db),
@@ -662,12 +694,39 @@ async function friendHome(ctx, params, id) {
 
 async function friendPosts(ctx, params, id) {
   return fromFriend(ctx, id, async (c) => {
-    const { posts, paging, avatar, cover } = await friend.friendPosts(c, pageNumber(params));
+    const { posts, paging, avatar, cover } = await friend.friendPosts(c, pageNumber(params), ctx.env);
     Object.assign(c, { avatar, cover });
     if (avatar) await rememberPicture(ctx.db, c, avatar)?.run();
     for (const p of posts) p.comments = await markMine(ctx.db, c.id, p.key, p.comments, ctx.url.origin);
+    await keepFriendEvents(ctx.db, c, posts);
     return { posts, paging };
   });
+}
+
+/** One of a friend's posts (an event they invited the owner to, say), with its comments. */
+async function friendPost(ctx, params, id, key) {
+  return fromFriend(ctx, id, async (c) => {
+    const p = await friend.friendPost(c, key, ctx.env);
+    if (!p) {
+      // Gone, or no longer shown to the owner (an invitation taken back): so is the owner's copy of it.
+      await ctx.db.prepare("DELETE FROM events_elsewhere WHERE connection_id = ? AND post_key = ?").bind(c.id, key).run();
+      throw new Error("That post isn't there any more.");
+    }
+    p.comments = await markMine(ctx.db, c.id, p.key, p.comments, ctx.url.origin);
+    await keepFriendEvents(ctx.db, c, [p]);
+    return { post: p };
+  });
+}
+
+/** A friend's event as a calendar file, from the owner's own copy of it. */
+async function friendEventFile(ctx, params, id, key) {
+  const e = await first(ctx.db, `SELECT e.*, c.name AS friend, c.origin FROM events_elsewhere e JOIN connections c ON c.id = e.connection_id
+    AND c.approved_at IS NOT NULL WHERE e.connection_id = ? AND e.post_key = ?`, [Number(id), key]);
+  if (!e) return null;
+  const page = `${ctx.url.origin}/friend/${id}/posts/${key}`;
+  return new Response(icsFile(e, { uid: postAddress(e.origin, key), url: page, about: `${e.friend}'s event: ${page}` }), {
+    headers: { "Content-Type": "text/calendar; charset=utf-8", "Content-Disposition": 'attachment; filename="event.ics"',
+      "Cache-Control": "private, no-store" } });
 }
 
 async function friendPhotos(ctx, params, id) {
@@ -688,17 +747,94 @@ async function friendPhoto(ctx, params, id, hash) {
 
 // --- groups, each its own Worker, read from there (membership.js) ------------------------------------------------------
 
-/** The owner's groups, with comments waiting in each, and the events they're going to that are still to come. */
+/** The owner's groups, with comments waiting in each. (What's coming up in them is on Events.) */
 async function groupsIndex(ctx) {
   const list = await all(ctx.db, `SELECT g.*, (SELECT COUNT(*) FROM group_inbox i WHERE i.group_id = g.id AND i.created_at > ?) AS notes
     FROM groups g WHERE g.joined_at IS NOT NULL ORDER BY g.name COLLATE NOCASE`, [ctx.user.activity_seen_at ?? 0]);
   // Groups whose Worker this site made, but which it didn't finish claiming.
   const unfinished = await all(ctx.db, "SELECT id, name, origin FROM groups WHERE joined_at IS NULL AND script != '' ORDER BY created_at");
-  // Plans long over are let go.
-  await ctx.db.prepare(`DELETE FROM group_plans AS e WHERE ${FINISHED_SQL} < ?`).bind(now() - 30 * 86400).run();
-  const plans = await all(ctx.db, `SELECT e.*, g.name AS group_name FROM group_plans e JOIN groups g ON g.id = e.group_id AND g.joined_at IS NOT NULL
-    WHERE ${FINISHED_SQL} >= ? ORDER BY e.starts_at LIMIT 20`, [now()]);
-  return { groups: list.map(withoutKeys), unfinished, plans, connected: ctx.connected };
+  return { groups: list.map(withoutKeys), unfinished, connected: ctx.connected };
+}
+
+const LIST_SECONDS = 366 * 86400; // the List view: from now, up to a year ahead
+const GROUPS_ASKED = 20; // groups the Events page asks for their events (two requests each, at most)
+
+/**
+ * Which view of a calendar a page asks for (?view=month, week or list; month by default), and the moments it covers:
+ * { view, month, day, week, from, to }. `month` and `day` for the month's grid, `week` (its Monday) for a week.
+ */
+function calendarView(params, zone) {
+  const view = ["week", "list"].includes(params.get("view")) ? params.get("view") : "month";
+  const month = readMonth(params.get("month"), zone);
+  const week = readWeek(params.get("week"), zone);
+  const at = now();
+  const [from, to] = view === "week" ? weekSpan(week, zone) : view === "list" ? [at, at + LIST_SECONDS] : monthSpan(month, zone);
+  return { view, month, day: view === "month" ? readDay(params.get("day"), month) : null, week, from, to };
+}
+
+/** What a calendar page needs to know about the view it's showing (calendarView), as plain data. */
+const calendarShown = ({ view, month, day, week, from, to }) => ({ view, month, day, week, from, to });
+
+/** An event as the calendar shows it: when, where, whose, where it's answered, and the owner's answer. */
+const calendarItem = (e, more) => ({ title: e.title, starts_at: e.starts_at, ends_at: e.ends_at ?? null, all_day: e.all_day ? 1 : 0,
+  time_zone: e.time_zone, place: e.place ?? null, cancelled_at: e.cancelled_at ?? null, ...more });
+
+/**
+ * Events: a month's calendar of everything the owner could go to (their own events, friends' they're invited to, and
+ * their groups', read from each group now), invitations still to answer, and making an event.
+ */
+async function eventsIndex(ctx, params) {
+  const { db } = ctx;
+  const shown = calendarView(params, ctx.zone);
+  const { from, to } = shown;
+  const at = now();
+  await oldEventsGone(db).run();
+  const IN_SPAN = `${FINISHED_SQL} >= ?1 AND e.starts_at < ?2`;
+  const [hosted, friends, plans, joined, invites] = await db.batch([
+    db.prepare(`SELECT e.*, p.key FROM events e JOIN posts p ON p.id = e.post_id WHERE ${IN_SPAN}`).bind(from, to),
+    db.prepare(`SELECT e.*, c.name AS friend FROM events_elsewhere e JOIN connections c ON c.id = e.connection_id
+      AND c.approved_at IS NOT NULL WHERE ${IN_SPAN} AND e.answer IS NOT 'no'`).bind(from, to),
+    db.prepare(`SELECT e.* FROM events_elsewhere e WHERE e.group_id IS NOT NULL AND ${IN_SPAN}`).bind(from, to),
+    db.prepare("SELECT * FROM groups WHERE joined_at IS NOT NULL ORDER BY name COLLATE NOCASE"),
+    // Invitations still to answer, for events still to come and not called off.
+    db.prepare(`SELECT e.*, c.id AS connection, c.name AS friend FROM events_elsewhere e JOIN connections c ON c.id = e.connection_id
+      AND c.approved_at IS NOT NULL WHERE e.answer IS NULL AND e.cancelled_at IS NULL AND ${FINISHED_SQL} >= ?1 ORDER BY e.starts_at LIMIT 50`).bind(at),
+  ]);
+  const items = [
+    ...hosted.results.map((e) => calendarItem(e, { kind: "own", href: `/posts/${e.key}`, who: "Your event" })),
+    ...friends.results.map((e) => calendarItem(e, { kind: "friend", href: `/friend/${e.connection_id}/posts/${e.post_key}`,
+      who: `${e.friend}'s event`, answer: e.answer })),
+  ];
+  // Each group is asked for what's coming up (and, for a month already begun, what's just been): one or two requests
+  // each, as Home asks friends; at most GROUPS_ASKED groups, as a page may only ask 50 other sites on the free plan.
+  // A group that doesn't answer, or isn't asked, shows the owner's own copies of their plans there.
+  const unreachable = [];
+  const asked = new Set(joined.results.slice(0, GROUPS_ASKED).map((g) => g.id));
+  await Promise.all(joined.results.map(async (g) => {
+    let reply;
+    try {
+      if (asked.has(g.id)) reply = await groups.loadEvents(ctx.env, ctx.url.origin, g, { past: from < at });
+    } catch {}
+    if (reply && !reply.outdated) {
+      // Each date of a repeating one on its own, with the owner's answer to it.
+      for (const d of [...reply.upcoming, ...reply.past].flatMap((p) => datesOf(p.event, { from, to }).map((x) => ({ ...x, post: p.id })))) {
+        if (d.answer === "no" || d.starts_at >= to || finishedAt(d) < from) continue;
+        items.push(calendarItem(d, { kind: "group", href: `/groups/${g.id}/posts/${d.post}${d.date ? `?date=${d.date}` : ""}`, who: g.name, answer: d.answer }));
+      }
+      return;
+    }
+    if (!reply && asked.has(g.id)) unreachable.push(g.name);
+    for (const e of plans.results.filter((x) => x.group_id === g.id)) {
+      items.push(calendarItem(e, { kind: "group", href: `/groups/${g.id}/posts/${e.post_id}${e.date ? `?date=${e.date}` : ""}`, who: g.name, answer: e.answer }));
+    }
+  }));
+  items.sort((a, b) => a.starts_at - b.starts_at);
+  return {
+    ...calendarShown(shown), items, unreachable, notAsked: Math.max(0, joined.results.length - GROUPS_ASKED),
+    invitations: invites.results.map((e) => calendarItem(e, { connection: e.connection, key: e.post_key, who: e.friend,
+      href: `/friend/${e.connection}/posts/${e.post_key}` })),
+    friends: (await invitable(db)).map(({ id, name }) => ({ id, name })),
+  };
 }
 
 /** Starting a group: its own Worker, made in the owner's Cloudflare account (groupsites.js). */
@@ -755,7 +891,9 @@ async function groupPost(ctx, params, id, postId) {
 
 /** A group's calendar: events to come, and adding one. */
 async function groupCalendar(ctx, params, id) {
-  return fromGroup(ctx, id, async (g) => groups.loadEvents(ctx.env, ctx.url.origin, g));
+  const shown = calendarView(params, ctx.zone);
+  return fromGroup(ctx, id, async (g) => ({ ...await groups.loadEvents(ctx.env, ctx.url.origin, g, { past: shown.from < now() }),
+    ...calendarShown(shown) }));
 }
 
 /** Changing an event the owner here added. */

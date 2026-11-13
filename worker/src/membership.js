@@ -31,7 +31,8 @@
 import { CONTEXT, fileUrl, groupId, groupPostId, seconds } from "../public/static/activity.js";
 import { MAX_COMMENT } from "./archive/comments.js";
 import { safeNext } from "./auth.js";
-import { ANSWERS, eventObject, parseEvent, readEventForm } from "./calendar.js";
+import { ANSWERS, eventObject, hasDate, onDate, readEventForm, ruleDates } from "./calendar.js";
+import { parseSharedEvent } from "./events.js";
 import { parseEdits, parseMedia } from "./friends.js";
 import { EDIT_SECONDS, mineVersions, mineVersionsGone } from "./edits.js";
 import { cleanName, cleanText, MAX_GROUP_ABOUT, MAX_GROUP_NAME, MAX_GROUP_PHOTOS, MAX_GROUP_TEXT } from "./groups.js";
@@ -75,14 +76,6 @@ function parseComments(collection, base, env) {
   });
 }
 
-/** An event in a group post, with who's going and the owner's own answer; null if there's none. */
-function parseGroupEvent(o, env) {
-  const event = parseEvent(o);
-  if (!event) return null;
-  const people = (list) => (Array.isArray(list) ? list.slice(0, 200) : []).map((p) => person(p, env)).filter((p) => p.name);
-  return { ...event, going: people(o["afterwrd:going"]), maybe: people(o["afterwrd:maybe"]), cantGo: people(o["afterwrd:cantGo"]),
-    answer: ANSWERS.includes(o["afterwrd:answer"]) ? o["afterwrd:answer"] : null };
-}
 
 /** A post in the group `n` on `site`, or null. */
 export function parseGroupNote(note, site, n, env) {
@@ -98,7 +91,7 @@ export function parseGroupNote(note, site, n, env) {
     photos: attachments.map((m) => parseMedia(m, site)).filter(Boolean),
     comments: parseComments(note.replies, note.id, env),
     commentCount: count(note.replies?.totalItems) ?? 0, // the group sends only the newest with a page of posts
-    event: note["afterwrd:event"] === undefined ? null : parseGroupEvent(note["afterwrd:event"], env),
+    event: note["afterwrd:event"] === undefined ? null : parseSharedEvent(note["afterwrd:event"], env),
     // Who chose what is read here, but markMine keeps it only on the owner's own polls.
     poll: note["afterwrd:poll"] === undefined ? null : parsePoll(note["afterwrd:poll"], env, { names: true }),
   };
@@ -161,8 +154,11 @@ export async function markMine(db, group, posts, ownOrigin) {
     let kept = null;
     try { kept = JSON.parse(sent.event ?? "null"); } catch {}
     if (!e || !kept) return null; // a post of theirs that wasn't an event isn't made one by the group
-    const { title, starts_at, ends_at, all_day, time_zone, place } = kept;
-    return { ...e, title, starts_at, ends_at, all_day, time_zone, place };
+    const { title, starts_at, ends_at, all_day, time_zone, place, rrule = null } = kept;
+    // Its dates called off one at a time are the group's to say, but only of the dates the writer gave it.
+    const own = { ...e, title, starts_at, ends_at, all_day, time_zone, place, rrule };
+    const dates = new Set(rrule ? ruleDates(own) : []);
+    return { ...own, skipped: (e.skipped ?? []).filter((d) => dates.has(d)), dates: (e.dates ?? []).filter((d) => dates.has(d.date)) };
   };
   // A poll they asked, with its options as they asked them (how many chose what, and who, are the group's to say).
   const poll = (sent, q) => {
@@ -207,38 +203,62 @@ async function refresh(db, group, info) {
 }
 
 /**
- * Keeps the owner's copies of the events they're going to (or might). Only their own answer, given here
- * (`answered`: {id, answer}), makes or drops one: the group's say-so about who's going never does. Otherwise copies
- * already kept are brought up to date with what the group just showed (`posts`, already marked as theirs or not), and
- * dropped for events no longer there (`gone`).
+ * One date of an event as the owner's copy keeps it: its title, times and place, and whether it's off ('' is a
+ * one-off's only date). Null if the event no longer has that date: the copy has nothing left to be a copy of.
+ */
+export function dateCopy(event, date) {
+  if (!hasDate(event, date)) return null;
+  return date ? onDate(event, date) : event;
+}
+
+const PLAN_FIELDS = ["title", "starts_at", "ends_at", "all_day", "time_zone", "place", "cancelled_at"];
+/** Whether a kept copy already says what `fresh` would. */
+export const sameCopy = (old, fresh) => PLAN_FIELDS.every((k) => (old[k] ?? null) === (fresh[k] ?? null));
+
+/**
+ * Keeps the owner's copies of the events they're going to (or might): one for each date of a repeating one. Only
+ * their own answer, given here (`answered`: {id, answer, date}), makes or drops one: the group's say-so about who's
+ * going never does. Otherwise copies already kept are brought up to date with what the group just showed (`posts`,
+ * already marked as theirs or not), and dropped for events no longer there (`gone`).
  */
 export async function keepPlans(db, group, posts, gone = [], answered = null) {
   const events = posts.filter((p) => p.event);
   if (!events.length && !gone.length && !answered) return;
-  const { results } = await db.prepare("SELECT * FROM group_plans WHERE group_id = ?").bind(group.id).all();
-  const had = new Map(results.map((r) => [r.post_id, r]));
-  const fields = ["title", "starts_at", "ends_at", "all_day", "time_zone", "place", "cancelled_at"];
-  const same = (old, e) => fields.every((k) => (old[k] ?? null) === (e[k] ?? null));
-  const drop = (id) => db.prepare("DELETE FROM group_plans WHERE group_id = ? AND post_id = ?").bind(group.id, id);
+  const { results } = await db.prepare("SELECT * FROM events_elsewhere WHERE group_id = ?").bind(group.id).all();
+  const key = (id, date) => `${id}:${date}`;
+  const had = new Map(results.map((r) => [key(r.post_id, r.date), r]));
+  const same = sameCopy;
+  const drop = (id, date = null) => db.prepare(`DELETE FROM events_elsewhere WHERE group_id = ? AND post_id = ?${date === null ? "" : " AND date = ?"}`)
+    .bind(group.id, id, ...(date === null ? [] : [date]));
   const writes = [];
   for (const { id, event } of events) {
-    const old = had.get(id);
-    if (answered?.id === id) {
-      if (answered.answer === "no") { if (old) writes.push(drop(id)); continue; }
-      if (old && old.answer === answered.answer && same(old, event)) continue;
-      if (!old && had.size >= MAX_PLANS) continue;
-      writes.push(db.prepare(`INSERT INTO group_plans (group_id, post_id, answer, ${fields.join(", ")}, updated_at)
-        VALUES (?, ?, ?, ${fields.map(() => "?").join(", ")}, ?)
-        ON CONFLICT (group_id, post_id) DO UPDATE SET answer = excluded.answer, ${fields.map((k) => `${k} = excluded.${k}`).join(", ")},
-        updated_at = excluded.updated_at`).bind(group.id, id, answered.answer, ...fields.map((k) => event[k] ?? null), now()));
-    } else if (old && !same(old, event)) {
-      writes.push(db.prepare(`UPDATE group_plans SET ${fields.map((k) => `${k} = ?`).join(", ")}, updated_at = ? WHERE group_id = ? AND post_id = ?`)
-        .bind(...fields.map((k) => event[k] ?? null), now(), group.id, id));
+    // Copies already kept, brought up to date, if they've changed; a date it no longer has is let go.
+    for (const old of results.filter((r) => r.post_id === id)) {
+      if (answered?.id === id && answered.date === old.date) continue;
+      const fresh = dateCopy(event, old.date);
+      if (!fresh) writes.push(db.prepare("DELETE FROM events_elsewhere WHERE id = ?").bind(old.id));
+      else if (!same(old, fresh)) {
+        writes.push(db.prepare(`UPDATE events_elsewhere SET ${PLAN_FIELDS.map((k) => `${k} = ?`).join(", ")}, updated_at = ? WHERE id = ?`)
+          .bind(...PLAN_FIELDS.map((k) => fresh[k] ?? null), now(), old.id));
+      }
     }
+    if (answered?.id !== id) continue;
+    const date = answered.date ?? "";
+    const old = had.get(key(id, date));
+    if (answered.answer === "no") { if (old) writes.push(drop(id, date)); continue; }
+    const copy = dateCopy(event, date);
+    if (!copy) continue; // not one of its dates
+    if (old && old.answer === answered.answer && same(old, copy)) continue;
+    if (!old && had.size >= MAX_PLANS) continue;
+    writes.push(db.prepare(`INSERT INTO events_elsewhere (group_id, post_id, date, answer, ${PLAN_FIELDS.join(", ")}, updated_at)
+      VALUES (?, ?, ?, ?, ${PLAN_FIELDS.map(() => "?").join(", ")}, ?)
+      ON CONFLICT (group_id, post_id, date) WHERE group_id IS NOT NULL DO UPDATE SET answer = excluded.answer,
+      ${PLAN_FIELDS.map((k) => `${k} = excluded.${k}`).join(", ")}, updated_at = excluded.updated_at`)
+      .bind(group.id, id, date, answered.answer, ...PLAN_FIELDS.map((k) => copy[k] ?? null), now()));
   }
   // Can't go, about an event the group no longer shows: the copy goes all the same.
-  if (answered?.answer === "no" && had.has(answered.id) && !events.some((p) => p.id === answered.id)) writes.push(drop(answered.id));
-  for (const id of gone) if (had.has(id)) writes.push(drop(id));
+  if (answered?.answer === "no" && !events.some((p) => p.id === answered.id)) writes.push(drop(answered.id, answered.date ?? ""));
+  for (const id of gone) writes.push(drop(id));
   if (writes.length) await db.batch(writes);
 }
 
@@ -252,14 +272,14 @@ export async function loadGroup(env, site, group, page) {
 }
 
 /**
- * A group's calendar: events still to come, and recent ones. `outdated` if the group's site is from before events
- * (its owner can update it).
+ * A group's calendar: events still to come, and (unless `past` is false, saving a request) recent ones. `outdated` if
+ * the group's site is from before events (its owner can update it).
  */
-export async function loadEvents(env, site, group) {
+export async function loadEvents(env, site, group, { past: withPast = true } = {}) {
   let upcoming;
   let past;
   try {
-    [upcoming, past] = await Promise.all([call(group, "/_group/events"), call(group, "/_group/events?when=past")]);
+    [upcoming, past] = await Promise.all([call(group, "/_group/events"), withPast ? call(group, "/_group/events?when=past") : null]);
   } catch (error) {
     if (error.message === "Not found.") return { outdated: true, group: null, upcoming: [], past: [] };
     throw error;
@@ -454,16 +474,21 @@ export async function commentInGroup(env, group, postId, words) {
  * The event in a group's reply (its post, as it is now), checked, kept in the owner's copies of their plans; with
  * `answer`, the owner's own answer, just given here, which is what makes or drops their copy.
  */
-async function keepReply(env, site, group, reply, id, answer = null) {
+async function keepReply(env, site, group, reply, id, answer = null, date = "") {
   const post = parseGroupNote(reply, group.origin, group.remote_id, env);
   const ok = post?.event && post.id === Number(id);
-  await keepPlans(env.DB, group, ok ? await markMine(env.DB, group, [post], site) : [], [], answer && { id: Number(id), answer });
+  const posts = ok ? await markMine(env.DB, group, [post], site) : [];
+  await keepPlans(env.DB, group, posts, [], answer && { id: Number(id), answer, date });
+  return posts[0] ?? null;
 }
 
 const keptEvent = (e) => JSON.stringify({ title: e.title, starts_at: e.starts_at, ends_at: e.ends_at, all_day: e.all_day,
-  time_zone: e.time_zone, place: e.place });
+  time_zone: e.time_zone, place: e.place, rrule: e.rrule ?? null });
 
-/** Adds an event to a group: a post with the event; the owner here is going to start with. Returns { id }. */
+/**
+ * Adds an event to a group: a post with the event; the owner here is going to start with (to its first date, if it
+ * repeats). Returns { id }.
+ */
 export async function addEvent(env, site, group, { text: words, event }) {
   if (words.length > MAX_GROUP_TEXT) throw new Refusal(`Posts can be up to ${MAX_GROUP_TEXT} characters.`);
   let id;
@@ -473,6 +498,11 @@ export async function addEvent(env, site, group, { text: words, event }) {
     const prefix = groupPostId(group.origin, group.remote_id, "");
     id = typeof reply.id === "string" && reply.id.startsWith(prefix) ? reply.id.slice(prefix.length) : "";
     if (!/^\d{1,15}$/.test(id)) throw unexpected();
+    // A group's site from before repeating events keeps it as a one-off: take it back, and say why.
+    if (event.rrule && reply["afterwrd:rrule"] !== true) {
+      await call(group, `/_group/posts/${Number(id)}/delete`, {}).catch(() => {});
+      throw new Error("its site needs updating before it can take events that repeat. Its owner can update it from their Update page");
+    }
   } catch (error) {
     throw new Refusal(`Couldn't add the event to ${group.name}: ${error.message}`);
   }
@@ -480,17 +510,18 @@ export async function addEvent(env, site, group, { text: words, event }) {
     VALUES (?, ?, ?, 'post', ?, ?, ?, '[]', ?, ?)`).bind(group.id, group.origin, group.remote_id, Number(id), Number(id), words || null,
     keptEvent(event), now()).run();
   // The event's added even if its answer couldn't be sent.
-  await answerEvent(env, site, group, id, "going").catch((error) => {
+  await answerEvent(env, site, group, id, "going", ruleDates(event)[0]).catch((error) => {
     if (!(error instanceof Refusal)) throw error;
   });
   return { id: Number(id) };
 }
 
-/** The owner's answer to an event: going, maybe or no. */
-export async function answerEvent(env, site, group, id, answer) {
+/** The owner's answer to an event (to one `date` of a repeating one): going, maybe or no. */
+export async function answerEvent(env, site, group, id, answer, date = "") {
   if (!ANSWERS.includes(answer)) throw new Refusal("Going, maybe, or can't go?");
+  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Refusal("That isn't one of its dates.");
   try {
-    await keepReply(env, site, group, await call(group, `/_group/events/${Number(id)}/answer`, { answer }), id, answer);
+    await keepReply(env, site, group, await call(group, `/_group/events/${Number(id)}/answer`, { answer, date: date || undefined }), id, answer, date);
   } catch (error) {
     throw new Refusal(`Couldn't send your answer: ${error.message}`);
   }
@@ -525,15 +556,20 @@ export async function editEvent(env, site, group, id, { text: words, event }) {
   } catch (error) {
     throw new Refusal(`Couldn't change the event: ${error.message}`);
   }
+  // A group's site from before repeating events changes the rest and drops the repeat: say so, and keep what it kept.
+  const kept = parseGroupNote(reply, group.origin, group.remote_id, env)?.event;
+  const repeatLost = event.rrule && kept && kept.rrule !== event.rrule;
   await env.DB.prepare("UPDATE group_mine SET text = ?, event = ? WHERE site = ? AND remote_group = ? AND kind = 'post' AND remote_id = ?")
-    .bind(words || null, keptEvent(event), group.origin, group.remote_id, Number(id)).run();
+    .bind(words || null, keptEvent(repeatLost ? { ...event, rrule: null } : event), group.origin, group.remote_id, Number(id)).run();
   await keepReply(env, site, group, reply, id);
+  if (repeatLost) throw new Refusal(`The rest is changed, but ${group.name}'s site needs updating before its events can repeat. Its owner can update it from their Update page.`);
 }
 
-/** Calls off an event (the writer's, or, running the group, anyone's). */
-export async function cancelEvent(env, site, group, id) {
+/** Calls off an event (the writer's, or, running the group, anyone's): all of it, or one `date` of a repeating one. */
+export async function cancelEvent(env, site, group, id, date = "") {
+  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Refusal("That isn't one of its dates.");
   try {
-    await keepReply(env, site, group, await call(group, `/_group/events/${Number(id)}/cancel`, {}), id);
+    await keepReply(env, site, group, await call(group, `/_group/events/${Number(id)}/cancel`, { date: date || undefined }), id);
   } catch (error) {
     throw new Refusal(`Couldn't call it off: ${error.message}`);
   }
@@ -577,7 +613,7 @@ export async function deleteInGroup(env, group, kind, id) {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM group_mine WHERE site = ? AND remote_group = ? AND kind = ? AND remote_id = ?")
       .bind(group.origin, group.remote_id, kind === "posts" ? "post" : "comment", Number(id)),
-    ...(kind === "posts" ? [env.DB.prepare("DELETE FROM group_plans WHERE group_id = ? AND post_id = ?").bind(group.id, Number(id))] : []),
+    ...(kind === "posts" ? [env.DB.prepare("DELETE FROM events_elsewhere WHERE group_id = ? AND post_id = ?").bind(group.id, Number(id))] : []),
     mineVersionsGone(env.DB),
   ]);
 }
@@ -592,7 +628,7 @@ export async function leaveGroup(env, group) {
 /** Forgets a group here (its notes and plans too). The owner's copies of what they said stay. */
 export const forgetGroup = (db, group) => db.batch([
   db.prepare("DELETE FROM group_inbox WHERE group_id = ?").bind(group.id),
-  db.prepare("DELETE FROM group_plans WHERE group_id = ?").bind(group.id),
+  db.prepare("DELETE FROM events_elsewhere WHERE group_id = ?").bind(group.id),
   db.prepare("DELETE FROM groups WHERE id = ?").bind(group.id),
 ]);
 
@@ -664,16 +700,16 @@ export async function handleGroupActions(request, env, url) {
       await editInGroup(env, group, change[1], change[2], cleanText(String(form.get("text") ?? "")));
       back.hash = change[1] === "posts" ? `gp${change[2]}` : `g${String(form.get("post") ?? "")}-${change[2]}`;
     } else if (action === "/events" || ev?.[2] === "edit") {
-      const read = readEventForm(form, request.cf?.timezone);
+      const read = readEventForm(form, request.cf?.timezone, { repeats: true });
       if (read.error) return problem(read.error, back);
       const words = cleanText(String(form.get("text") ?? ""));
       if (ev) await editEvent(env, site, group, ev[1], { text: words, event: read.event });
       const id = ev ? ev[1] : (await addEvent(env, site, group, { text: words, event: read.event })).id;
       back = new URL(`${home}/posts/${id}`, site);
     } else if (ev?.[2] === "answer") {
-      await answerEvent(env, site, group, ev[1], String(form.get("answer") ?? ""));
+      await answerEvent(env, site, group, ev[1], String(form.get("answer") ?? ""), String(form.get("date") ?? ""));
     } else if (ev?.[2] === "cancel") {
-      await cancelEvent(env, site, group, ev[1]);
+      await cancelEvent(env, site, group, ev[1], String(form.get("date") ?? ""));
     } else if (polled) {
       if (polled[2] === "vote") await voteInGroup(env, group, polled[1], form.getAll("choice").map(String));
       else await closePollInGroup(env, group, polled[1]);

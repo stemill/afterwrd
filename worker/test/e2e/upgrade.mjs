@@ -90,7 +90,8 @@ if (stage === "before") {
     comments: [...a.querySelectorAll(".comment .said")].map((c) => c.textContent) }));
   check("the post keeps its address, with both photos and its comment", card.text === "Before the upgrade" && card.photos === 2
     && card.comments.join() === "Still here?", JSON.stringify(card));
-  await page.goto(BASE + was.photo);
+  // On its own (from 0.45.0, a post's photos link to themselves "in" the post, which names the post instead).
+  await page.goto(BASE + was.photo.split("?")[0]);
   check("its photo keeps its comment, in Posted on afterwrd", (await said(".info")).join() === "Nice photo"
     && (await page.$eval(".info .album-link", (a) => a.textContent)) === "Posted on afterwrd");
 

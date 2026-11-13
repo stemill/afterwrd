@@ -27,6 +27,11 @@ const TABLES = {
   // Polls in the owner's posts, and who answered: the owner's own records.
   polls: { columns: "*" },
   poll_votes: { columns: "post_id, voter, name, choices, voted_at" },
+  // The owner's events, who they're shared with and their answers; and events from elsewhere on their calendar.
+  events: { columns: "*" },
+  event_answers: { columns: "*" },
+  post_audience: { columns: "*" },
+  events_elsewhere: { columns: "*" },
   // What edited posts and comments said before (edits.js).
   post_versions: { columns: "*" },
   comment_versions: { columns: "*" },

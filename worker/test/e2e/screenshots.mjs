@@ -144,7 +144,8 @@ async function connect(host, hostSite, guest, guestSite) {
 async function commentOnFirst(page, selector, words) {
   const form = await page.$(`${selector} form.say`);
   await (await form.$("textarea")).type(words);
-  await Promise.all([page.waitForNavigation({ timeout: 30_000 }), (await form.$("button")).click()]);
+  // Sent in place since 0.45.0 (or, the old way, with a new page): whichever happens.
+  await Promise.all([settled(page, { timeout: 30_000 }), (await form.$("button")).click()]);
 }
 const post = (page, path, body) => page.evaluate(async (p, b) => {
   const res = await fetch(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
@@ -159,7 +160,9 @@ async function shot(page, url, file, { width = 1200, height = 900, full = true }
     const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     for (let n = walk.nextNode(); n; n = walk.nextNode()) for (const [from, to] of Object.entries(hosts)) n.nodeValue = n.nodeValue.replaceAll(from, to);
     await Promise.all([...document.images].map((i) => (i.complete ? null : new Promise((r) => { i.onload = i.onerror = r; }))));
-    document.querySelectorAll(".live-bar, #live").forEach((e) => e.remove());
+    // A brand-new site's one-off setup notices (automatic updates, the home screen, checking it) aren't what a site
+    // looks like day to day.
+    document.querySelectorAll(".live-bar, #live, main .notice").forEach((e) => e.remove());
   }, HOSTS);
   await page.screenshot({ path: `${SHOTS}/${file}`, fullPage: full });
   step(`saved docs/screenshots/${file}`);
@@ -228,7 +231,7 @@ for (const fields of [
   await ann.$eval("form.event-form", (f, v) => { for (const [k, x] of Object.entries(v)) if (f.elements[k]) f.elements[k].value = x; }, fields);
   await Promise.all([ann.waitForNavigation({ timeout: 30_000 }), ann.click("form.event-form button.primary")]);
 }
-await ben.goto(`${B}${benGroupHref}/calendar`);
+await ben.goto(`${B}${benGroupHref}/calendar?month=${nextMonth.slice(0, 7)}`);
 await Promise.all([settled(ben, { timeout: 30_000 }), ben.click(".answers button[value=going]")]);
 step("a group, with events");
 
@@ -240,5 +243,6 @@ await ann.goto(`${A}/friend`);
 const benPage = await ann.$eval("a[href^='/friend/']", (a) => a.getAttribute("href"));
 await shot(ann, `${A}${benPage}`, "friend-desktop.png");
 await shot(ann, `${A}/groups/${group}`, "group-desktop.png");
-await shot(ann, `${A}/groups/${group}/calendar`, "calendar-phone.png", { width: 390, height: 844 });
+// The month of the first event, so the grid has something on it.
+await shot(ann, `${A}/groups/${group}/calendar?month=${nextMonth.slice(0, 7)}`, "calendar-phone.png", { width: 390, height: 844 });
 await browser.close();

@@ -24,6 +24,7 @@ const ICONS = {
   groups: '<circle cx="12" cy="8" r="3"/><path d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M5.5 6.5a2.5 2.5 0 0 0 0 5M2 18c0-2 1.2-3.7 3-4.4M18.5 6.5a2.5 2.5 0 0 1 0 5M22 18c0-2-1.2-3.7-3-4.4"/>',
   poll: '<path d="M4 6h9M4 12h16M4 18h6"/>', // answers' bars
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  events: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M8 14h2M14 14h2M8 17h2"/>',
   profile: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>',
   memories: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>',
   devices: '<rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M11 18h2"/>', // a phone
@@ -135,6 +136,7 @@ export const ownerMain = (newComments = 0, requests = 0, messages = 0) => [
   { key: "photos", label: "Photos", href: "/photos" },
   { key: "connected", label: "Friends", href: "/friend", badge: requests },
   { key: "groups", label: "Groups", href: "/groups" },
+  { key: "events", label: "Events", href: "/events" },
   { key: "activity", label: "Notifications", href: "/activity", badge: newComments },
 ];
 

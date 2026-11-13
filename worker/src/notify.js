@@ -1,10 +1,10 @@
 // Notes between connected sites, so a friend's site can say "something new" without asking every site in turn.
 // Queued in the outbox (outbox.js), which sends them in batches to each friend's POST /_peer/notify:
 //   a new post here        {type: "Create", object: {type: "Note", id: <the post's address>, content: <its start>}}
-//                          to every approved connection
+//                          to every approved connection it's shared with (share.js)
 //   a comment here         {type: "Create", object: {type: "Note", inReplyTo: <the post or photo's address>,
 //                          content, attributedTo: {name}}} to the approved connections whose owners have commented
-//                          on that post or photo, apart from the one who wrote it
+//                          on that post or photo and can still see it, apart from the one who wrote it
 // Received (receiveNote, from peers.js): kept in `inbox` only if it's about the sender's own post or photo and, for a
 // comment, only if the owner here has commented on it too. Cut to size, rate-limited, pruned after 60 days, and
 // shown as text: Notifications lists the comments, and open pages count the posts (live.js).
@@ -14,10 +14,13 @@
 // anywhere: members' sites read the group when they open it. A member's site keeps a note in `group_inbox` only if its
 // owner wrote or commented on that post there (receiveGroupNote). The only other note a group sends is to those going
 // to an event (or who might) when it changes or is called off (notifyEventChange); a member's site keeps it only if
-// its owner still has plans for that event (group_plans).
+// its owner still has plans for that event (events_elsewhere).
 import { CONTEXT, groupPostId, POST_KEY_RE, postId, targetId } from "../public/static/activity.js";
-import { eventObject, eventWhen, parseEvent } from "./calendar.js";
+import { eventObject, eventWhen, hasDate, parseEvent } from "./calendar.js";
+import { dateCopy, sameCopy } from "./membership.js";
 import { outbox } from "./outbox.js";
+import { SHARED_SQL } from "./share.js";
+import { receiveFriendEventNote } from "./events.js";
 import { now } from "./util.js";
 
 const SNIPPET = 200;
@@ -34,21 +37,28 @@ async function send(env, connections, note) {
   if (connections.length) await outbox(env).send(connections.map((c) => c.id), { "@context": CONTEXT, ...note });
 }
 
-/** Tells every friend about a new post here, by its address (posts.key), once it's been made. */
+/** Tells the friends a new post here is shared with about it, by its address (posts.key), once it's been made. */
 export async function notifyNewPost(env, origin, key) {
   const db = env.DB;
   const post = await db.prepare("SELECT * FROM posts WHERE key = ? AND source = 'afterwrd'").bind(key).first();
   if (!post) return;
-  const { results } = await db.prepare(`SELECT id FROM connections
-    WHERE connected_at IS NOT NULL AND approved_at IS NOT NULL ORDER BY id`).all();
+  const { results } = await db.prepare(`SELECT c.id FROM connections c, posts p
+    WHERE p.id = ?1 AND c.connected_at IS NOT NULL AND c.approved_at IS NOT NULL AND ${SHARED_SQL("c.id")} ORDER BY c.id`).bind(post.id).all();
   await send(env, results, { type: "Create", object: { type: "Note", id: postId(origin, post.key), content: snippet(post.text || post.title) } });
 }
 
-/** Tells the friends who've commented on `target` here about a new comment on it, apart from its writer's site. */
+/**
+ * Tells the friends who've commented on `target` here (a post's key, or photo-<sha256>) about a new comment on it,
+ * apart from its writer's site, and anyone it's no longer shared with (share.js: the post, or the post a photo came
+ * with).
+ */
 export async function notifyComment(env, origin, target, { name, text, from = null }) {
   const { results } = await env.DB.prepare(`SELECT DISTINCT c.id FROM connections c
-    JOIN comments s ON s.origin = c.origin AND s.target = ?
-    WHERE c.connected_at IS NOT NULL AND c.approved_at IS NOT NULL AND c.origin != ? ORDER BY c.id`).bind(target, from ?? "").all();
+    JOIN comments s ON s.origin = c.origin AND s.target = ?1
+    WHERE c.connected_at IS NOT NULL AND c.approved_at IS NOT NULL AND c.origin != ?2
+      AND NOT EXISTS (SELECT 1 FROM posts p WHERE (p.key = ?1 OR p.id IN (SELECT post_id FROM media WHERE 'photo-' || hash = ?1))
+        AND NOT ${SHARED_SQL("c.id")})
+    ORDER BY c.id`).bind(target, from ?? "").all();
   await send(env, results, { type: "Create", object: { type: "Note", inReplyTo: targetId(origin, target), content: snippet(text),
     attributedTo: { type: "Person", name: snippet(name, 100) } } });
 }
@@ -68,6 +78,8 @@ function keyOn(origin, address) {
  * @returns {Promise<import("./util.js").Answer>}
  */
 export async function receiveNote(db, peer, note) {
+  // About one of their events: an invitation, a change, or an invitation taken back (events.js).
+  if (["Invite", "Update", "Undo"].includes(note?.type)) return receiveFriendEventNote(db, peer, note);
   const object = note?.type === "Create" && note.object?.type === "Note" ? note.object : null;
   const isComment = typeof object?.inReplyTo === "string";
   const target = object && keyOn(peer.origin, isComment ? object.inReplyTo : object.id);
@@ -81,8 +93,8 @@ export async function receiveNote(db, peer, note) {
   const at = now();
   const row = await db.prepare(`INSERT INTO inbox (connection_id, kind, target, actor, text, created_at)
     SELECT ?1, ?2, ?3, ?4, ?5, ?6
-    WHERE (SELECT COUNT(*) FROM inbox WHERE connection_id = ?1 AND created_at > ?6 - ?7) < ?8
-      AND (SELECT COUNT(*) FROM inbox WHERE connection_id = ?1 AND created_at > ?6 - 86400) < ?9
+    WHERE (SELECT COUNT(*) FROM inbox WHERE connection_id = ?1 AND kind IN ('post', 'comment') AND created_at > ?6 - ?7) < ?8
+      AND (SELECT COUNT(*) FROM inbox WHERE connection_id = ?1 AND kind IN ('post', 'comment') AND created_at > ?6 - 86400) < ?9
       AND NOT (?2 = 'post' AND EXISTS (SELECT 1 FROM inbox WHERE connection_id = ?1 AND kind = 'post' AND target = ?3))
     RETURNING id`).bind(peer.id, isComment ? "comment" : "post", target,
     isComment ? snippet(object.attributedTo?.name, 100) || "Someone" : null, snippet(object.content) || null,
@@ -109,15 +121,16 @@ export async function notifyGroupComment(env, site, group, post, { id, name, tex
 
 /**
  * In a group's Worker: tells the sites of the members going to an event, or who might, that it's changed or been
- * called off (`kind`), apart from whoever did it (`from`). Nothing else about events is sent to anyone.
+ * called off (`kind`), apart from whoever did it (`from`). With `date`, it's about that date of a repeating event,
+ * and goes to those going to that date. Nothing else about events is sent to anyone.
  */
-export async function notifyEventChange(env, site, group, post, event, { kind, name, from }) {
-  const { results } = await env.DB.prepare(`SELECT m.id FROM group_members m JOIN group_answers a ON a.origin = m.origin AND a.post_id = ?1
-    WHERE m.group_id = ?2 AND m.approved_at IS NOT NULL AND m.origin != ?3 AND a.answer IN ('going', 'maybe') ORDER BY m.id`)
-    .bind(post.id, group.id, from).all();
+export async function notifyEventChange(env, site, group, post, event, { kind, name, from, date = null }) {
+  const { results } = await env.DB.prepare(`SELECT DISTINCT m.id FROM group_members m JOIN group_answers a ON a.origin = m.origin AND a.post_id = ?1
+    WHERE m.group_id = ?2 AND m.approved_at IS NOT NULL AND m.origin != ?3 AND a.answer IN ('going', 'maybe') AND (?4 IS NULL OR a.date = ?4)
+    ORDER BY m.id`).bind(post.id, group.id, from, date).all();
   if (!results.length) return;
   await outbox(env).sendToMembers(results.map((r) => r.id), { "@context": CONTEXT, type: "Update", "afterwrd:change": kind,
-    actor: { type: "Person", name: snippet(name, 100) },
+    actor: { type: "Person", name: snippet(name, 100) }, "afterwrd:date": date ?? undefined,
     object: { type: "Note", id: groupPostId(site, group.id, post.id), "afterwrd:event": eventObject(event) } });
 }
 
@@ -131,10 +144,16 @@ async function receiveEventNote(db, group, note) {
   const id = typeof note.object?.id === "string" && note.object.id.startsWith(prefix) ? note.object.id.slice(prefix.length) : "";
   const event = parseEvent(note.object?.["afterwrd:event"]);
   const kind = note["afterwrd:change"];
-  if (!/^\d{1,15}$/.test(id) || !event || (kind !== "changed" && kind !== "cancelled")) return [{ error: "That isn't about an event in this group." }, 400];
+  // About one date of a repeating event (that date called off), or about the whole of it.
+  const date = typeof note["afterwrd:date"] === "string" ? note["afterwrd:date"] : null;
+  // A note about one date only calls that date off: changes are always to the whole of it.
+  if (!/^\d{1,15}$/.test(id) || !event || (kind !== "changed" && kind !== "cancelled")
+    || (date !== null && (kind !== "cancelled" || !event.rrule || !hasDate(event, date)))) {
+    return [{ error: "That isn't about an event in this group." }, 400];
+  }
   const at = now();
-  if (kind === "cancelled") event.cancelled_at ??= at;
-  // An event the owner here added keeps their own words, time and place: the group can only say it's off.
+  if (kind === "cancelled" && date === null) event.cancelled_at ??= at;
+  // An event the owner here added keeps their own words, time, place and repeat: the group can only say it's off.
   const mine = await db.prepare("SELECT event FROM group_mine WHERE site = ? AND remote_group = ? AND kind = 'post' AND remote_id = ?")
     .bind(group.origin, group.remote_id, Number(id)).first();
   let kept = null;
@@ -142,21 +161,36 @@ async function receiveEventNote(db, group, note) {
   if (mine && kept) {
     if (kind !== "cancelled") return [{ ok: true }, 202]; // their own change: nothing to tell them
     Object.assign(event, { title: kept.title, starts_at: kept.starts_at, ends_at: kept.ends_at, all_day: kept.all_day,
-      time_zone: kept.time_zone, place: kept.place });
+      time_zone: kept.time_zone, place: kept.place, rrule: kept.rrule ?? null });
   }
-  const plan = await db.prepare(`UPDATE group_plans SET title = ?, starts_at = ?, ends_at = ?, all_day = ?, time_zone = ?, place = ?,
-    cancelled_at = ?, updated_at = ? WHERE group_id = ? AND post_id = ? RETURNING answer`).bind(event.title, event.starts_at, event.ends_at,
-    event.all_day, event.time_zone, event.place, event.cancelled_at, at, group.id, Number(id)).first();
-  if (!plan) return [{ ok: true }, 202];
-  const words = `${event.title} · ${eventWhen(event)}${event.place ? ` · ${event.place}` : ""}`;
-  // Counted apart from comments, and far fewer: event news can't crowd out comments, or become a stream of nags.
-  const row = await db.prepare(`INSERT INTO group_inbox (group_id, post_id, actor, text, created_at, kind)
-    SELECT ?1, ?2, ?3, ?4, ?5, ?9
+  // The owner's copies of the dates they're going to (one date, if that's what it's about).
+  const { results: copies } = await db.prepare(`SELECT * FROM events_elsewhere WHERE group_id = ? AND post_id = ?${date === null ? "" : " AND date = ?"}`)
+    .bind(group.id, Number(id), ...(date === null ? [] : [date])).all();
+  if (!copies.length) return [{ ok: true }, 202];
+  // What the note says: the date it's about, or the next of theirs (or the event's first).
+  const shown = (date !== null ? dateCopy(event, date) : copies.length === 1 ? dateCopy(event, copies[0].date) : null) ?? event;
+  const words = `${event.title} · ${eventWhen(shown)}${event.place ? ` · ${event.place}` : ""}`;
+  // Counted apart from comments, and far fewer: event news can't crowd out comments, or become a stream of nags. The
+  // allowance is checked (and the note kept) first: over it, nothing at all is written.
+  const row = await db.prepare(`INSERT INTO group_inbox (group_id, post_id, actor, text, created_at, kind, date)
+    SELECT ?1, ?2, ?3, ?4, ?5, ?9, ?10
     WHERE (SELECT COUNT(*) FROM group_inbox WHERE group_id = ?1 AND kind IS NOT NULL AND created_at > ?5 - ?6) < ?7
       AND (SELECT COUNT(*) FROM group_inbox WHERE group_id = ?1 AND kind IS NOT NULL AND created_at > ?5 - 86400) < ?8
     RETURNING id`).bind(group.id, Number(id), snippet(note.actor?.name, 100) || "Someone", snippet(words, 400), at,
-    EVENT_RATE.seconds, EVENT_RATE.count, EVENT_RATE.daily, kind).first();
-  return row ? [{ ok: true }, 202] : [{ error: "That's a lot of notes for now." }, 429];
+    EVENT_RATE.seconds, EVENT_RATE.count, EVENT_RATE.daily, kind, date).first();
+  if (!row) return [{ error: "That's a lot of notes for now." }, 429];
+  // Then each copy brought up to date, if it's changed; a date the event no longer has is let go.
+  const writes = copies.flatMap((c) => {
+    const fresh = dateCopy(event, c.date);
+    if (!fresh) return [db.prepare("DELETE FROM events_elsewhere WHERE id = ?").bind(c.id)];
+    const copy = date !== null ? { ...fresh, cancelled_at: c.cancelled_at ?? at } : fresh;
+    if (sameCopy(c, copy)) return [];
+    return [db.prepare(`UPDATE events_elsewhere SET title = ?, starts_at = ?, ends_at = ?, all_day = ?, time_zone = ?, place = ?,
+      cancelled_at = ?, updated_at = ? WHERE id = ?`).bind(copy.title, copy.starts_at, copy.ends_at, copy.all_day, copy.time_zone, copy.place,
+      copy.cancelled_at ?? null, at, c.id)];
+  });
+  if (writes.length) await db.batch(writes);
+  return [{ ok: true }, 202];
 }
 
 /**

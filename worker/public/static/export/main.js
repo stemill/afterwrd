@@ -13,7 +13,7 @@ const EXTENSIONS = {
 const TABLES = ["settings", "facebook_people", "albums", "posts", "facebook_post_tags", "facebook_comments",
   "facebook_reactions", "media", "facebook_tagged_photos", "comments", "comments_elsewhere", "polls", "poll_votes",
   "connections", "friend_links", "users", "groups", "group_mine", "chats", "messages", "post_versions", "comment_versions",
-  "comments_elsewhere_versions"];
+  "comments_elsewhere_versions", "events", "event_answers", "post_audience", "events_elsewhere"];
 
 const form = document.getElementById("export");
 const status = document.getElementById("status");
@@ -109,6 +109,23 @@ function documents(t) {
       votersCount: votes.length,
     };
   };
+  // An event (src/events.js, src/calendar.js eventObject), as sent between sites.
+  const eventFields = (e) => ({
+    type: "Event", name: e.title, startTime: iso(e.starts_at), endTime: iso(e.ends_at ?? undefined), "afterwrd:allDay": Boolean(e.all_day),
+    "afterwrd:timeZone": e.time_zone, location: e.place ? { type: "Place", name: e.place } : undefined, "afterwrd:cancelled": iso(e.cancelled_at ?? undefined),
+  });
+  const friend = (id) => {
+    const c = t.connections.find((x) => x.id === id);
+    return c ? { type: "Person", id: actorId(c.origin), name: c.name } : { type: "Person", name: "A friend you're no longer connected with" };
+  };
+  // The owner's event in a post, with who was invited and what each answered.
+  const event = (p) => {
+    const e = t.events.find((x) => x.post_id === p.id);
+    if (!e) return undefined;
+    const answer = (id) => t.event_answers.find((a) => a.post_id === p.id && a.connection_id === id)?.answer;
+    return { ...eventFields(e), "afterwrd:invited": t.post_audience.filter((a) => a.post_id === p.id)
+      .map((a) => ({ ...friend(a.connection_id), "afterwrd:answer": answer(a.connection_id) })) };
+  };
   const postIds = new Map();
   const posts = [...t.posts].sort(newest).map((p) => {
     const { key } = p;
@@ -134,6 +151,9 @@ function documents(t) {
       ...editedFields({ ...p, earlier: postEarlier(p.id) }),
       "afterwrd:facebookId": p.fbid || undefined,
       "afterwrd:poll": poll(p),
+      "afterwrd:event": event(p),
+      // Who could see it: all friends, unless it was for some only (an event, for those invited).
+      "afterwrd:audience": p.audience === "chosen" ? "chosen" : undefined,
       replies: replies(key),
     };
   });
@@ -216,6 +236,16 @@ function documents(t) {
       type: "Group", id: groupId(g.origin, g.remote_id), name: g.name, summary: g.about || undefined,
       "afterwrd:owner": { type: "Person", name: g.host_name }, "afterwrd:role": g.role || undefined, "afterwrd:joinedAt": iso(g.joined_at),
     })), { name: "Groups you're in (each is its own site, which keeps everything in it)" }),
+    // Friends' events you were invited to, and groups' events you said you'd go to, as your site last heard of them.
+    ...(t.events_elsewhere.length ? { "events-elsewhere.json": collection([...t.events_elsewhere].sort((a, b) => a.starts_at - b.starts_at).map((e) => {
+      const g = e.group_id ? t.groups.find((x) => x.id === e.group_id) : null;
+      const c = e.connection_id ? t.connections.find((x) => x.id === e.connection_id) : null;
+      return { ...eventFields(e),
+        url: c ? postId(c.origin, e.post_key) : g ? groupPostId(g.origin, g.remote_id, e.post_id) : undefined,
+        attributedTo: c ? friend(c.id) : undefined, context: g ? groupId(g.origin, g.remote_id) : undefined,
+        "afterwrd:date": e.date || undefined, // which date of a repeating group event
+        "afterwrd:answer": e.answer ?? undefined, "afterwrd:invitedAt": iso(e.invited_at ?? undefined) };
+    }), { name: "Friends' and groups' events on your calendar" }) } : {}),
     "groups-elsewhere.json": collection([...t.group_mine].sort((a, b) => b.created_at - a.created_at).map((m) => {
       const post = groupPostId(m.site, m.remote_group, m.post_id);
       return {

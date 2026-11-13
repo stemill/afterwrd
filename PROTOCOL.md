@@ -276,6 +276,13 @@ A site from before 0.32.0 answers `404`; afterwrd then suggests a friend link in
 
 ## 5. Friend API
 
+**Who sees a post (afterwrd 0.46.0).** A post written on afterwrd is shared with all the owner's friends, or with
+chosen friends only (an event, 5.20, is shared with those invited). Every answer in this section is for the friend
+whose key the request carries, and leaves out what isn't shared with them: in lists and their counts, by address
+(`404 "That isn't there any more."`, as if it weren't there), for comments, answers and votes, and in notes (section
+8, which go only to friends a post is shared with). A photo that came with a post a friend isn't shown is never shown
+to them either, whatever album it's in.
+
 All the endpoints in this section are on the site being read (the "owner's site"). They are called by a connected friend's site with `Authorization: Bearer <key the owner's site issued>`.
 
 How the receiver handles the key:
@@ -343,6 +350,12 @@ Which posts are included:
 - Posts imported from the owner's Facebook download are included **only if** the owner published the "posts" section of that download.
 
 Source: `src/share.js:119-131`, `src/friends.js:87-96`, `test/e2e/feed.mjs:222`.
+
+### 5.3a `GET /_peer/posts/<post key>` (afterwrd 0.46.0)
+
+One post, with all its comments: a Note as in `/_peer/posts`, with `attributedTo` the owner (a Person, as in 5.2)
+instead of the owner's address. `404` if there's no such post or it isn't shared with the caller. A friend's site uses
+it for an event's own page and to answer an invitation's link. Older sites answer `404 "Not found."`.
 
 ### 5.4 `GET /_peer/albums`
 
@@ -601,6 +614,40 @@ The caller's site checked the receiver's by itself (5.16) and found something th
   was found until a friend's check passes again. It's the friend's word, as 5.12 is. Answer: `200 {"ok": true}`.
 - Older sites answer `404`, which the caller ignores.
 
+### 5.19 `POST /_peer/answer` (afterwrd 0.46.0)
+
+The caller's owner answers the event in a post here (5.20) that they're invited to:
+
+```json
+{"@context": "https://www.w3.org/ns/activitystreams", "type": "Accept",
+ "object": "https://ann.example/posts/post-1762164000-0b918c1b"}
+```
+
+- `type` is `Accept` (going), `TentativeAccept` (maybe) or `Reject` (can't go), as Friendica and Hubzilla answer
+  events.
+- `object` must be a post written on this site and shared with the caller (they're invited). Otherwise: `404`.
+- Any other `type`, a post without an event, an event called off, or one that's over: `400`. Invitation, event and
+  answer are checked in the same statement that keeps the answer, so one sent as the invitation is taken back fails.
+- One answer per caller; a new one replaces it. Answers notify no one.
+- On success: `200`, the post as `GET /_peer/posts/<post key>` returns it, so the caller's site can update its copy.
+- Older sites answer `404 "Not found."`.
+
+### 5.20 Events in a person's posts (afterwrd 0.46.0)
+
+A person's post can carry an event, `afterwrd:event`, read as in 9.7. It's shared only with the friends the owner
+invited. In a Note sent to an invited friend the event also carries:
+
+- `afterwrd:going` and `afterwrd:maybe`: lists of `{"type": "Person", "id": "<origin>/", "name"}`, the invited friends
+  who answered so, named as the owner's site names them. Everyone invited sees these. Those who can't go, and those who
+  haven't answered, aren't listed to anyone but the owner;
+- `afterwrd:invited`: how many friends are invited;
+- `afterwrd:answer`: the caller's own answer, if they've given one.
+
+The owner is the host and has no answer. A receiver reads it as 9.7, plus `afterwrd:invited` as a whole number from 0
+to 10,000, and keeps a copy of each event it's shown (for its owner's calendar), at most 200 still to come per friend.
+
+Notes about events (section 8.4) go to those invited; nothing is sent when someone answers.
+
 ## 6. Objects
 
 All objects use ActivityStreams 2.0 vocabulary. afterwrd's own terms use the prefix `afterwrd:` and the IRI `https://afterwrd.app/ns#`:
@@ -853,7 +900,8 @@ A note tells a friend's site that something happened, so that site doesn't have 
 
 ### 8.1 New post
 
-This note goes to **every approved connection** when the owner posts on afterwrd. Imported posts never trigger it.
+This note goes to **every approved connection the post is shared with** (section 5) when the owner posts on afterwrd.
+Imported posts never trigger it, and nor do events, whose friends are sent invitations instead (8.4).
 
 ```json
 {
@@ -868,7 +916,7 @@ This note goes to **every approved connection** when the owner posts on afterwrd
 
 ### 8.2 New comment
 
-When anyone comments on a post or photo, this note goes to the approved connections whose sites have themselves commented on that same post or photo. It does not go to the site the new comment came from.
+When anyone comments on a post or photo, this note goes to the approved connections whose sites have themselves commented on that same post or photo, and who can still see it (section 5). It does not go to the site the new comment came from.
 
 ```json
 {
@@ -883,7 +931,7 @@ When anyone comments on a post or photo, this note goes to the approved connecti
 
 ### 8.3 What the receiver does
 
-1. It checks the note:
+1. It checks the note (an `Invite`, `Update` or `Undo` is about an event: 8.4):
    - `type` must be `Create` and `object.type` must be `Note`.
    - The note must be about the **sender's own** post or photo:
      - a comment note has `object.inReplyTo`;
@@ -905,6 +953,47 @@ When anyone comments on a post or photo, this note goes to the approved connecti
 Notes only prompt the receiver. Content is always read with the pull APIs.
 
 Source: `src/notify.js:1-17`, `src/notify.js:24-29`, `src/notify.js:34-92`, `test/e2e/feed.mjs:159-165`, `test/e2e/feed.mjs:183-190`.
+
+### 8.4 Events (afterwrd 0.46.0)
+
+Three notes about the owner's events (5.20), sent like any other note:
+
+**An invitation**, to each friend when they're invited (when the event's made, or later):
+
+```json
+{"@context": [ … ], "type": "Invite", "actor": {"type": "Person", "id": "https://ann.example/", "name": "Ann Example"},
+ "object": {"type": "Note", "id": "https://ann.example/posts/post-1762164000-0b918c1b", "content": "first 200 characters",
+            "afterwrd:event": { …Event, 9.7… }}}
+```
+
+**A change, or calling it off**, to everyone invited who hasn't said no, when the title, start, end, all-day flag, time
+zone or place changes (at most once every 300 s), or the event is called off or deleted while still to come:
+
+```json
+{"@context": [ … ], "type": "Update", "afterwrd:change": "changed",
+ "actor": { …Person… }, "object": {"type": "Note", "id": "https://ann.example/posts/…", "afterwrd:event": { …Event… }}}
+```
+
+`afterwrd:change` is `changed` or `cancelled`; a cancelled event carries `afterwrd:cancelled`.
+
+**An invitation taken back**, to that friend only:
+
+```json
+{"@context": [ … ], "type": "Undo", "actor": { …Person… },
+ "object": {"type": "Invite", "object": "https://ann.example/posts/post-1762164000-0b918c1b"}}
+```
+
+The receiver:
+
+- refuses (`400 "That isn't about an event on your site."`) a note whose post isn't `<sender's origin>/posts/<post
+  key>`, an `Undo` whose object isn't an `Invite`, and an `Invite` or `Update` whose event doesn't parse (9.7) or whose
+  `afterwrd:change` isn't one of the two;
+- for an `Undo`, forgets its copy of that event and what it kept about it, and shows nothing (`202`);
+- ignores (`202`) an `Update` about an event it holds no invitation to, or whose invitation its owner said no to;
+- otherwise keeps (or updates) its copy of the event, and a notification: the sender's name and the event's title,
+  when and where, cut to 400 characters. At most one invitation notification per post. Limits per sender, apart from
+  comments: 10 event notes per 600 s and 30 a day (`429` beyond them), and 200 events still to come (`429`);
+- never takes the caller's answer from a note: only its owner's own answers (5.19) set it.
 
 ## 9. Groups
 
@@ -1208,9 +1297,11 @@ The group then sends comment notes (9.6).
 
 #### `POST /_group/events/<m>/answer`
 
-Body: `{"answer": "going" | "maybe" | "no"}`.
+Body: `{"answer": "going" | "maybe" | "no", "date": "YYYY-MM-DD"}`. `date` is for a repeating event (9.7a): one of its
+dates, which it must have. A one-off event takes no `date` (or `""`).
 
-It answers `400` if the answer isn't one of those, or if the event is gone, called off or over.
+It answers `400` if the answer isn't one of those, if the event is gone, called off or over, if a repeating event's
+answer has no `date` or a date it doesn't have, if that date is called off or over, or if a one-off's has a `date`.
 
 #### `POST /_group/events/<m>/edit`
 
@@ -1222,7 +1313,8 @@ Body: `{"content": "…", "afterwrd:event": { …Event… }}`.
 
 #### `POST /_group/events/<m>/cancel`
 
-Body: `{}`.
+Body: `{}`, or `{"date": "YYYY-MM-DD"}` to call off one date of a repeating event (9.7a): only that date's off, and
+only those going to it, or who might, are told (the note carries `afterwrd:date`).
 
 - Who may cancel is the same as for deleting. Anyone else gets `400`.
 - Calling off an event that is already off does nothing.
@@ -1364,6 +1456,33 @@ It then reads:
 - `afterwrd:cancelled`, if present, as a time.
 
 It reads up to 200 names in each of the going, maybe and can't-go lists.
+
+### 9.7a Repeating events (afterwrd 0.46.0)
+
+An event in a group can repeat. The Event then carries:
+
+- `afterwrd:rrule`: its rule, as iCalendar's RRULE, and only exactly one of these (anything else, or a rule whose first
+  date isn't the day the event starts, or which runs more than 366 days, means the event doesn't repeat):
+  - `FREQ=WEEKLY;UNTIL=YYYYMMDD` or `FREQ=WEEKLY;INTERVAL=2;UNTIL=YYYYMMDD`: on the weekday it starts;
+  - `FREQ=MONTHLY;BYMONTHDAY=<1–31>;UNTIL=YYYYMMDD`: a month without that date is skipped;
+  - `FREQ=MONTHLY;BYDAY=<1–4 or -1><SU|MO|TU|WE|TH|FR|SA>;UNTIL=YYYYMMDD`: the nth (or last) weekday of each month,
+    skipped where there's none.
+
+  `UNTIL` is a date where the event is held, the last day it may fall on. At most 60 dates are read.
+- `afterwrd:cancelledDates`: dates called off one at a time, as `YYYY-MM-DD`.
+- In group reads, instead of the going, maybe and can't-go lists for the whole event: `afterwrd:dates`, a list of
+  `{"afterwrd:date": "YYYY-MM-DD", "afterwrd:going": [ … ], "afterwrd:maybe": [ … ], "afterwrd:cantGo": [ … ],
+  "afterwrd:answer": … }`, one for each date that has any answers.
+
+Each date is worked out where the event is held: the start's day and wall-clock time moved to that date, so 19:00 stays
+19:00 through clock changes, lasting as long as the first. A date is named by its day there (`YYYY-MM-DD`). The event
+is over when its last date is. Changing the title, time, zone, place or rule changes every date and tells everyone going
+to any date, or who might. `POST /_group/posts` answers a repeating event's post with `"afterwrd:rrule": true`; a
+group from before this doesn't, and member sites take such a post back and say the group needs updating.
+
+A member's site keeps a copy of each date its owner says they're going to, or might, and reads a note with
+`afterwrd:date` as being about that date alone. A member's site from before this shows a repeating event as its first
+date, and can't answer it.
 
 **When an event has finished:**
 
@@ -1538,12 +1657,14 @@ Notes on the "Auth" column:
 | GET | `/_peer/hello?from=` | The site being paired with | issued key (pending only) | Proves the key → `{name, protocol}` |
 | GET | `/_peer/feed` | A friend's site | issued key (approved) | Newest 30 afterwrd posts with comments |
 | GET | `/_peer/posts?page=` | A friend's site | issued key (approved) | Posts, 30 per page |
+| GET | `/_peer/posts/<post key>` | A friend's site | issued key (approved) | One post, with comments (5.3a) |
 | GET | `/_peer/albums` | A friend's site | issued key (approved) | Albums the friend may see |
 | GET | `/_peer/albums/<key>?page=` | A friend's site | issued key (approved) | An album's media, 150 per page |
 | GET | `/_peer/photos/<sha256>` | A friend's site | issued key (approved) | One photo or video, with comments and neighbours |
 | POST | `/_peer/comments` | A friend's site | issued key (approved) | Comment on a post or photo → `{id}` |
 | POST | `/_peer/comments/<n>/delete` | A friend's site | issued key (approved) | Delete its own comment |
 | POST | `/_peer/comments/<n>/edit` | A friend's site | issued key (approved) | Change its own comment's words (15 minutes) |
+| POST | `/_peer/answer` | A friend's site | issued key (approved) | Answer an event it's invited to (5.19) |
 | POST | `/_peer/notify` | A friend's site | issued key (approved) | A note (section 8) |
 | POST | `/_peer/message` | A friend's site | issued key (approved) | A message (5.14) |
 | POST | `/_peer/disconnect` | A friend's site | issued key (pending or approved) | Ends the connection |

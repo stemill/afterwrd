@@ -2,8 +2,9 @@
 //   GET  /_peer/hello?from=<origin>     who's here; only mid-connect, to prove to <origin> the key is ours for it
 //   GET  /_peer/feed                    the owner's newest posts written on afterwrd, with all their comments
 //   GET  /_peer/posts?page=n            the owner's posts and photos, for their friend pages, through share.js:
-//   GET  /_peer/albums                    posts, albums, an album's photos, one photo; files come as signed links
-//   GET  /_peer/albums/<key>?page=n
+//   GET  /_peer/posts/<key>               posts, one post, albums, an album's photos, one photo; files come as signed
+//   GET  /_peer/albums                    links. Only what's shared with the asking friend: a post can be for only
+//   GET  /_peer/albums/<key>?page=n       some friends (an event, for those invited)
 //   GET  /_peer/photos/<sha256>
 //   POST /_peer/comments                a Note inReplyTo a post or photo made on afterwrd: their owner comments on it
 //   POST /_peer/comments/<n>/delete     their owner deletes a comment they made
@@ -11,6 +12,9 @@
 //                                       else comments after it: edits.js)
 //   POST /_peer/vote                    {inReplyTo: a post here, afterwrd:choices: [n…]}: their owner answers its poll
 //                                       (none takes it back); answers with the poll as they now see it (polls.js)
+//   POST /_peer/answer                  {type: Accept | TentativeAccept | Reject, object: an event's post here}: their
+//                                       owner is going, might go, or can't (events.js); answers with the post as
+//                                       they now see it
 //   POST /_peer/notify                  a note: something new on their site (notify.js)
 //   POST /_peer/message                 a message from their owner to the owner here (messages.js)
 //   POST /_peer/introduce               {origin, name, content?}: their owner introduces the owner here to someone
@@ -28,7 +32,7 @@
 import { commentId, CONTEXT, POST_KEY_RE, postId, tidy } from "../public/static/activity.js";
 import { commentable, findTarget, MAX_COMMENT } from "./archive/comments.js";
 import { editComment, versionsGone } from "./edits.js";
-import { notes, ownerActor, photoShared, postShared, shareAlbum, shareAlbums, sharePhoto, sharePosts } from "./share.js";
+import { notes, ownerActor, photoShared, postShared, SHARED_SQL, shareAlbum, shareAlbums, sharePhoto, sharePost, sharePosts } from "./share.js";
 import { json, now, Refusal, sha256 } from "./util.js";
 import { notifyComment, receiveNote } from "./notify.js";
 import { receiveIntroduction } from "./connect.js";
@@ -36,6 +40,7 @@ import { receiveChecked, receiveCheckRequest } from "./checks.js";
 import { giveCheckToken, receiveCheckFailed, receiveCheckSoon } from "./friendchecks.js";
 import { receiveMessage } from "./messages.js";
 import { answerHere, pollObject, sitePolls } from "./polls.js";
+import { answerFromFriend, friendGone } from "./events.js";
 
 const FEED_POSTS = 30;
 const TIMEOUT_MS = 8000;
@@ -147,14 +152,16 @@ export async function handlePeer(request, env, url, work) {
     return json({ error: `Waiting for ${await ownerName(db)} to approve the connection.` }, 403);
   }
 
-  if (route === "GET /_peer/feed") return json(await feed(env, url.origin, peer.origin));
+  if (route === "GET /_peer/feed") return json(await feed(env, url.origin, peer));
   const page = Math.min(10_000, Math.max(1, Number.parseInt(url.searchParams.get("page"), 10) || 1));
-  if (route === "GET /_peer/posts") return json(await sharePosts(env, url.origin, page, await ownerName(db), peer.origin));
+  if (route === "GET /_peer/posts") return json(await sharePosts(env, url.origin, page, await ownerName(db), peer));
   if (route === "GET /_peer/albums") return json(await shareAlbums(env, url.origin));
-  const shared = /^GET \/_peer\/(albums\/(\d+|other|videos)|photos\/([0-9a-f]{64}))$/.exec(route);
+  const shared = /^GET \/_peer\/(albums\/(\d+|other|videos)|photos\/([0-9a-f]{64})|posts\/(post-\d+-[0-9a-f]{8}))$/.exec(route);
   if (shared) {
-    const found = shared[2] ? await shareAlbum(env, url.origin, shared[2], page) : await sharePhoto(env, url.origin, shared[3]);
-    return found ? json(found) : json({ error: "That isn't there any more." }, 404);
+    const found = shared[2] ? await shareAlbum(env, url.origin, shared[2], page)
+      : shared[3] ? await sharePhoto(env, url.origin, shared[3], peer)
+      : await sharePost(env, url.origin, shared[4], await ownerName(db), peer);
+    return found ? json(tidy({ "@context": CONTEXT, ...found })) : json({ error: "That isn't there any more." }, 404);
   }
   if (route === "POST /_peer/disconnect") {
     // The owner's copies of what they said on that site (comments_elsewhere) stay: they're theirs.
@@ -162,6 +169,7 @@ export async function handlePeer(request, env, url, work) {
       db.prepare("DELETE FROM connections WHERE id = ?").bind(peer.id),
       db.prepare("DELETE FROM friend_links WHERE connection_id = ?").bind(peer.id),
       db.prepare("DELETE FROM introductions WHERE connection_id = ?").bind(peer.id),
+      ...friendGone(db, peer.id),
     ]);
     return json({ ok: true });
   }
@@ -197,10 +205,9 @@ export async function handlePeer(request, env, url, work) {
     const reply = typeof note.inReplyTo === "string" ? note.inReplyTo : "";
     const target = reply.startsWith(postId(url.origin, "")) ? reply.slice(postId(url.origin, "").length)
       : reply.startsWith(`${url.origin}/photos/sha256/`) ? `photo-${reply.slice(`${url.origin}/photos/sha256/`.length)}` : "";
-    const found = (POST_KEY_RE.test(target) || /^photo-[0-9a-f]{64}$/.test(target)) && (await findTarget(db, target));
+    const found = await visibleTarget(db, target, peer);
     // Only what they're shown: something unshared answers as if it weren't there.
-    const visible = found && (found.post ? await postShared(db, found.post) : await photoShared(db, found.photo));
-    if (!visible) return json({ error: "That isn't there any more." }, 404);
+    if (!found) return json({ error: "That isn't there any more." }, 404);
     if (!commentable(found)) return json({ error: "Only posts and photos added on afterwrd take comments." }, 403);
     // Limits checked in the same statement as the insert, so comments sent all at once can't slip past.
     const row = await db.prepare(`INSERT INTO comments (target, author_id, author_name, text, created_at, origin)
@@ -217,13 +224,26 @@ export async function handlePeer(request, env, url, work) {
     const body = await request.json().catch(() => ({}));
     const reply = typeof body?.inReplyTo === "string" ? body.inReplyTo : "";
     const key = reply.startsWith(postId(url.origin, "")) ? reply.slice(postId(url.origin, "").length) : "";
-    // Polls are only ever in posts written here, which friends can always see.
-    const found = POST_KEY_RE.test(key) && (await findTarget(db, key));
+    // Polls are only ever in posts written here, and answered only by those who can see them.
+    const found = await visibleTarget(db, key, peer);
     const id = found?.post?.source === "afterwrd" ? found.post.id : null;
     if (!id) return json({ error: "That isn't there any more." }, 404);
     const trouble = await answerHere(db, id, peer.origin, peer.name, body["afterwrd:choices"]);
     if (trouble) return json({ error: trouble }, 400);
     return json(tidy({ "@context": CONTEXT, "afterwrd:poll": pollObject((await sitePolls(db, [id], peer.origin)).get(id)) }));
+  }
+
+  if (route === "POST /_peer/answer") {
+    const body = await request.json().catch(() => ({}));
+    const answer = { Accept: "going", TentativeAccept: "maybe", Reject: "no" }[body?.type];
+    const reply = typeof body?.object === "string" ? body.object : "";
+    const key = reply.startsWith(postId(url.origin, "")) ? reply.slice(postId(url.origin, "").length) : "";
+    // Only an event they're invited to: anything else answers as if it weren't there.
+    const found = await visibleTarget(db, key, peer);
+    if (!found?.post || found.post.source !== "afterwrd") return json({ error: "That isn't there any more." }, 404);
+    const trouble = answer ? await answerFromFriend(db, found.post.id, peer, answer) : "Answer going, maybe or no.";
+    if (trouble) return json({ error: trouble }, 400);
+    return json(tidy({ "@context": CONTEXT, ...(await sharePost(env, url.origin, key, await ownerName(db), peer)) }));
   }
 
   if (route === "POST /_peer/message") {
@@ -236,6 +256,8 @@ export async function handlePeer(request, env, url, work) {
     return json(body, status);
   }
 
+  // Their own comments only; changing one also needs them still able to see what it's on. (Deleting doesn't: what
+  // they said is theirs to take back.)
   const del = /^POST \/_peer\/comments\/(\d+)\/delete$/.exec(route);
   if (del) {
     await db.batch([db.prepare("DELETE FROM comments WHERE id = ? AND origin = ?").bind(Number(del[1]), peer.origin), ...versionsGone(db)]);
@@ -244,6 +266,8 @@ export async function handlePeer(request, env, url, work) {
   const change = /^POST \/_peer\/comments\/(\d+)\/edit$/.exec(route);
   if (change) {
     const note = await request.json().catch(() => ({}));
+    const on = await db.prepare("SELECT target FROM comments WHERE id = ? AND origin = ?").bind(Number(change[1]), peer.origin).first();
+    if (on && !(await visibleTarget(db, on.target, peer))) return json({ error: "That isn't there any more." }, 404);
     try {
       if (note?.type !== "Note") throw new Refusal("That isn't a comment.", 400);
       await editComment(env, Number(change[1]), { origin: peer.origin }, note.content, MAX_COMMENT);
@@ -257,17 +281,27 @@ export async function handlePeer(request, env, url, work) {
 }
 
 /**
- * The owner's newest afterwrd posts as an OrderedCollection of Notes, each with its photos, comments and any poll (with
- * `viewer`'s own answer: the friend's site asking).
+ * A post or photo here (post-… or photo-<sha256>) that `peer` may see, as findTarget gives it; null if there's no
+ * such thing, or it isn't shared with them.
  */
-async function feed(env, site, viewer) {
-  const { results: posts } = await env.DB.prepare("SELECT * FROM posts WHERE source = 'afterwrd' ORDER BY created_at DESC, id DESC LIMIT ?")
-    .bind(FEED_POSTS).all();
+async function visibleTarget(db, target, peer) {
+  const found = (POST_KEY_RE.test(target) || /^photo-[0-9a-f]{64}$/.test(target)) && (await findTarget(db, target));
+  if (!found) return null;
+  return (found.post ? await postShared(db, found.post, peer.id) : await photoShared(db, found.photo, peer.id)) ? found : null;
+}
+
+/**
+ * The owner's newest afterwrd posts that `peer` may see, as an OrderedCollection of Notes, each with its photos,
+ * comments and any poll (with the friend's own answer).
+ */
+async function feed(env, site, peer) {
+  const { results: posts } = await env.DB.prepare(`SELECT p.* FROM posts p WHERE p.source = 'afterwrd' AND ${SHARED_SQL("?1")}
+    ORDER BY p.created_at DESC, p.id DESC LIMIT ?2`).bind(peer.id, FEED_POSTS).all();
   return tidy({
     "@context": CONTEXT,
     type: "OrderedCollection",
     attributedTo: await ownerActor(env, site, await ownerName(env.DB)),
     totalItems: posts.length,
-    orderedItems: await notes(env, site, posts, { viewer }),
+    orderedItems: await notes(env, site, posts, { peer }),
   });
 }

@@ -220,10 +220,18 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   a comment sends a quiet note only to the people who wrote that post or commented on it, which shows in their
   *Notifications*. Each group has a *Calendar*: any member can add an event, and members say whether they're
   going. Adding one sends nothing to anyone; if you've said you're going, or might, you're told when its time, place
-  or name changes or it's called off, and it shows under *Coming up* on *Groups*. Only whoever added an event can
+  or name changes or it's called off, and it's on your *Events* calendar. An event can repeat (every week, every two
+  weeks, or monthly on the same date or weekday, for up to a year): people answer each date, and one date can be
+  called off on its own. Only whoever added an event can
   change it; they, and the group's admins, can call it off. *Add to my calendar* downloads it for your phone's or
   computer's own calendar. The *Update* page brings your groups up to your site's version, and deleting a group removes its
   Worker and database. A free Cloudflare account holds about 9 groups besides your site (10 databases in all).
+- **Events.** *Events → Make an event* makes one on your own site and invites the friends you tick: only they see
+  it, from their own sites, where it shows in *Notifications* and on their *Events* page. They answer Going, Maybe or
+  Can't go; everyone invited sees who's going and who might, and only you see who can't, or hasn't answered (or whose
+  site didn't take the invitation). Change it or call it off, and everyone invited who hasn't said no is told. You can
+  invite more people later, or quietly take an invitation back. *Events* also shows a calendar of everything you could
+  go to, your own events, friends' and your groups', by month, week or as a list.
 - **Comments.** You and your friends (from their own sites) can comment under a post or photo; comments show
   straight away. Friends can delete their own, and you can delete any. *Notifications* lists comments on your
   posts and photos, and comments on friends' posts and photos you've commented on too, with a count in the menu

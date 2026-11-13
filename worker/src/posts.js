@@ -17,6 +17,7 @@ import { safeNext } from "./auth.js";
 import { answerHere, readPoll } from "./polls.js";
 import { editPost, MAX_POST_TEXT, versionsGone } from "./edits.js";
 import { messagePage } from "./views/pages.js";
+import { eventGone } from "./events.js";
 
 const MAX_TEXT = MAX_POST_TEXT;
 const MAX_PHOTOS = 20;
@@ -103,7 +104,7 @@ export async function handlePosts(request, env, url) {
   }
   const del = /^\/_admin\/posts\/(\d+)\/delete$/.exec(url.pathname);
   if (del) {
-    await deletePost(env, Number(del[1]));
+    await deletePost(env, url.origin, Number(del[1]));
     return Response.redirect(`${url.origin}/posts`, 303);
   }
   const poll = /^\/_admin\/posts\/(\d+)\/(vote|close|edit)$/.exec(url.pathname);
@@ -160,12 +161,14 @@ export async function createPost(env, origin, body) {
 
 /**
  * Deletes a post made here and the comments on it. Its photos go too (files included, unless something else uses
- * them), apart from any that are also in an album of the owner's, which stay there. Nothing if it isn't one.
+ * them), apart from any that are also in an album of the owner's, which stay there. An event goes with its post, and
+ * if it was still to come, those invited are told it's off. Nothing if it isn't one.
  */
-export async function deletePost(env, postId) {
+export async function deletePost(env, origin, postId) {
   const db = env.DB;
   const post = await db.prepare("SELECT * FROM posts WHERE id = ? AND source = 'afterwrd'").bind(postId).first();
   if (!post) return;
+  const event = await eventGone(env, origin, post);
   const IN_POSTS = "album_id IN (SELECT id FROM albums WHERE role = 'posts')";
   const { results: going } = await db.prepare(`SELECT * FROM media WHERE post_id = ? AND ${IN_POSTS}`).bind(post.id).all();
   await db.batch([
@@ -174,6 +177,7 @@ export async function deletePost(env, postId) {
     db.prepare("UPDATE media SET post_id = NULL WHERE post_id = ?").bind(post.id),
     db.prepare("DELETE FROM polls WHERE post_id = ?").bind(post.id),
     db.prepare("DELETE FROM poll_votes WHERE post_id = ?").bind(post.id),
+    ...event,
     db.prepare("DELETE FROM posts WHERE id = ?").bind(post.id),
     ...photoCommentsGone(db, going),
     ...versionsGone(db),

@@ -9,6 +9,7 @@ import { MAX_POST_TEXT } from "./edits.js";
 import { HASH_RE } from "./media.js";
 import { callSite, siteOrigin } from "./peers.js";
 import { parsePoll } from "./polls.js";
+import { parseSharedEvent } from "./events.js";
 
 const text = (v, max) => (typeof v === "string" && v.length <= max ? v : null);
 const count = (n) => (Number.isSafeInteger(n) && n > 0 ? n : null);
@@ -89,6 +90,8 @@ export function parseNote(note, site, friendName, env = null) {
     ...parseEdits(note, created, MAX_POST_TEXT), // earlier words of a post written on afterwrd: no longer than it allows
     // Their poll, if the post asks one: how many chose what, and what the owner here chose. Never who.
     poll: note["afterwrd:poll"] === undefined ? null : parsePoll(note["afterwrd:poll"], env),
+    // Their event, if it's one (shown only to those they invited): who's coming, and the owner here's answer.
+    event: note["afterwrd:event"] === undefined ? null : parseSharedEvent(note["afterwrd:event"], env),
   };
 }
 
@@ -102,23 +105,37 @@ function parseActor(actor, site) {
 }
 
 /** A connected site's newest posts, for Home. */
-export function cleanFeed(data, site) {
+export function cleanFeed(data, site, env = null) {
   const actor = parseActor(data?.attributedTo, site);
   const items = Array.isArray(data?.orderedItems) ? data.orderedItems.slice(0, 50) : [];
-  return { ...actor, posts: items.map((n) => parseNote(n, site, actor.name)).filter(Boolean) };
+  return { ...actor, posts: items.map((n) => parseNote(n, site, actor.name, env)).filter(Boolean) };
 }
 
 const call = (connection, path) => callSite(connection.origin, path, { key: connection.their_key });
 
-export async function friendPosts(connection, page) {
+export async function friendPosts(connection, page, env = null) {
   const data = await call(connection, `/_peer/posts?page=${page}`);
   const items = Array.isArray(data?.orderedItems) ? data.orderedItems.slice(0, 100) : [];
   const { avatar, cover } = parseActor(data?.attributedTo, connection.origin);
   return {
     avatar, cover,
-    posts: items.map((n) => parseNote(n, connection.origin, connection.name)).filter(Boolean),
+    posts: items.map((n) => parseNote(n, connection.origin, connection.name, env)).filter(Boolean),
     paging: { page, total: count(data?.totalItems) ?? 0, hasNext: data?.["afterwrd:hasNext"] === true },
   };
+}
+
+/** One of their posts, with its comments; null if their site says it isn't there (or isn't shown to this one). */
+export async function friendPost(connection, key, env = null) {
+  let data;
+  try {
+    data = await call(connection, `/_peer/posts/${key}`);
+  } catch (error) {
+    if (error.status === 404) return null;
+    throw error;
+  }
+  const post = parseNote(data, connection.origin, connection.name, env);
+  if (post?.key !== key) throw new Error("Their site sent something unexpected.");
+  return post;
 }
 
 export async function friendAlbums(connection) {

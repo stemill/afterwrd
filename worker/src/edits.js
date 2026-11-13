@@ -13,8 +13,10 @@ export const MAX_POST_TEXT = 5000;
 const EARLIER_SHOWN = 20; // versions kept forever; this many shown (and sent to friends), the newest
 
 // SQL: post p (an alias) can still have its words changed at ?at: written here, new enough, nobody else has commented
-// on it, and nobody else has answered its poll. The owner's own comments and answers don't count.
+// on it, and nobody else has answered its poll. The owner's own comments and answers don't count. An event's words
+// change with the event instead (events.js).
 const POST_OPEN = (p) => `${p}.source = 'afterwrd' AND ${p}.created_at > ?at - ${EDIT_SECONDS}
+  AND NOT EXISTS (SELECT 1 FROM events e WHERE e.post_id = ${p}.id)
   AND (SELECT COUNT(*) FROM post_versions h WHERE h.post_id = ${p}.id) < ${MAX_EDITS}
   AND NOT EXISTS (SELECT 1 FROM comments o WHERE o.target = ${p}.key AND NOT (o.origin = 'site' AND o.author_id IS NOT NULL))
   AND NOT EXISTS (SELECT 1 FROM poll_votes v WHERE v.post_id = ${p}.id AND v.voter != 'site')`;
@@ -62,6 +64,7 @@ export async function editPost(env, postId, words) {
     EXISTS (SELECT 1 FROM polls q WHERE q.post_id = p.id) AS has_poll FROM posts p WHERE p.id = ? AND p.source = 'afterwrd'`)
     .bind(postId).first();
   if (!post) throw new Refusal("That post isn't there any more.", 404);
+  if (await db.prepare("SELECT 1 FROM events WHERE post_id = ?").bind(post.id).first()) throw new Refusal("Change an event with its own Change it.");
   if (text.length > MAX_POST_TEXT) throw new Refusal(`Posts can be up to ${MAX_POST_TEXT} characters.`);
   if (!text && post.has_poll) throw new Refusal("A poll needs its question.");
   if (!text && !post.has_photos) throw new Refusal("Write something: a post without photos needs words.");

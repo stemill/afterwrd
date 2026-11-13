@@ -19,6 +19,7 @@
 //                      POST …/<id>/facebook (name, or none=1): which person in the Facebook download they are,
 //                      POST …/ask (origin, group or introduction, back), GET|POST …/<id>/introduce (to, note),
 //                      POST …/introductions/<n>/dismiss
+import { friendGone } from "./events.js";
 import { safeNext } from "./auth.js";
 import { testingHere } from "./cloudflare.js";
 import { loadMembers } from "./membership.js";
@@ -452,6 +453,7 @@ export async function removeFriend(env, id) {
     db.prepare("DELETE FROM introductions WHERE connection_id = ? OR origin = ?").bind(connection.id, connection.origin),
     // Someone the owner removed can't ask again without a link (the owner still can).
     db.prepare("INSERT OR REPLACE INTO declined_asks (origin, declined_at) VALUES (?, ?)").bind(connection.origin, now()),
+    ...friendGone(db, connection.id),
   ]);
 }
 

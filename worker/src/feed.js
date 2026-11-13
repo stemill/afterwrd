@@ -5,6 +5,8 @@
 //   POST /_feed/comments/<connection>/<remote id>/delete       back (a form)
 //   POST /_feed/comments/<connection>/<remote id>/edit         text, back: change it (their site decides: edits.js)
 //   POST /_feed/vote                                           connection, target, choice…, back: answering their poll
+//   POST /_feed/answer                                         connection, target, answer, back: answering their event
+//                                                              (events.js)
 import { actorId, commentId, targetId } from "../public/static/activity.js";
 import { MAX_COMMENT } from "./archive/comments.js";
 import { safeNext } from "./auth.js";
@@ -14,6 +16,7 @@ import { callSite } from "./peers.js";
 import { html, now, Refusal, withoutKeys } from "./util.js";
 import { INBOX_JOIN } from "./notify.js";
 import { EDIT_SECONDS, elsewhereVersions, elsewhereVersionsGone } from "./edits.js";
+import { answerFriendEvent, keepFriendEvents } from "./events.js";
 
 // Home asks friends' sites for their newest posts when it opens. Each is a request, and the free plan allows 50 per
 // page, so with more friends than SITES it asks those whose notes (notify.js) say they've posted lately, newest
@@ -86,14 +89,14 @@ async function sitesToAsk(db, all) {
   return [...connections.filter((c) => posted.has(c.id)), ...turns.slice(0, SITES - posted.size)];
 }
 
-export async function loadFeed(db, ownOrigin) {
+export async function loadFeed(db, ownOrigin, env = null) {
   const { results: connections } = await db.prepare(`SELECT * FROM connections WHERE connected_at IS NOT NULL
     AND approved_at IS NOT NULL ORDER BY name COLLATE NOCASE`).all();
   const asking = await sitesToAsk(db, connections);
   const replies = await Promise.all(asking.map(async (connection) => {
     try {
       const feed = await callSite(connection.origin, "/_peer/feed", { key: connection.their_key });
-      return { connection, feed: cleanFeed(feed, connection.origin) };
+      return { connection, feed: cleanFeed(feed, connection.origin, env) };
     } catch (error) {
       return { connection, error };
     }
@@ -112,6 +115,8 @@ export async function loadFeed(db, ownOrigin) {
     for (const r of renamed) r.connection.name = r.feed.name;
   }
   for (const r of replies) if (r.feed) r.connection.avatar = r.feed.avatar;
+  // Their events the owner's invited to: copies kept up to date for the calendar (events.js).
+  for (const r of replies) if (r.feed) await keepFriendEvents(db, r.connection, r.feed.posts);
   const pictures = replies.map((r) => r.feed?.avatar && rememberPicture(db, r.connection, r.feed.avatar)).filter(Boolean);
   if (pictures.length) await db.batch(pictures);
   // What Home shows, with each friend as it's shown: without the keys to their site (util.js pageData).
@@ -141,6 +146,15 @@ export async function handleFeed(request, env, url) {
         connection: form.get("connection"), target: String(form.get("target") ?? ""), text: String(form.get("text") ?? ""),
       });
       if (made) back.hash = `r${made.connection}-${made.id}`;
+      return Response.redirect(back.href, 303);
+    }
+    if (url.pathname === "/_feed/answer") {
+      const connection = String(form.get("connection") ?? "");
+      const target = String(form.get("target") ?? "");
+      const friend = await connectionById(env.DB, connection);
+      if (!friend) throw new Refusal("You're no longer connected with them.");
+      await answerFriendEvent(env, friend, target, String(form.get("answer") ?? ""));
+      back.hash ||= `f${friend.id}-${TARGET_RE.test(target) ? target : ""}`;
       return Response.redirect(back.href, 303);
     }
     if (url.pathname === "/_feed/vote") {

@@ -52,7 +52,7 @@
 import { actorId, CONTEXT, editedFields, fileUrl, groupId, groupPostId, iso, tidy } from "../public/static/activity.js";
 import pkg from "../package.json";
 import { MAX_COMMENT } from "./archive/comments.js";
-import { ANSWERS, eventChanged, eventObject, FINISHED_SQL, finishedAt, parseEvent } from "./calendar.js";
+import { ANSWERS, eventChanged, eventObject, finishedAt, GROUP_FINISHED_SQL, occurrenceOn, parseEvent, ruleDates } from "./calendar.js";
 import { choicesMask, isOpen, OPEN_SQL, pollFromQuestion, pollObject, readPoll, tally } from "./polls.js";
 import { signedLink } from "./friends.js";
 import { mediaStore } from "./media.js";
@@ -131,14 +131,30 @@ async function photoObject(env, site, f) {
   };
 }
 
-/** An event, with who's going (members only) and, for the member asking, their own answer. */
+/**
+ * An event, with who's going (members only) and, for the member asking, their own answer. A repeating one has those
+ * for each date that has any (`afterwrd:dates`), and none for the series as a whole.
+ */
 function eventWithAnswers(e, answers, member) {
-  const people = (answer) => answers.filter((a) => a.post_id === e.post_id && a.answer === answer)
-    .map((a) => ({ type: "Person", id: actorId(a.origin), name: a.name }));
-  return {
-    ...eventObject(e), "afterwrd:going": people("going"), "afterwrd:maybe": people("maybe"), "afterwrd:cantGo": people("no"),
-    "afterwrd:answer": answers.find((a) => a.post_id === e.post_id && a.origin === member.origin)?.answer,
+  const mine = answers.filter((a) => a.post_id === e.post_id);
+  const lists = (date) => {
+    const people = (answer) => mine.filter((a) => a.date === date && a.answer === answer).map((a) => ({ type: "Person", id: actorId(a.origin), name: a.name }));
+    return { "afterwrd:going": people("going"), "afterwrd:maybe": people("maybe"), "afterwrd:cantGo": people("no"),
+      "afterwrd:answer": mine.find((a) => a.date === date && a.origin === member.origin)?.answer };
   };
+  if (!e.rrule) return { ...eventObject(e), ...lists("") };
+  const dates = new Set(ruleDates(e));
+  const answered = [...new Set(mine.map((a) => a.date))].filter((d) => dates.has(d)).sort();
+  return { ...eventObject(e), "afterwrd:dates": answered.map((date) => ({ "afterwrd:date": date, ...lists(date) })) };
+}
+
+/** The dates called off one at a time, for these events (rows of group_events), as each one's `skipped`. */
+async function withSkips(db, events) {
+  const repeating = events.filter((e) => e.rrule);
+  if (!repeating.length) return events;
+  const { results } = await db.prepare("SELECT post_id, date FROM group_event_skips WHERE post_id IN (SELECT value FROM json_each(?)) ORDER BY date")
+    .bind(JSON.stringify(repeating.map((e) => e.post_id))).all();
+  return events.map((e) => ({ ...e, skipped: results.filter((x) => x.post_id === e.post_id).map((x) => x.date) }));
 }
 
 /**
@@ -157,7 +173,7 @@ async function groupNotes(env, site, group, posts, member, comments = PAGE_COMME
       FROM group_comments c WHERE post_id IN (${marks})) WHERE n <= ? ORDER BY created_at, id`).bind(...ids, comments),
     db.prepare(`SELECT post_id, COUNT(*) AS n FROM group_comments WHERE post_id IN (${marks}) GROUP BY post_id`).bind(...ids),
     db.prepare(`SELECT * FROM group_events WHERE post_id IN (${marks})`).bind(...ids),
-    db.prepare(`SELECT a.post_id, a.origin, a.answer, m.name FROM group_answers a
+    db.prepare(`SELECT a.post_id, a.origin, a.date, a.answer, m.name FROM group_answers a
       JOIN group_members m ON m.origin = a.origin AND m.approved_at IS NOT NULL
       WHERE a.post_id IN (${marks}) ORDER BY a.answered_at, m.name`).bind(...ids),
     db.prepare(`SELECT * FROM group_polls WHERE post_id IN (${marks})`).bind(...ids),
@@ -166,13 +182,14 @@ async function groupNotes(env, site, group, posts, member, comments = PAGE_COMME
       WHERE v.post_id IN (${marks}) ORDER BY v.voted_at, m.name`).bind(...ids),
   ]);
   const author = (row) => ({ type: "Person", id: actorId(row.origin), name: row.author_name });
+  const kept = await withSkips(db, events.results);
   // What edited posts and comments said before (edits.js).
   const postsEarlier = await groupPostVersions(db, posts.filter((p) => p.edited_at).map((p) => p.id));
   const commentsEarlier = await groupCommentVersions(db, newest.results.filter((c) => c.edited_at).map((c) => c.id));
   return Promise.all(posts.map(async (p) => {
     const address = groupPostId(site, group.id, p.id);
     const thread = newest.results.filter((c) => c.post_id === p.id);
-    const event = events.results.find((e) => e.post_id === p.id);
+    const event = kept.find((e) => e.post_id === p.id);
     const poll = polls.results.find((q) => q.post_id === p.id);
     return {
       type: "Note", id: address, attributedTo: author(p), context: groupId(site, group.id), published: iso(p.created_at),
@@ -218,7 +235,7 @@ async function groupPost(env, site, group, member, id, comments = POST_COMMENTS)
 async function groupEvents(env, site, group, member, past) {
   const db = env.DB;
   const { results } = await db.prepare(`SELECT p.* FROM group_events e JOIN group_posts p ON p.id = e.post_id AND p.group_id = ?
-    WHERE ${FINISHED_SQL} ${past ? "<" : ">="} ? ORDER BY e.starts_at ${past ? "DESC" : "ASC"}, p.id LIMIT ?`)
+    WHERE ${GROUP_FINISHED_SQL} ${past ? "<" : ">="} ? ORDER BY e.starts_at ${past ? "DESC" : "ASC"}, p.id LIMIT ?`)
     .bind(group.id, now(), past ? PAST : UPCOMING).all();
   return tidy({
     "@context": CONTEXT, type: "OrderedCollection", context: await groupObject(db, site, group, member), totalItems: results.length,
@@ -317,6 +334,7 @@ async function createPost(env, group, member, { text, photos, event = null, poll
   if (poll && event) return { error: "A post can be an event or a poll, not both.", status: 400 };
   if (!text && !photos.length && !event) return { error: "Write something or add a photo.", status: 400 };
   if (event && finishedAt(event) < now()) return { error: "That event would already be over.", status: 400 };
+  if (event?.rrule && firstOver(event, now())) return { error: "Its first date would already be over.", status: 400 };
   const at = now();
   const bytes = photos.reduce((n, f) => n + f.size + THUMB_BYTES, 0);
   const saved = await db.prepare(`INSERT INTO group_posts (group_id, origin, author_name, text, created_at)
@@ -335,8 +353,9 @@ async function createPost(env, group, member, { text, photos, event = null, poll
     const rows = [
       ...photos.map((f) => db.prepare(`INSERT INTO group_photos (post_id, hash, thumb_hash, width, height, size)
         VALUES (?, ?, ?, ?, ?, ?)`).bind(id, f.hash, f.thumb_hash, f.width, f.height, f.size + THUMB_BYTES)),
-      ...(event ? [db.prepare(`INSERT INTO group_events (post_id, title, starts_at, ends_at, all_day, time_zone, place)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`).bind(id, event.title, event.starts_at, event.ends_at, event.all_day, event.time_zone, event.place)] : []),
+      ...(event ? [db.prepare(`INSERT INTO group_events (post_id, title, starts_at, ends_at, all_day, time_zone, place, rrule, last_ends_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(id, event.title, event.starts_at, event.ends_at, event.all_day, event.time_zone, event.place,
+        event.rrule ?? null, event.rrule ? finishedAt(event) : null)] : []),
       ...(poll ? [db.prepare("INSERT INTO group_polls (post_id, options, multiple, closes_at) VALUES (?, ?, ?, ?)")
         .bind(id, JSON.stringify(poll.options), poll.multiple, poll.closes_at)] : []),
     ];
@@ -366,6 +385,7 @@ async function deletePost(env, site, group, member, id) {
     db.prepare("DELETE FROM group_comments WHERE post_id = ?").bind(post.id),
     db.prepare("DELETE FROM group_photos WHERE post_id = ?").bind(post.id),
     db.prepare("DELETE FROM group_answers WHERE post_id = ?").bind(post.id),
+    db.prepare("DELETE FROM group_event_skips WHERE post_id = ?").bind(post.id),
     db.prepare("DELETE FROM group_events WHERE post_id = ?").bind(post.id),
     db.prepare("DELETE FROM group_poll_votes WHERE post_id = ?").bind(post.id),
     db.prepare("DELETE FROM group_polls WHERE post_id = ?").bind(post.id),
@@ -489,24 +509,46 @@ async function deleteChatMessage(env, site, group, member, address) {
 
 // --- events -------------------------------------------------------------------------------------------------------------
 
-/** An event's post and the event, if it's in this group. */
+/** An event's post and the event (with the dates of a repeating one called off), if it's in this group. */
 async function findEvent(db, group, id) {
-  const row = await db.prepare(`SELECT p.*, e.title, e.starts_at, e.ends_at, e.all_day, e.time_zone, e.place, e.cancelled_at, e.changed_at
-    FROM group_events e JOIN group_posts p ON p.id = e.post_id WHERE e.post_id = ? AND p.group_id = ?`).bind(Number(id), group.id).first();
-  return row && { post: row, event: { post_id: row.id, title: row.title, starts_at: row.starts_at, ends_at: row.ends_at,
-    all_day: row.all_day, time_zone: row.time_zone, place: row.place, cancelled_at: row.cancelled_at } };
+  const row = await db.prepare(`SELECT p.*, e.title, e.starts_at, e.ends_at, e.all_day, e.time_zone, e.place, e.cancelled_at, e.changed_at,
+    e.rrule FROM group_events e JOIN group_posts p ON p.id = e.post_id WHERE e.post_id = ? AND p.group_id = ?`).bind(Number(id), group.id).first();
+  if (!row) return null;
+  const [event] = await withSkips(db, [{ post_id: row.id, title: row.title, starts_at: row.starts_at, ends_at: row.ends_at,
+    all_day: row.all_day, time_zone: row.time_zone, place: row.place, cancelled_at: row.cancelled_at, rrule: row.rrule }]);
+  return { post: row, event };
 }
 
-/** A member says whether they're going. Returns an error message, or null. */
-async function answerEvent(db, group, member, id, answer) {
+/**
+ * Which date of an event `date` names: for a repeating one, one of its dates (as calendar.js occurrences gives it);
+ * for a one-off, '' (or nothing). Returns { date: the occurrence } or { error }.
+ */
+function whichDate(event, date) {
+  if (!event.rrule) return date === undefined || date === null || date === "" ? { date: occurrenceOn(event, "") } : { error: "That event doesn't repeat." };
+  const found = typeof date === "string" && occurrenceOn(event, date);
+  return found ? { date: found } : { error: date ? "That isn't one of its dates." : "This event repeats: say which date. (Your site may need updating.)" };
+}
+
+/** When one date of an event (calendar.js occurrences) is over. */
+const dateOver = (event, o) => finishedAt({ ...event, rrule: null, starts_at: o.starts_at, ends_at: o.ends_at });
+
+/** Whether a repeating event's first date is over at `at`. */
+const firstOver = (event, at) => dateOver(event, occurrenceOn(event, ruleDates(event)[0])) < at;
+
+/** A member says whether they're going (to one date, if it repeats). Returns an error message, or null. */
+async function answerEvent(db, group, member, id, answer, date) {
   if (!ANSWERS.includes(answer)) return "Going, maybe, or can't go?";
   const found = await findEvent(db, group, id);
   if (!found) return "That event isn't there any more.";
   if (found.event.cancelled_at) return "That event has been called off.";
-  if (finishedAt(found.event) < now()) return "That event is over.";
-  await db.prepare(`INSERT INTO group_answers (post_id, origin, answer, answered_at) SELECT ?1, ?3, ?4, ?2 WHERE ${STILL_MEMBER_SQL}
-    ON CONFLICT (post_id, origin) DO UPDATE SET answer = excluded.answer, answered_at = excluded.answered_at`)
-    .bind(found.post.id, now(), member.origin, answer).run();
+  const which = whichDate(found.event, date);
+  if (which.error) return which.error;
+  if (which.date.cancelled) return "That date has been called off.";
+  if (dateOver(found.event, which.date) < now()) return "That event is over.";
+  await db.prepare(`INSERT INTO group_answers (post_id, origin, date, answer, answered_at) SELECT ?1, ?3, ?5, ?4, ?2 WHERE ${STILL_MEMBER_SQL}
+    AND NOT EXISTS (SELECT 1 FROM group_event_skips WHERE post_id = ?1 AND date = ?5)
+    ON CONFLICT (post_id, origin, date) DO UPDATE SET answer = excluded.answer, answered_at = excluded.answered_at`)
+    .bind(found.post.id, now(), member.origin, answer, which.date.date).run();
   return null;
 }
 
@@ -523,6 +565,8 @@ async function editEvent(env, site, group, member, id, { text, event }) {
   const at = now();
   if (finishedAt(found.event) < at) return "That event is over.";
   if (finishedAt(event) < at) return "That event would already be over.";
+  // A repeating one can't be moved to start on a day that's already over (its time of day can change, under way or not).
+  if (event.rrule && ruleDates(event)[0] !== ruleDates(found.event)[0] && firstOver(event, at)) return "Its first date would already be over.";
   const changed = eventChanged(found.event, event);
   // Each change sends a note to everyone going: not more than one every few minutes, checked and recorded in one
   // statement, so requests sent together can't all get through.
@@ -532,11 +576,20 @@ async function editEvent(env, site, group, member, id, { text, event }) {
     if (!ok) return "You've just changed this event. Try again in a few minutes.";
   }
   await db.batch([
-    db.prepare(`UPDATE group_events SET title = ?, starts_at = ?, ends_at = ?, all_day = ?, time_zone = ?, place = ?
-      WHERE post_id = ?`).bind(event.title, event.starts_at, event.ends_at, event.all_day, event.time_zone, event.place, found.post.id),
+    db.prepare(`UPDATE group_events SET title = ?, starts_at = ?, ends_at = ?, all_day = ?, time_zone = ?, place = ?, rrule = ?, last_ends_at = ?
+      WHERE post_id = ?`).bind(event.title, event.starts_at, event.ends_at, event.all_day, event.time_zone, event.place, event.rrule ?? null,
+      event.rrule ? finishedAt(event) : null, found.post.id),
     db.prepare("UPDATE group_posts SET text = ? WHERE id = ?").bind(text || null, found.post.id),
   ]);
-  if (changed) await notifyEventChange(env, site, group, found.post, event, { kind: "changed", name: member.name, from: member.origin });
+  if (changed) {
+    await notifyEventChange(env, site, group, found.post, { ...event, skipped: found.event.skipped }, { kind: "changed", name: member.name, from: member.origin });
+    // Then (those going have been told) answers and dates called off that are for dates it no longer has go.
+    const dates = JSON.stringify(ruleDates(event));
+    await db.batch([
+      db.prepare("DELETE FROM group_answers WHERE post_id = ? AND date NOT IN (SELECT value FROM json_each(?))").bind(found.post.id, dates),
+      db.prepare("DELETE FROM group_event_skips WHERE post_id = ? AND date NOT IN (SELECT value FROM json_each(?))").bind(found.post.id, dates),
+    ]);
+  }
   return null;
 }
 
@@ -582,13 +635,27 @@ async function closePoll(db, group, member, id) {
   return null;
 }
 
-/** Calls an event off: whoever added it, or an admin (as for deleting it). Those going are told. */
-async function cancelEvent(env, site, group, member, id) {
+/**
+ * Calls an event off (or, with `date`, one date of a repeating one): whoever added it, or an admin (as for deleting
+ * it). Those going, or who might, are told (to that date, for one date).
+ */
+async function cancelEvent(env, site, group, member, id, date) {
   const db = env.DB;
   const found = await findEvent(db, group, id);
   if (!found || !(await mayDelete(db, member, found.post.origin))) return "That isn't yours to call off.";
   if (found.event.cancelled_at) return null;
   const at = now();
+  if (date !== undefined && date !== null && date !== "") {
+    const which = whichDate(found.event, date);
+    if (which.error) return which.error;
+    if (dateOver(found.event, which.date) < at) return "That date is over.";
+    // Only the first of requests sent together calls it off, and tells people.
+    if (!(await db.prepare("INSERT INTO group_event_skips (post_id, date, cancelled_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING RETURNING post_id")
+      .bind(found.post.id, which.date.date, at).first())) return null;
+    await notifyEventChange(env, site, group, found.post, { ...found.event, skipped: [...found.event.skipped, which.date.date] },
+      { kind: "cancelled", name: member.name, from: member.origin, date: which.date.date });
+    return null;
+  }
   if (finishedAt(found.event) < at) return "That event is over.";
   // Only the first of requests sent together calls it off, and tells people.
   if (!(await db.prepare("UPDATE group_events SET cancelled_at = ? WHERE post_id = ? AND cancelled_at IS NULL RETURNING post_id")
@@ -634,7 +701,7 @@ async function close(env, group, owner) {
   const { results: members } = await db.prepare("SELECT * FROM group_members WHERE id != ?").bind(owner.id).all();
   const { results: photos } = await db.prepare("SELECT hash, thumb_hash FROM group_photos").all();
   await db.batch([
-    ...["group_chat", "group_comments", "group_comment_versions", "group_photos", "group_answers", "group_poll_votes", "group_polls",
+    ...["group_chat", "group_comments", "group_comment_versions", "group_photos", "group_answers", "group_event_skips", "group_poll_votes", "group_polls",
       "group_events", "group_posts", "group_post_versions", "group_links", "group_members", "groups"]
       .map((table) => db.prepare(`DELETE FROM ${table}`)),
     // So it can't be claimed again, should its Worker outlast this (its owner's site deletes it next).
@@ -793,7 +860,8 @@ export async function handleGroupApi(request, env, url) {
     if (asked.error) return json({ error: asked.error }, 400);
     const made = await createPost(env, group, member, { text: cleanText(note.content), photos, event, poll: asked.poll });
     return made.error ? json({ error: made.error }, made.status)
-      : json({ id: groupPostId(site, group.id, made.id), "afterwrd:poll": asked.poll ? true : undefined });
+      : json({ id: groupPostId(site, group.id, made.id), "afterwrd:poll": asked.poll ? true : undefined,
+        "afterwrd:rrule": event?.rrule ? true : undefined });
   }
   if (route === "GET /_group/events") return json(await groupEvents(env, site, group, member, url.searchParams.get("when") === "past"));
   if (route === "POST /_group/chat" || route === "POST /_group/chat/delete") {
@@ -816,9 +884,9 @@ export async function handleGroupApi(request, env, url) {
     const body = await request.json().catch(() => ({}));
     let trouble;
     if (ev[2] === "answer") {
-      trouble = await answerEvent(db, group, member, ev[1], body?.answer);
+      trouble = await answerEvent(db, group, member, ev[1], body?.answer, body?.date);
     } else if (ev[2] === "cancel") {
-      trouble = await cancelEvent(env, site, group, member, ev[1]);
+      trouble = await cancelEvent(env, site, group, member, ev[1], body?.date);
     } else {
       const event = parseEvent(body?.["afterwrd:event"]);
       trouble = !event || event.cancelled_at ? "Unexpected event details."

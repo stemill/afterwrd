@@ -340,28 +340,29 @@ const notes = (state) => n(state, "group_inbox WHERE kind IS NOT NULL");
 const inboxes = () => [stateA, stateB, stateC].map((st) => n(st, "group_inbox")).join();
 const quiet = inboxes();
 await ann.goto(`${A}/groups/${annGroup}/calendar`);
-check("the Calendar starts empty, with adding an event open", (await text(ann)).includes("Nothing coming up") && await ann.$eval("details.add-event", (d) => d.open));
+check("the Calendar starts empty, with adding an event open", (await text(ann)).includes("Nothing this month.") && await ann.$eval("details.add-event", (d) => d.open)
+  && Boolean(await ann.$(".calendar .cal-grid")));
 await addEvent(ann, { title: "Book swap", start_date: "2027-06-12", start_time: "19:00", end_time: "21:00", place: "Ann's house", text: "Bring a book" });
 const swap = sql(stateG, "SELECT * FROM group_events")[0];
 check("Ann adds an event, in her time zone", swap?.title === "Book swap" && swap.time_zone === "Europe/London"
   && swap.starts_at === Date.UTC(2027, 5, 12, 18) / 1000 && swap.ends_at === Date.UTC(2027, 5, 12, 20) / 1000, JSON.stringify(swap));
 check("…lands on its page, saying when and where", (await text(ann)).includes("Sat 12 Jun 2027, 19:00–21:00") && (await text(ann)).includes("Ann's house"), (await text(ann)).slice(0, 400));
-check("…and she's going", await pressed(ann, `gp${swap.post_id}`) === "going" && n(stateA, "group_plans WHERE answer = 'going'") === 1);
+check("…and she's going", await pressed(ann, `gp${swap.post_id}`) === "going" && n(stateA, "events_elsewhere WHERE answer = 'going'") === 1);
 await pause(2500);
 check("no one is sent anything about a new event", inboxes() === quiet, `${quiet} -> ${inboxes()}`);
 
-await bob.goto(`${B}/groups/${bobGroup}/calendar`);
-check("Bob's Calendar lists it under its month", (await text(bob)).includes("June 2027") && (await text(bob)).includes("Book swap"));
+await bob.goto(`${B}/groups/${bobGroup}/calendar?month=2027-06`);
+check("Bob's Calendar lists it under its month", (await text(bob)).includes("June 2027") && (await text(bob, ".calendar")).includes("Book swap"));
 await answer(bob, `gp${swap.post_id}`, "going");
 check("Bob says he's going", await pressed(bob, `gp${swap.post_id}`) === "going" && n(stateG, `group_answers WHERE origin = '${B}' AND answer = 'going'`) === 1);
 await cat.goto(`${C}/groups/${catGroup}`);
 check("the event shows in Posts too", (await text(cat)).includes("Book swap") && (await text(cat)).includes("2 going"));
 await answer(cat, `gp${swap.post_id}`, "maybe");
-check("Cat might go", n(stateC, "group_plans WHERE answer = 'maybe'") === 1);
+check("Cat might go", n(stateC, "events_elsewhere WHERE answer = 'maybe'") === 1);
 await pause(2500);
 check("…and no one is told who's going", inboxes() === quiet);
-await bob.goto(`${B}/groups`);
-check("Bob's Groups page shows it coming up", (await text(bob, ".coming-up")).includes("Book swap"));
+await bob.goto(`${B}/events?month=2027-06`);
+check("Bob's Events calendar shows it, as a group's", (await bob.$$eval(".cal-event.cal-group", (es) => es.map((e) => e.textContent).join())).includes("Book swap"));
 await cat.goto(`${C}/groups/${catGroup}/posts/${swap.post_id}`);
 const who = await text(cat, ".event .answered");
 check("the event's page names who's going", who.includes("Ann Example") && who.includes("Bob Example") && who.includes("You"), who);
@@ -380,13 +381,13 @@ check("changing the time tells Bob and Cat", await waitFor(() => notes(stateB) =
 check("…and not Ann, who changed it", notes(stateA) === 0);
 check("changing it again straight away is refused", (await call(G, `/_group/events/${swap.post_id}/edit`, sql(stateA, "SELECT their_key FROM groups")[0].their_key,
   { type: "Note", content: "", "afterwrd:event": { type: "Event", name: "Book swap", startTime: "2027-06-12T20:00:00Z", "afterwrd:timeZone": "Europe/London" } })).status === 400);
-check("Bob's copy of his plans is brought up to date", sql(stateB, "SELECT starts_at FROM group_plans")[0]?.starts_at === Date.UTC(2027, 5, 12, 19) / 1000);
+check("Bob's copy of his plans is brought up to date", sql(stateB, "SELECT starts_at FROM events_elsewhere")[0]?.starts_at === Date.UTC(2027, 5, 12, 19) / 1000);
 await bob.goto(`${B}/activity`);
 check("Bob's Notifications say what changed", (await text(bob)).includes("Ann Example changed an event you're going to in Book club (2026)")
   && (await text(bob)).includes("Sat 12 Jun 2027, 20:00–22:00"), (await text(bob)).slice(0, 400));
 await cat.goto(`${C}/groups/${catGroup}/posts/${swap.post_id}`);
 await answer(cat, `gp${swap.post_id}`, "no");
-check("Cat can't go after all: her plans drop it", n(stateC, "group_plans") === 0);
+check("Cat can't go after all: her plans drop it", n(stateC, "events_elsewhere") === 0);
 const ics = await bob.evaluate((p) => fetch(p).then(async (r) => ({ type: r.headers.get("Content-Type"), body: await r.text() })),
   `/groups/${bobGroup}/posts/${swap.post_id}/event.ics`);
 check("Add to my calendar gives a calendar file", ics.type.startsWith("text/calendar") && ics.body.includes("SUMMARY:Book swap")
@@ -416,9 +417,9 @@ check("a group can't send notes about an event Cat isn't going to", notes(stateC
 check("…nor one that isn't an event", (await call(B, "/_member/notify", groupKeyForBob, { ...forged, object: { ...forged.object, "afterwrd:event": { type: "Event" } } })).status === 400);
 // Only Cat's own answer, given from her site, puts an event in her plans: the group saying she's going doesn't.
 sql(stateG, `INSERT INTO group_answers (post_id, origin, answer, answered_at) VALUES (${swap.post_id}, '${C}', 'going', 1)
-  ON CONFLICT (post_id, origin) DO UPDATE SET answer = 'going'`);
+  ON CONFLICT (post_id, origin, date) DO UPDATE SET answer = 'going'`);
 await cat.goto(`${C}/groups/${catGroup}/calendar`);
-check("a group saying Cat's going doesn't put it in her plans", n(stateC, "group_plans") === 0);
+check("a group saying Cat's going doesn't put it in her plans", n(stateC, "events_elsewhere") === 0);
 sql(stateG, `UPDATE group_answers SET answer = 'no' WHERE origin = '${C}' AND post_id = ${swap.post_id}`);
 // A post Bob wrote that wasn't an event isn't made one of his by the group.
 sql(stateG, `INSERT INTO group_events (post_id, title, starts_at, all_day, time_zone) VALUES (${bobPost}, 'Forged party', ${Date.UTC(2027, 7, 1) / 1000}, 1, 'Europe/London')`);
@@ -438,7 +439,7 @@ await Promise.all([settled(ann), ann.click(".event form[action$='/cancel'] butto
 check("Ann calls it off", Boolean(sql(stateG, `SELECT cancelled_at FROM group_events WHERE post_id = ${quiz.post_id}`)[0].cancelled_at)
   && (await text(ann)).includes("Called off"));
 check("…and Bob is told", await waitFor(() => notes(stateB) === 2));
-check("…and his plans say so", Boolean(sql(stateB, `SELECT cancelled_at FROM group_plans WHERE post_id = ${quiz.post_id}`)[0]?.cancelled_at));
+check("…and his plans say so", Boolean(sql(stateB, `SELECT cancelled_at FROM events_elsewhere WHERE post_id = ${quiz.post_id}`)[0]?.cancelled_at));
 await bob.goto(`${B}/activity`);
 check("Bob's Notifications say it's off", (await text(bob)).includes("Ann Example called off an event you were going to"));
 await ann.setViewport({ width: 390, height: 844 });
@@ -562,7 +563,7 @@ check("Ann takes Bob's admin role back", (await bob.$$eval(".member-list form:no
 await Promise.all([bob.waitForNavigation(), bob.click('form[action$="/leave"] button')]);
 check("Bob leaves", n(stateB, "groups") === 0 && n(stateG, `group_members WHERE origin = '${B}'`) === 0);
 check("…keeping his own copies of his posts", sql(stateB, "SELECT kind FROM group_mine").every((r) => r.kind === "post"));
-check("…and forgetting his plans there", n(stateB, "group_plans") === 0);
+check("…and forgetting his plans there", n(stateB, "events_elsewhere") === 0);
 check("…and the group forgets his answers, so rejoining starts afresh", n(stateG, `group_answers WHERE origin = '${B}'`) === 0);
 check("…which stays in the group", n(stateG, `group_posts WHERE id = ${bobPost}`) === 1);
 await ann.goto(`${A}/groups/${annGroup}/members`);
