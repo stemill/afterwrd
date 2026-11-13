@@ -181,12 +181,12 @@ await bob.goto(`${B}/groups/${bobGroup}`);
 let bobCards = await cards(bob);
 check("Bob reads the group from his site", bobCards.length === 1 && bobCards[0].who === "Ann Example" && bobCards[0].text === "Welcome, everyone", JSON.stringify(bobCards));
 check("…with its name and members", (await text(bob)).includes("Book club") && (await text(bob)).includes("3 members"));
-await postInGroup(bob, "Started the first book", [`${fixtures}/photo1.jpg`]);
+await postInGroup(bob, "Started the first book", [`${fixtures}/photo1.jpg`, `${fixtures}/big.jpg`]);
 const photo = sql(stateG, "SELECT hash, thumb_hash FROM group_photos")[0];
 check("Bob's photo is kept on the group's Worker", Boolean(photo));
 check("…and not left behind on his site", (await bob.evaluate((h) => fetch(`/files/${h}`, { cache: "no-store" }).then((r) => r.status), photo?.hash)) === 404);
 bobCards = await cards(bob);
-check("Bob's post shows as his, with the photo", bobCards[0]?.who === "You" && bobCards[0].photos === 1 && bobCards[0].canDelete, JSON.stringify(bobCards[0]));
+check("Bob's post shows as his, with the photos", bobCards[0]?.who === "You" && bobCards[0].photos === 2 && bobCards[0].canDelete, JSON.stringify(bobCards[0]));
 check("Bob, an admin, isn't offered deleting Ann's post", bobCards[1]?.who === "Ann Example" && !bobCards[1].canDelete);
 await bob.waitForFunction(() => document.querySelector("article.in-group .collage img")?.complete, { timeout: 15_000 });
 check("the photo loads from the group's Worker", await bob.$eval("article.in-group .collage img", (i) => i.naturalWidth > 0 && i.src.startsWith("http://localhost:8790/files/")));
@@ -196,6 +196,21 @@ await bob.screenshot({ path: `${OUT}/group-phone.png`, fullPage: true });
 await bob.setViewport({ width: 1280, height: 800 });
 const bobPost = sql(stateG, `SELECT id FROM group_posts WHERE origin = '${B}'`)[0].id;
 const annPost = sql(stateG, `SELECT id FROM group_posts WHERE origin = '${A}'`)[0].id;
+// A photo opened from a group's post is among that post's photos, and ✕ goes back to the post where it was.
+await bob.goto(`${B}/groups/${bobGroup}`);
+await Promise.all([bob.waitForNavigation(), bob.click(`#gp${bobPost} .collage a.tile:nth-of-type(2)`)]);
+const groupInPost = await bob.evaluate(() => ({ counter: document.querySelector(".counter")?.textContent, close: document.getElementById("close").getAttribute("href"),
+  prev: document.getElementById("prev")?.getAttribute("href"), next: Boolean(document.getElementById("next")),
+  shown: document.querySelector(".stage img")?.naturalWidth > 0, post: document.querySelector(".info article.in-group .text")?.textContent }));
+check("a photo opened from a group's post is among that post's photos", groupInPost.counter === "2 / 2" && !groupInPost.next
+  && groupInPost.prev?.startsWith(`/groups/${bobGroup}/posts/${bobPost}/photos/`) && groupInPost.prev.includes("?back=")
+  && groupInPost.post === "Started the first book", JSON.stringify(groupInPost));
+check("…and ✕ goes back to the post where it was", groupInPost.close === `/groups/${bobGroup}#gp${bobPost}`, groupInPost.close);
+await Promise.all([bob.waitForNavigation(), bob.click("#prev")]);
+check("…and stays with the post going back a photo", (await bob.$eval(".counter", (c) => c.textContent)) === "1 / 2"
+  && (await bob.$eval("#close", (a) => a.getAttribute("href"))) === groupInPost.close);
+await bob.goto(`${B}${groupInPost.prev.replace(/back=[^&]*/, `back=${encodeURIComponent("//evil.example/")}`)}`);
+check("…but never back to another site", (await bob.$eval("#close", (a) => a.getAttribute("href"))) === "/");
 
 // Changing words in a group (edits.js, on the group's Worker): only the writer, for 15 minutes, and until someone else
 // comments. The writer's site keeps its own record.

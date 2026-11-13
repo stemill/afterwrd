@@ -235,7 +235,9 @@
     const region = form.closest("[data-region]");
     const removing = form.dataset.inplace === "remove";
     const nothingToRedraw = !removing && !region?.id;
-    const thisPagesPost = removing && region?.dataset.region === location.pathname; // deleted: the site says where next
+    // Deleted from its own page, or one of its photos': the site says where next.
+    const thisPagesPost = removing && Boolean(region?.dataset.region)
+      && (location.pathname === region.dataset.region || location.pathname.startsWith(`${region.dataset.region}/`));
     if (!region || nothingToRedraw || thisPagesPost) return; // sent the ordinary way
     e.preventDefault();
     // One thing at a time in each part: each send redraws it, so a second would land on a copy that's gone.

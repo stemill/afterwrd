@@ -72,7 +72,7 @@ const ann = await owner(A, "Ann Example");
 const bob = await owner(B, "Bob Example");
 check("both sites set up and import", !(await importZip(ann, A)) && !(await importZip(bob, B)));
 await compose(ann, A, "Ann's news from site A");
-await compose(bob, B, "Bob's holiday", [`${fixtures}/photo1.jpg`]);
+await compose(bob, B, "Bob's holiday", [`${fixtures}/photo1.jpg`, `${fixtures}/big.jpg`]);
 
 // Before connecting.
 await ann.goto(`${A}/`);
@@ -132,8 +132,24 @@ check("Bob's Feed has Ann's post, and only her afterwrd post", bobFeed.length ==
 await ann.goto(`${A}/`);
 check("Home shows Ann's own posts and Bob's together", Boolean(await ann.$("article.own")) && Boolean(await ann.$("article.from-friend")));
 let annFeed = await feedCards(ann);
-check("Ann's Feed has Bob's post with its photo", annFeed.length === 1 && annFeed[0].who === "Bob Example" && annFeed[0].photos === 1, JSON.stringify(annFeed));
+check("Ann's Feed has Bob's post with its photos", annFeed.length === 1 && annFeed[0].who === "Bob Example" && annFeed[0].photos === 2, JSON.stringify(annFeed));
 await ann.waitForFunction(() => document.querySelector("article.from-friend .collage img")?.complete, { timeout: 15_000 });
+// Opened from his post, a photo of Bob's is among that post's photos (not his "Posted on afterwrd" album), and ✕ goes
+// back to the post on Home. Worked out on Ann's site, so it's the same whatever version Bob's is.
+await Promise.all([ann.waitForNavigation(), ann.click("article.from-friend .collage a.tile:nth-of-type(2)")]);
+const friendInPost = await ann.evaluate(() => ({ counter: document.querySelector(".counter")?.textContent,
+  close: document.getElementById("close").getAttribute("href"), prev: document.getElementById("prev")?.getAttribute("href"),
+  next: Boolean(document.getElementById("next")), album: document.querySelector(".info .album-link").getAttribute("href") }));
+check("a friend's photo opened from their post is among that post's photos", friendInPost.counter === "2 / 2" && !friendInPost.next
+  && /^\/friend\/\d+\/photos\/[0-9a-f]{64}\?in=post&back=/.test(friendInPost.prev ?? "")
+  && /^\/friend\/\d+\/photos\/album\//.test(friendInPost.album), JSON.stringify(friendInPost));
+check("…and ✕ goes back to the post on Home", /^\/#f\d+-post-\d+-[0-9a-f]{8}$/.test(friendInPost.close), friendInPost.close);
+await Promise.all([ann.waitForNavigation(), ann.click("#prev")]);
+check("…and stays with the post going back a photo", (await ann.$eval(".counter", (c) => c.textContent)) === "1 / 2"
+  && (await ann.$eval("#close", (a) => a.getAttribute("href"))) === friendInPost.close);
+await ann.goto(`${A}${friendInPost.prev.replace(/back=[^&]*/, `back=${encodeURIComponent("//evil.example/")}`)}`);
+check("…but never back to another site", (await ann.$eval("#close", (a) => a.getAttribute("href"))) === "/");
+await ann.goto(`${A}/`);
 // Bob makes his holiday photo his profile picture; Ann's site shows it, and remembers it for her Friends page.
 await bob.goto(`${B}/posts`);
 const bobsPhoto = await bob.$eval("main article.own .collage a.tile", (a) => a.getAttribute("href"));

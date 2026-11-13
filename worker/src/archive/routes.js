@@ -90,6 +90,7 @@ const ROUTES = [
   [/^\/groups\/join$/, null, groupJoin, views.groupJoinPage],
   [/^\/groups\/(\d{1,15})$/, null, groupHome, views.groupPage],
   [/^\/groups\/(\d{1,15})\/posts\/(\d{1,15})$/, null, groupPost, views.groupPostPage],
+  [/^\/groups\/(\d{1,15})\/posts\/(\d{1,15})\/photos\/([0-9a-f]{64})$/, null, groupPhoto, views.groupPhotoPage],
   [/^\/groups\/(\d{1,15})\/members$/, null, groupMembers, views.groupMembersPage],
   [/^\/groups\/(\d{1,15})\/calendar$/, null, groupCalendar, views.groupCalendarPage],
   [/^\/groups\/(\d{1,15})\/posts\/(\d{1,15})\/edit$/, null, groupEventEdit, views.groupEventEditPage],
@@ -729,11 +730,21 @@ async function friendAlbum(ctx, params, id, key) {
   return fromFriend(ctx, id, async (c) => ({ album: await friend.friendAlbum(c, key, pageNumber(params)) }));
 }
 
+/**
+ * A friend's photo, among the rest of its album; or, opened from their post (?in=post), among that post's photos, with
+ * ✕ going back to where the post was (?back=, a page on this site). Worked out here from the post their site sends
+ * with the photo, so it's the same whatever version their site is.
+ */
 async function friendPhoto(ctx, params, id, hash) {
   return fromFriend(ctx, id, async (c) => {
     const m = await friend.friendPhoto(c, hash);
     m.comments = await markMine(ctx.db, c.id, `photo-${m.hash}`, m.comments, ctx.url.origin);
-    return { photo: m };
+    const photos = m.post?.photos ?? [];
+    const at = params.get("in") === "post" ? photos.findIndex((p) => p.hash === m.hash) : -1;
+    if (at < 0) return { photo: { ...m, inPost: null } };
+    const back = params.get("back") ? safeNext(params.get("back"), ctx.url) : `/friend/${c.id}/posts#f${c.id}-${m.post.key}`;
+    return { photo: { ...m, inPost: { index: at + 1, total: photos.length, prev: photos[at - 1]?.hash ?? null,
+      next: photos[at + 1]?.hash ?? null, back, stay: `?${new URLSearchParams({ in: "post", back })}` } } };
   });
 }
 
@@ -880,6 +891,19 @@ async function groupPost(ctx, params, id, postId) {
     const found = await groups.loadGroupPost(ctx.env, ctx.url.origin, g, postId);
     if (!found?.post) throw new Error("That post isn't there any more.");
     return found;
+  });
+}
+
+/** A photo in a group's post, among that post's photos, with ✕ going back to where the post was (?back=, on this site). */
+async function groupPhoto(ctx, params, id, postId, hash) {
+  return fromGroup(ctx, id, async (g) => {
+    const found = await groups.loadGroupPost(ctx.env, ctx.url.origin, g, postId);
+    const photos = found?.post?.photos ?? [];
+    const at = photos.findIndex((m) => m.hash === hash);
+    if (at < 0) throw new Error("That photo isn't there any more.");
+    const back = params.get("back") ? safeNext(params.get("back"), ctx.url) : `/groups/${g.id}#gp${found.post.id}`;
+    return { ...found, photo: photos[at], index: at + 1, total: photos.length, prev: photos[at - 1]?.hash ?? null,
+      next: photos[at + 1]?.hash ?? null, back, stay: `?${new URLSearchParams({ back })}` };
   });
 }
 

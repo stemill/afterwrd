@@ -913,8 +913,10 @@ function faceFor(ctx, origin, name, n, fresh = null) {
     : html`<span class="who who-${n % 6}" aria-hidden="true">${initial(name)}</span>`;
 }
 
-function remoteCard(ctx, c, p, { thread = true } = {}) {
+/** `back`: where ✕ on one of its photos comes back to (this page and the post on it, unless said otherwise). */
+function remoteCard(ctx, c, p, { thread = true, back = `${ctx.url.pathname}${ctx.url.search}#f${c.id}-${p.key}` } = {}) {
   const n = p.photos.length;
+  const stay = `?${new URLSearchParams({ in: "post", back })}`;
   const what = p.title && p.title !== "Posted on afterwrd." ? summary(p.title, c.name) : "";
   // An event's card comes back from its own page (only sites new enough for events have one).
   return html`<article class="card social from-friend" id="f${c.id}-${p.key}" data-region="${friendBase(c)}/posts${p.event ? `/${p.key}` : ""}">
@@ -930,7 +932,7 @@ function remoteCard(ctx, c, p, { thread = true } = {}) {
   ${p.event && friendEventBlock(ctx, c, p, { full: ctx.url.pathname === `${friendBase(c)}/posts/${p.key}` })}
   ${n > 0 && html`<div class="collage collage-${Math.min(n, 4)}">
     ${p.photos.slice(0, 4).map((m, i) => html`
-      <a href="${friendBase(c)}/photos/${m.hash}" class="tile" ${n === 1 && m.kind === "photo" && html`style="--bg-img: url('${m.thumbSrc}')"`}>
+      <a href="${friendBase(c)}/photos/${m.hash}${stay}" class="tile" ${n === 1 && m.kind === "photo" && html`style="--bg-img: url('${m.thumbSrc}')"`}>
         ${remoteMedia(m)}
         ${i === 3 && n > 4 && html`<span class="more">+${n - 4}</span>`}
       </a>`)}
@@ -1227,25 +1229,27 @@ export function friendAlbumPage(ctx, { friend: c, album }) {
 ${(album.paging.page > 1 || album.paging.hasNext) && pager(ctx, album.paging)}`, "wide");
 }
 
+/** A friend's photo: among its album, or (m.inPost, opened from their post) among that post's photos. */
 export function friendPhotoPage(ctx, { friend: c, photo: m }) {
-  const back = m.album ? `${friendBase(c)}/photos/album/${m.album.key}` : `${friendBase(c)}/photos`;
+  const album = m.album ? `${friendBase(c)}/photos/album/${m.album.key}` : `${friendBase(c)}/photos`;
+  const set = m.inPost ?? { ...m.album, prev: m.prev, next: m.next, back: album, stay: "" };
   const main = html`
 <main class="theatre">
   <section class="stage">
     ${remoteMedia(m, { full: true })}
-    <a class="close" id="close" href="${back}" title="Back (Esc)" aria-label="Back to album">✕</a>
-    ${m.album && html`<span class="counter">${m.album.index} / ${m.album.total}</span>`}
-    ${m.prev && html`<a class="nav prev" id="prev" href="${friendBase(c)}/photos/${m.prev}" title="Previous (←)" aria-label="Previous"></a>`}
-    ${m.next && html`<a class="nav next" id="next" href="${friendBase(c)}/photos/${m.next}" title="Next (→)" aria-label="Next"></a>`}
+    <a class="close" id="close" href="${set.back}" title="Back (Esc)" aria-label="${m.inPost ? "Back to the post" : "Back to album"}">✕</a>
+    ${set.total && html`<span class="counter">${set.index} / ${set.total}</span>`}
+    ${set.prev && html`<a class="nav prev" id="prev" href="${friendBase(c)}/photos/${set.prev}${set.stay}" title="Previous (←)" aria-label="Previous"></a>`}
+    ${set.next && html`<a class="nav next" id="next" href="${friendBase(c)}/photos/${set.next}${set.stay}" title="Next (→)" aria-label="Next"></a>`}
   </section>
   <aside class="info">
-    <a class="album-link" href="${back}">${m.album?.name ?? `${c.name}'s photos`}</a>
+    <a class="album-link" href="${album}">${m.album?.name ?? `${c.name}'s photos`}</a>
     <time class="when">${fmtDatetime(m.created_at)}</time>
     <p class="meta"><a href="${friendBase(c)}/posts">${c.name}</a></p>
     ${m.description && !(m.post && m.post.text === m.description) && html`<div class="caption">${linkify(m.description)}</div>`}
     <h2>Comments</h2>
     ${remoteThread(ctx, c, `photo-${m.hash}`, m.comments, { region: true })}
-    ${m.post && html`<h2>Posted with</h2>${remoteCard(ctx, c, m.post, { thread: false })}`}
+    ${m.post && html`<h2>Posted with</h2>${remoteCard(ctx, c, m.post, { thread: false, back: m.inPost?.back ?? `${friendBase(c)}/posts#f${c.id}-${m.post.key}` })}`}
   </aside>
 </main>
 <script>
@@ -1529,9 +1533,13 @@ function groupThread(ctx, g, p) {
 </section>`;
 }
 
-/** A post in a group. Its photos come by signed links from the group's site. */
-function groupCard(ctx, g, p) {
+/**
+ * A post in a group. Its photos come by signed links from the group's site, and open among the post's photos, with ✕
+ * coming back to `back` (this page and the post on it, unless said otherwise).
+ */
+function groupCard(ctx, g, p, { back = `${ctx.url.pathname}${ctx.url.search}#gp${p.id}` } = {}) {
   const n = p.photos.length;
+  const stay = `?${new URLSearchParams({ back })}`;
   return html`<article class="card social in-group" id="gp${p.id}" data-region="${groupBase(g)}/posts/${p.id}">
   <header>
     ${groupFace(ctx, p)}
@@ -1552,7 +1560,7 @@ function groupCard(ctx, g, p) {
     whoLink: p.mine && !ctx.url.pathname.includes("/posts/") ? `${groupBase(g)}/posts/${p.id}#poll-g${p.id}` : null })}
   ${n > 0 && html`<div class="collage collage-${Math.min(n, 4)}">
     ${p.photos.slice(0, 4).map((m, i) => html`
-      <a href="${m.src}" target="_blank" rel="noopener" class="tile" ${n === 1 && html`style="--bg-img: url('${m.thumbSrc}')"`}>
+      <a href="${groupBase(g)}/posts/${p.id}/photos/${m.hash}${stay}" class="tile" ${n === 1 && html`style="--bg-img: url('${m.thumbSrc}')"`}>
         ${remoteMedia(m)}
         ${i === 3 && n > 4 && html`<span class="more">+${n - 4}</span>`}
       </a>`)}
@@ -1575,6 +1583,35 @@ export function groupPostPage(ctx, { membership: g, group: info, post }) {
   return page(ctx, info.name, html`
 ${groupHead(ctx, g, info, "")}
 <div class="feed">${groupCard(ctx, g, post)}</div>`);
+}
+
+/** A photo in a group's post, among that post's photos; the post beneath, where it can be commented on. */
+export function groupPhotoPage(ctx, { membership: g, group: info, post, photo: m, index, total, prev, next, back, stay }) {
+  g.ownerFrom = info.ownerFrom;
+  const main = html`
+<main class="theatre">
+  <section class="stage">
+    ${remoteMedia(m, { full: true })}
+    <a class="close" id="close" href="${back}" title="Back (Esc)" aria-label="Back to the post">✕</a>
+    <span class="counter">${index} / ${total}</span>
+    ${prev && html`<a class="nav prev" id="prev" href="${groupBase(g)}/posts/${post.id}/photos/${prev}${stay}" title="Previous (←)" aria-label="Previous"></a>`}
+    ${next && html`<a class="nav next" id="next" href="${groupBase(g)}/posts/${post.id}/photos/${next}${stay}" title="Next (→)" aria-label="Next"></a>`}
+  </section>
+  <aside class="info">
+    <a class="album-link" href="${groupBase(g)}">${info.name}</a>
+    <time class="when">${fmtDatetime(post.created_at)}</time>
+    <h2>Posted with</h2>
+    ${groupCard(ctx, g, post, { back })}
+  </aside>
+</main>
+<script>
+  document.addEventListener('keydown', e => {
+    if (e.target.matches('input, textarea, select') || e.metaKey || e.ctrlKey) return;
+    const link = document.getElementById({ ArrowLeft: 'prev', ArrowRight: 'next', Escape: 'close' }[e.key]);
+    if (link) link.click();
+  });
+</script>`;
+  return layout(ctx, { title: info.name, bodyClass: "viewer", main });
 }
 
 // --- events in groups (calendar.js) ---------------------------------------------------------------------------------
