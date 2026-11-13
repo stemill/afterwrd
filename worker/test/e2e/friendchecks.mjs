@@ -133,6 +133,8 @@ async function connect(page, selector, code) {
   await Promise.all([page.waitForFunction(() => document.title === "relay stand-in"), page.click(selector)]);
   await page.goto(`${relay.searchParams.get("to")}#${new URLSearchParams({ code, state: relay.searchParams.get("state") })}`);
   await page.waitForFunction(() => !location.pathname.startsWith("/_cloudflare/") || document.querySelector("#error")?.textContent, { timeout: 15000 });
+  // The address changes before the page it's going to has arrived: wait for that page, or reading it finds nothing.
+  await page.waitForFunction(() => document.readyState !== "loading", { timeout: 15000 });
   return page.url().includes("/_admin/update") ? null : await text(page, "#error");
 }
 const key = () => randomBytes(32).toString("base64url");
