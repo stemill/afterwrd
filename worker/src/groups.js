@@ -48,6 +48,7 @@ import { actorId, CONTEXT, editedFields, fileUrl, groupId, groupPostId, iso, tid
 import pkg from "../package.json";
 import { MAX_COMMENT } from "./archive/comments.js";
 import { ANSWERS, eventChanged, eventObject, finishedAt, GROUP_FINISHED_SQL, occurrenceOn, parseEvent, ruleDates } from "./calendar.js";
+import { ALLOWED_SQL, answerAllowance, TOO_MANY_ANSWERS, wasAllowed } from "./limits.js";
 import { choicesMask, isOpen, OPEN_SQL, pollFromQuestion, pollObject, readPoll, tally } from "./polls.js";
 import { signedLink } from "./friends.js";
 import { mediaStore } from "./media.js";
@@ -71,6 +72,7 @@ const POST_COMMENTS = 300;
 const UPCOMING = 100; // events still to come, in the Calendar
 const PAST = 30; // and the most recent ones that have finished
 const CHANGE_SECONDS = 300; // an event's time, place or name can change, telling those going, once every five minutes
+const MAX_SKIPS_A_DAY = 10; // dates of one repeating event called off one at a time, each telling those going that day
 const LINK_SECONDS = 14 * 86400;
 const LINK_REQUESTS = 100; // requests to join one invite link can make
 const WAITING_SECONDS = 7 * 86400; // a request to join no one has answered is dropped after this
@@ -452,11 +454,15 @@ async function answerEvent(db, group, member, id, answer, date) {
   if (which.error) return which.error;
   if (which.date.cancelled) return "That date has been called off.";
   if (dateOver(found.event, which.date) < now()) return "That event is over.";
-  await db.prepare(`INSERT INTO group_answers (post_id, origin, date, answer, answered_at) SELECT ?1, ?3, ?5, ?4, ?2 WHERE ${STILL_MEMBER_SQL}
+  // Within their allowance of answers (limits.js), checked in the same transaction.
+  const at = now();
+  const allowance = answerAllowance(db, member.origin, at);
+  await db.batch([...allowance.statements, db.prepare(`INSERT INTO group_answers (post_id, origin, date, answer, answered_at)
+    SELECT ?1, ?3, ?5, ?4, ?2 WHERE ${STILL_MEMBER_SQL} AND ${ALLOWED_SQL("?6")}
     AND NOT EXISTS (SELECT 1 FROM group_event_skips WHERE post_id = ?1 AND date = ?5)
     ON CONFLICT (post_id, origin, date) DO UPDATE SET answer = excluded.answer, answered_at = excluded.answered_at`)
-    .bind(found.post.id, now(), member.origin, answer, which.date.date).run();
-  return null;
+    .bind(found.post.id, at, member.origin, answer, which.date.date, allowance.token)]);
+  return (await wasAllowed(db, allowance.token)) ? null : TOO_MANY_ANSWERS;
 }
 
 /**
@@ -519,19 +525,24 @@ async function answerPoll(db, group, member, id, list) {
   if (!isOpen(poll)) return "That poll has closed.";
   const mask = choicesMask(list, poll);
   if (mask === null) return poll.multiple ? "Those aren't options in this poll." : "Pick one of the options.";
-  const binds = [poll.post_id, now(), member.origin, mask];
+  // Within their allowance of answers (limits.js), checked in the same transaction as the answer.
+  const at = now();
+  const allowance = answerAllowance(db, member.origin, at);
+  const binds = [poll.post_id, at, member.origin, mask, allowance.token];
+  const tooMany = async () => ((await wasAllowed(db, allowance.token)) ? null : TOO_MANY_ANSWERS);
   if (!mask) {
     // Taking an answer back, too, only while it's open: an answer still there afterwards means it had closed.
-    await db.prepare(`DELETE FROM group_poll_votes WHERE post_id = ?1 AND origin = ?3 AND ${OPEN_SQL("group_polls")}`).bind(...binds).run();
+    await db.batch([...allowance.statements, db.prepare(`DELETE FROM group_poll_votes WHERE post_id = ?1 AND origin = ?3
+      AND ${OPEN_SQL("group_polls")} AND ${ALLOWED_SQL("?5")}`).bind(poll.post_id, at, member.origin, mask, allowance.token)]);
     const left = await db.prepare("SELECT 1 FROM group_poll_votes WHERE post_id = ? AND origin = ?").bind(poll.post_id, member.origin).first();
-    return left ? "That poll has closed." : null;
+    return left ? (await tooMany()) ?? "That poll has closed." : null;
   }
   // Only while it's open, and while they're still a member (removed or left mid-request, nothing's left behind).
-  const done = await db.prepare(`INSERT INTO group_poll_votes (post_id, origin, choices, voted_at)
-    SELECT ?1, ?3, ?4, ?2 WHERE ${OPEN_SQL("group_polls")} AND ${STILL_MEMBER_SQL}
+  const results = await db.batch([...allowance.statements, db.prepare(`INSERT INTO group_poll_votes (post_id, origin, choices, voted_at)
+    SELECT ?1, ?3, ?4, ?2 WHERE ${OPEN_SQL("group_polls")} AND ${STILL_MEMBER_SQL} AND ${ALLOWED_SQL("?5")}
     ON CONFLICT (post_id, origin) DO UPDATE SET choices = excluded.choices, voted_at = excluded.voted_at
-    RETURNING post_id`).bind(...binds).first();
-  return done ? null : "That poll has closed.";
+    RETURNING post_id`).bind(...binds)]);
+  return results.at(-1).results.length ? null : (await tooMany()) ?? "That poll has closed.";
 }
 
 /** Whoever asked a poll closes it. An error message, or null. */
@@ -556,9 +567,14 @@ async function cancelEvent(env, site, group, member, id, date) {
     const which = whichDate(found.event, date);
     if (which.error) return which.error;
     if (dateOver(found.event, which.date) < at) return "That date is over.";
-    // Only the first of requests sent together calls it off, and tells people.
-    if (!(await db.prepare("INSERT INTO group_event_skips (post_id, date, cancelled_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING RETURNING post_id")
-      .bind(found.post.id, which.date.date, at).first())) return null;
+    // Only the first of requests sent together calls it off, and tells people; and at most a few dates a day, as each
+    // tells everyone going that day (checked in the same statement).
+    if (!(await db.prepare(`INSERT INTO group_event_skips (post_id, date, cancelled_at) SELECT ?1, ?2, ?3
+      WHERE (SELECT COUNT(*) FROM group_event_skips WHERE post_id = ?1 AND cancelled_at > ?3 - 86400) < ?4
+      ON CONFLICT DO NOTHING RETURNING post_id`).bind(found.post.id, which.date.date, at, MAX_SKIPS_A_DAY).first())) {
+      const already = await db.prepare("SELECT 1 FROM group_event_skips WHERE post_id = ? AND date = ?").bind(found.post.id, which.date.date).first();
+      return already ? null : `You can call off up to ${MAX_SKIPS_A_DAY} dates of an event a day. Try again tomorrow.`;
+    }
     await notifyEventChange(env, site, group, found.post, { ...found.event, skipped: [...found.event.skipped, which.date.date] },
       { kind: "cancelled", name: member.name, from: member.origin, date: which.date.date });
     return null;
@@ -608,7 +624,7 @@ async function close(env, group, owner) {
   const { results: members } = await db.prepare("SELECT * FROM group_members WHERE id != ?").bind(owner.id).all();
   const { results: photos } = await db.prepare("SELECT hash, thumb_hash FROM group_photos").all();
   await db.batch([
-    ...["group_comments", "group_comment_versions", "group_photos", "group_answers", "group_event_skips", "group_poll_votes", "group_polls",
+    ...["group_comments", "group_comment_versions", "group_photos", "group_answers", "group_event_skips", "answer_log", "group_poll_votes", "group_polls",
       "group_events", "group_posts", "group_post_versions", "group_links", "group_members", "groups"]
       .map((table) => db.prepare(`DELETE FROM ${table}`)),
     // So it can't be claimed again, should its Worker outlast this (its owner's site deletes it next).
@@ -776,7 +792,7 @@ export async function handleGroupApi(request, env, url) {
     const body = await request.json().catch(() => ({}));
     const trouble = polled[2] === "vote" ? await answerPoll(db, group, member, polled[1], body?.["afterwrd:choices"])
       : await closePoll(db, group, member, polled[1]);
-    if (trouble) return json({ error: trouble }, 400);
+    if (trouble) return json({ error: trouble }, trouble === TOO_MANY_ANSWERS ? 429 : 400);
     // The post as it is now, so the member's site can show it.
     return json(await groupPost(env, site, group, member, polled[1], 0));
   }
@@ -793,7 +809,7 @@ export async function handleGroupApi(request, env, url) {
       trouble = !event || event.cancelled_at ? "Unexpected event details."
         : await editEvent(env, site, group, member, ev[1], { text: cleanText(body.content), event });
     }
-    if (trouble) return json({ error: trouble }, 400);
+    if (trouble) return json({ error: trouble }, trouble === TOO_MANY_ANSWERS ? 429 : 400);
     // The event as it is now, so the member's site can keep its copy.
     return json(await groupPost(env, site, group, member, ev[1], 0));
   }

@@ -41,6 +41,7 @@ import { giveCheckToken, receiveCheckFailed, receiveCheckSoon } from "./friendch
 import { notifyLater } from "./push.js";
 import { answerHere, pollObject, sitePolls } from "./polls.js";
 import { answerFromFriend, friendGone } from "./events.js";
+import { TOO_MANY_ANSWERS } from "./limits.js";
 
 const FEED_POSTS = 30;
 const TIMEOUT_MS = 8000;
@@ -229,7 +230,7 @@ export async function handlePeer(request, env, url, work) {
     const id = found?.post?.source === "afterwrd" ? found.post.id : null;
     if (!id) return json({ error: "That isn't there any more." }, 404);
     const trouble = await answerHere(db, id, peer.origin, peer.name, body["afterwrd:choices"]);
-    if (trouble) return json({ error: trouble }, 400);
+    if (trouble) return json({ error: trouble }, trouble === TOO_MANY_ANSWERS ? 429 : 400);
     return json(tidy({ "@context": CONTEXT, "afterwrd:poll": pollObject((await sitePolls(db, [id], peer.origin)).get(id)) }));
   }
 
@@ -241,8 +242,8 @@ export async function handlePeer(request, env, url, work) {
     // Only an event they're invited to: anything else answers as if it weren't there.
     const found = await visibleTarget(db, key, peer);
     if (!found?.post || found.post.source !== "afterwrd") return json({ error: "That isn't there any more." }, 404);
-    const trouble = answer ? await answerFromFriend(db, found.post.id, peer, answer) : "Answer going, maybe or no.";
-    if (trouble) return json({ error: trouble }, 400);
+    const trouble = answer ? await answerFromFriend(db, found.post.id, peer, answer) : { error: "Answer going, maybe or no.", status: 400 };
+    if (trouble) return json({ error: trouble.error }, trouble.status);
     return json(tidy({ "@context": CONTEXT, ...(await sharePost(env, url.origin, key, await ownerName(db), peer)) }));
   }
 

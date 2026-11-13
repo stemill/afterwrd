@@ -135,6 +135,21 @@ check("Events is in the menu", Boolean(await ann.$('nav.main a[href="/events"][a
 check("…with a calendar of the month and a form to make an event", Boolean(await ann.$(".calendar .cal-grid")) && Boolean(await ann.$("#make form")));
 check("the form lists friends to invite", (await ann.$$eval("#make .guest-options label", (l) => l.map((x) => x.textContent.trim()))).join() === "Bob Example,Cat Example");
 await ann.$eval("#make", (d) => { d.open = true; });
+// On a phone: each tick box is small and just left of its name; a field's name and "(optional)" share a line.
+await ann.setViewport({ width: 390, height: 844 });
+const layout = await ann.evaluate(() => {
+  const label = document.querySelector("#make .guest-options label");
+  const [box, name] = [label.querySelector("input").getBoundingClientRect(), label.querySelector("span").getBoundingClientRect()];
+  const field = [...document.querySelectorAll("#make .event-form label .field")].find((f) => f.textContent.startsWith("Where"));
+  const meta = field.querySelector(".meta").getBoundingClientRect();
+  return { boxWidth: box.width, gap: name.left - box.right, leftOfLabel: box.left - label.getBoundingClientRect().left,
+    sameLine: Math.abs(meta.top - field.getBoundingClientRect().top) < 4, textarea: document.querySelector("#make textarea").getBoundingClientRect().height };
+});
+check("the form lines up on a phone", layout.boxWidth < 30 && layout.gap >= 0 && layout.gap < 20 && layout.leftOfLabel < 4 && layout.sameLine
+  && layout.textarea > 70, JSON.stringify(layout));
+await ann.$eval("#make .event-form input[name=place]", (i) => i.scrollIntoView());
+await ann.screenshot({ path: `${OUT}/events-form-phone.png`, fullPage: true });
+await ann.setViewport({ width: 1280, height: 800 });
 await fill(ann, "#make", { title: "Picnic", day: picnicDay, time: "13:00", place: "The park", words: "Bring a blanket." });
 await tick(ann, "#make", ["Bob Example"]);
 await Promise.all([ann.waitForNavigation(), ann.click("#make button.primary")]);
@@ -285,6 +300,16 @@ check("a change to an event Bob wasn't invited to is ignored", (await toBob({ ty
 check("Bob's answers must be one of the three", (await call(A, "/_peer/answer", bobKey, { type: "Like", object: `${A}/posts/${key}` })).status === 400);
 check("…and about an event", (await call(A, "/_peer/answer", bobKey, { type: "Accept", object: `${A}/posts/post-1-00000000` })).status === 404);
 check("…from a friend", (await call(A, "/_peer/answer", "x".repeat(43), { type: "Accept", object: `${A}/posts/${key}` })).status === 401);
+// A friend answering over and over runs out of answers for a while (limits.js), and their answer stops changing.
+const flips = [];
+for (let i = 0; i < 32; i++) flips.push((await call(A, "/_peer/answer", bobKey, { type: i % 2 ? "Accept" : "TentativeAccept", object: `${A}/posts/${key}` })).status);
+const keptAnswer = sql(stateA, `SELECT answer FROM event_answers WHERE connection_id = ${bobId}`)[0]?.answer;
+check("answering again and again is limited", flips.includes(429) && flips.indexOf(429) <= 30 && n(stateA, `answer_log WHERE who = '${B}'`) <= 30, flips.join(","));
+await call(A, "/_peer/answer", bobKey, { type: keptAnswer === "going" ? "TentativeAccept" : "Accept", object: `${A}/posts/${key}` });
+check("…and an answer over the limit changes nothing", sql(stateA, `SELECT answer FROM event_answers WHERE connection_id = ${bobId}`)[0]?.answer === keptAnswer);
+// The rest of this test doesn't need Bob to answer Ann again; poll answers share the allowance (polls.mjs covers polls).
+sql(stateA, `DELETE FROM answer_log WHERE who = '${B}'`);
+sql(stateA, `UPDATE event_answers SET answer = 'going' WHERE connection_id = ${bobId}`);
 const overEvent = { ...fakeEvent, startTime: new Date(Date.now() - 5 * 86400_000).toISOString() };
 check("an invitation to something already over is let go, keeping nothing", (await toBob({ type: "Invite",
   object: { type: "Note", id: `${A}/posts/post-1-00000002`, "afterwrd:event": overEvent } })).status === 202
@@ -428,6 +453,16 @@ check("…on his phone too", await phoneTold(phoneBefore), String(bobPhone.lengt
 const copies = sql(stateB, `SELECT date, starts_at FROM events_elsewhere WHERE post_id = ${club.post_id} ORDER BY date`);
 const londonTime = (t) => new Date(t * 1000).toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit" });
 check("…and each of his dates moves to 19:30", copies.length === 2 && copies.every((c) => londonTime(c.starts_at) === "19:30"), JSON.stringify(copies));
+// In the group too: a member answering over and over runs out of answers for a while.
+const groupFlips = [];
+for (let i = 0; i < 32; i++) groupFlips.push((await call(G, `/_group/events/${club.post_id}/answer`, bobGroupKey, { answer: i % 2 ? "going" : "maybe", date: clubDays[3] })).status);
+check("a member answering again and again is limited", groupFlips.includes(429) && groupFlips.indexOf(429) <= 30, groupFlips.join(","));
+// And calling off one date at a time is limited to a few a day per event.
+const nowS = Math.floor(Date.now() / 1000);
+sql(stateG, `INSERT INTO group_event_skips (post_id, date, cancelled_at) VALUES ${Array.from({ length: 9 }, (_, i) => `(${club.post_id}, '2000-01-0${i + 1}', ${nowS})`).join(", ")}`);
+const eleventh = await call(G, `/_group/events/${club.post_id}/cancel`, annGroupKey, { date: clubDays[3] });
+check("calling off an eleventh date in a day is refused", eleventh.status === 400 && (await eleventh.json()).error.includes("up to 10 dates"));
+sql(stateG, `DELETE FROM group_event_skips WHERE date LIKE '2000-%'`);
 await bob.setViewport({ width: 390, height: 844 });
 await bob.goto(`${B}/groups/${bobGroup}/posts/${club.post_id}`);
 await bob.screenshot({ path: `${OUT}/events-repeating-phone.png`, fullPage: true });

@@ -29,6 +29,7 @@ import m0014 from "../migrations/0014_updates.sql";
 import m0015 from "../migrations/0015_editing.sql";
 import m0016 from "../migrations/0016_friend_checks.sql";
 import m0017 from "../migrations/0017_personal_events.sql";
+import m0018 from "../migrations/0018_answer_limits.sql";
 import m0019 from "../migrations/0019_no_messages.sql";
 import pkg from "../package.json";
 
@@ -51,6 +52,7 @@ const MIGRATIONS = [
   ["0015_editing.sql", m0015],
   ["0016_friend_checks.sql", m0016],
   ["0017_personal_events.sql", m0017],
+  ["0018_answer_limits.sql", m0018],
   ["0019_no_messages.sql", m0019],
 ];
 const VERSION = pkg.version;
