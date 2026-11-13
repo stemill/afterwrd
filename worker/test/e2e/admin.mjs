@@ -50,7 +50,7 @@ await register(phone, newOwner(ownerName));
 let second = "";
 try { cli(`Second ${Date.now()}`); } catch (e) { second = String(e.stderr); }
 check("the terminal won't make a second owner", second.includes("already has an owner"), second.trim());
-check("the menu has Your devices", (await navLabels(phone)) === "Home,Messages,Photos,Friends,Groups,Events,Notifications,Your profile,Your devices,Add to home screen,Import,Download everything,Update", await navLabels(phone));
+check("the menu has Your devices", (await navLabels(phone)) === "Home,Photos,Friends,Groups,Events,Notifications,Your profile,Your devices,Add to home screen,Import,Download everything,Update", await navLabels(phone));
 // The look: dark unless chosen, picked behind the picture, kept in this browser (also for the sign-in page), and Auto
 // as the device is set.
 const look = (page) => page.evaluate(() => `${document.documentElement.dataset.look}/${document.querySelector('input[name="look"]:checked')?.value}`);

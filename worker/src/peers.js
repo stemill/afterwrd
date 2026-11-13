@@ -15,8 +15,8 @@
 //   POST /_peer/answer                  {type: Accept | TentativeAccept | Reject, object: an event's post here}: their
 //                                       owner is going, might go, or can't (events.js); answers with the post as
 //                                       they now see it
-//   POST /_peer/notify                  a note: something new on their site (notify.js)
-//   POST /_peer/message                 a message from their owner to the owner here (messages.js)
+//   POST /_peer/notify                  a note: something new on their site, or about one of their events
+//                                       (notify.js; an invitation or a change also tells the owner's devices: push.js)
 //   POST /_peer/introduce               {origin, name, content?}: their owner introduces the owner here to someone
 //                                       (connect.js); either can then ask the other to be friends
 //   POST /_peer/checked                 {site, version}: their site checked this one and found it genuine (checks.js)
@@ -38,7 +38,7 @@ import { notifyComment, receiveNote } from "./notify.js";
 import { receiveIntroduction } from "./connect.js";
 import { receiveChecked, receiveCheckRequest } from "./checks.js";
 import { giveCheckToken, receiveCheckFailed, receiveCheckSoon } from "./friendchecks.js";
-import { receiveMessage } from "./messages.js";
+import { notifyLater } from "./push.js";
 import { answerHere, pollObject, sitePolls } from "./polls.js";
 import { answerFromFriend, friendGone } from "./events.js";
 
@@ -246,13 +246,9 @@ export async function handlePeer(request, env, url, work) {
     return json(tidy({ "@context": CONTEXT, ...(await sharePost(env, url.origin, key, await ownerName(db), peer)) }));
   }
 
-  if (route === "POST /_peer/message") {
-    const [body, status] = await receiveMessage(env, peer, await request.json().catch(() => ({})), { site: url.origin, work });
-    return json(body, status);
-  }
-
   if (route === "POST /_peer/notify") {
-    const [body, status] = await receiveNote(db, peer, await request.json().catch(() => ({})));
+    const [body, status] = await receiveNote(db, peer, await request.json().catch(() => ({})),
+      (notice) => notifyLater(env, url.origin, work, notice));
     return json(body, status);
   }
 

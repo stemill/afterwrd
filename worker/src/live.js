@@ -1,14 +1,12 @@
 // What's changed since an open page loaded, for public/static/live.js to say quietly ("2 new posts · Show"):
 //   GET /_live?since=<time>&targets=<key>,…&remote=<connection>:<key>,…&groups=<group>:<post>,…
-//   -> { notifications, requests, posts, comments, update, messages }
+//   -> { notifications, requests, posts, comments, update }
 // notifications and requests are the header's counts. posts counts friends' new posts (from the notes their sites
 // send, notify.js). comments counts new comments by others on the posts and photos the page shows: those here
 // (`targets`), friends' (`remote`, from their notes) and in groups (`groups`, from theirs). Only reads this site's own database. Times are in seconds, so
 // anything from the second the page was made counts: at worst, offering something the page already shows.
-// update is the newer afterwrd release that's out, if any (update.js), for the mark on the Update button. messages: chats
-// with something unread and not muted (messages.js).
+// update is the newer afterwrd release that's out, if any (update.js), for the mark on the Update button.
 import { newCount } from "./archive/comments.js";
-import { unreadChats } from "./messages.js";
 import { INBOX_JOIN } from "./notify.js";
 import { waitingRelease } from "./update.js";
 import { json, now } from "./util.js";
@@ -43,6 +41,5 @@ export async function handleLive(request, env, url, user, work) {
     posts: posts.results[0].n,
     comments: here.results[0].n + there.results[0].n + groups.results[0].n,
     update: await waitingRelease(env, work),
-    messages: await unreadChats(db),
   }, 200);
 }

@@ -29,6 +29,7 @@ import m0014 from "../migrations/0014_updates.sql";
 import m0015 from "../migrations/0015_editing.sql";
 import m0016 from "../migrations/0016_friend_checks.sql";
 import m0017 from "../migrations/0017_personal_events.sql";
+import m0019 from "../migrations/0019_no_messages.sql";
 import pkg from "../package.json";
 
 // Every file in migrations/, in order. A new migration needs adding here too.
@@ -50,6 +51,7 @@ const MIGRATIONS = [
   ["0015_editing.sql", m0015],
   ["0016_friend_checks.sql", m0016],
   ["0017_personal_events.sql", m0017],
+  ["0019_no_messages.sql", m0019],
 ];
 const VERSION = pkg.version;
 // A migration that failed, kept so the version left running can say so (the Update page): {version, migration, error, at}.

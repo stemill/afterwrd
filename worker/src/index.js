@@ -23,7 +23,6 @@ import { serveStatic } from "./static.js";
 import { handleCheck } from "./checks.js";
 import { html } from "./util.js";
 import { handleLive } from "./live.js";
-import { handleMessages } from "./messages.js";
 import { handlePush } from "./push.js";
 import { autoState, handleAutoConnect, handleAutoStep, health, runAuto } from "./auto.js";
 import { handleChecksConnect, runFriendChecks } from "./friendchecks.js";
@@ -137,9 +136,7 @@ async function route(request, env, work) {
   if (url.pathname === "/_comments" || url.pathname.startsWith("/_comments/")) return handleComments(request, env, url, user);
   if (url.pathname === "/_live") return handleLive(request, env, url, user, work);
   if (url.pathname.startsWith("/_feed/")) return handleFeed(request, env, url);
-  // Messages with friends (messages.js).
-  if (url.pathname.startsWith("/_messages/")) return handleMessages(request, env, url);
-  // This device saying yes or no to notifications about messages (push.js).
+  // This device saying yes or no to notifications about events (push.js).
   if (url.pathname.startsWith("/_push/")) return handlePush(request, env, url, user);
   if (url.pathname.startsWith("/_groups/")) return handleGroupActions(request, env, url);
   if (!reading) return new Response("Method not allowed", { status: 405 });

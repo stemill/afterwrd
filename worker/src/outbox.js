@@ -1,9 +1,7 @@
 // Notes waiting to go to other sites (notify.js), sent a batch at a time by this Durable Object's alarm (and, apart
 // from them, in a separate object of this class named "vault", the few secrets the site keeps for automatic updates:
 // auto.js, the vault table below): to friends'
-// sites (POST /_peer/notify) and, in a group's Worker, to its members' sites (POST /_member/notify). Also messages
-// to friends (messages.js, POST /_peer/message) that couldn't be delivered straight away: those go first, and the
-// message here is marked delivered, or not delivered and why, when that's known. One request
+// sites (POST /_peer/notify) and, in a group's Worker, to its members' sites (POST /_member/notify). One request
 // may only call 50 other sites on Cloudflare's free plan; batches of 40, one after another, let a post reach any
 // number of friends. A site that can't be reached is tried again later (after 1, 5 and 30 minutes, then 2 and 6
 // hours) and then given up on; a site that says no (it's disconnected, or doesn't want the note) isn't asked again.
@@ -20,24 +18,21 @@ export const outbox = (env) => env.OUTBOX.get(env.OUTBOX.idFromName("outbox"));
 // Who each kind of note goes to: its table here, how to find their site and key in D1, and where to send it.
 const FRIENDS = "SELECT id, origin, their_key FROM connections WHERE approved_at IS NOT NULL AND id IN";
 const MEMBERS = "SELECT id, origin, their_key FROM group_members WHERE approved_at IS NOT NULL AND id IN";
-// `track`: a message of the owner's (messages.js), marked delivered here, or not delivered and why, when that's known.
 const KINDS = {
-  messages: { column: "connection_id", more: "message_id INTEGER NOT NULL,", path: "/_peer/message", sql: FRIENDS, track: true },
-  // A message in a group's chat, to the group's site; and, in a group's Worker, passed on to its members' sites.
-  group_messages: { column: "group_id", more: "message_id INTEGER NOT NULL,", path: "/_group/chat", track: true,
-    sql: "SELECT id, origin, their_key FROM groups WHERE joined_at IS NOT NULL AND origin IS NOT NULL AND id IN" },
   // Invitations to the owner's events (events.js): what becomes of each is kept with whoever it's for (post_audience).
   invites: { column: "connection_id", more: "post_id INTEGER NOT NULL,", path: "/_peer/notify", sql: FRIENDS, invite: true },
   notes: { column: "connection_id", path: "/_peer/notify", sql: FRIENDS },
   member_notes: { column: "member_id", path: "/_member/notify", sql: MEMBERS },
-  // Last, so a busy chat can't hold up a group's comments and event changes, which are few.
-  member_messages: { column: "member_id", path: "/_member/message", sql: MEMBERS },
 };
+// Queues there once were, for messages between friends and in groups' chats (gone in 0.47.0): anything still
+// waiting in them goes, unsent.
+const GONE = ["messages", "group_messages", "member_messages"];
 
 export class Outbox extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    for (const table of GONE) this.sql.exec(`DROP TABLE IF EXISTS ${table}`);
     for (const [table, { column, more = "" }] of Object.entries(KINDS)) {
       this.sql.exec(`CREATE TABLE IF NOT EXISTS ${table} (
         id INTEGER PRIMARY KEY AUTOINCREMENT, ${column} INTEGER NOT NULL, ${more} body TEXT NOT NULL,
@@ -89,22 +84,6 @@ export class Outbox extends DurableObject {
     return this.queue("member_notes", memberIds, body);
   }
 
-  /**
-   * Queues a message (messages.js) that couldn't be delivered straight away, to try again in `delay` seconds: to a
-   * friend (`table` messages, `to` their connection) or a group (group_messages, the group).
-   */
-  async sendMessage(table, to, messageId, body, delay) {
-    if (!KINDS[table]?.track) throw new Error(`Not a kind of message: ${table}`);
-    const due = Date.now() + delay * 1000;
-    this.sql.exec(`INSERT INTO ${table} (${KINDS[table].column}, message_id, body, due) VALUES (?, ?, ?, ?)`, to, messageId, JSON.stringify(body), due);
-    await this.wake(due);
-  }
-
-  /** In a group's Worker: passes a message in its chat, or its deletion, on to members' sites (`memberIds`, group_members ids). */
-  sendChatToMembers(memberIds, body) {
-    return this.queue("member_messages", memberIds, body);
-  }
-
   async queue(table, ids, body) {
     const text = JSON.stringify(body);
     const at = Date.now();
@@ -148,20 +127,15 @@ export class Outbox extends DurableObject {
     const invited = !KINDS[table].invite || !due.length ? null : new Set((await this.env.DB.prepare(
       `SELECT post_id || ':' || connection_id AS k FROM post_audience WHERE post_id IN (SELECT value FROM json_each(?))`)
       .bind(JSON.stringify([...new Set(due.map((n) => n.post_id))])).all()).results.map((r) => r.k));
-    // A message the owner has deleted here since (or that's been delivered after all) isn't sent.
-    const waiting = !KINDS[table].track ? null : due.length ? new Set((await this.env.DB.prepare(
-      `SELECT id FROM messages WHERE delivered_at IS NULL AND id IN (${due.map(() => "?").join(",")})`)
-      .bind(...due.map((n) => n.message_id)).all()).results.map((m) => m.id)) : new Set();
 
     await Promise.all(due.map(async (note) => {
-      if ((waiting && !waiting.has(note.message_id)) || (invited && !invited.has(`${note.post_id}:${note.connection_id}`))) {
+      if (invited && !invited.has(`${note.post_id}:${note.connection_id}`)) {
         this.sql.exec(`DELETE FROM ${table} WHERE id = ?`, note.id);
         return;
       }
       const to = recipients.get(note[column]);
       let delivered = false;
       let again = Boolean(to);
-      let status = to ? 0 : 403; // 0: unreachable
       if (to) {
         try {
           const response = await fetch(`${to.origin}${path}`, {
@@ -169,7 +143,6 @@ export class Outbox extends DurableObject {
             headers: { Authorization: `Bearer ${to.their_key}`, "Content-Type": "application/json" }, body: note.body,
           });
           await response.body?.cancel();
-          status = response.status;
           delivered = response.ok;
           again = response.status >= 500 || response.status === 429; // anything else won't change by asking again
         } catch {} // unreachable: try again later
@@ -181,25 +154,8 @@ export class Outbox extends DurableObject {
         await this.env.DB.prepare("UPDATE post_audience SET delivery = ? WHERE post_id = ? AND connection_id = ?")
           .bind(delivered ? "delivered" : again ? "unreachable" : "refused", note.post_id, note.connection_id).run();
       }
-      if (waiting && finished) {
-        const when = Math.floor(Date.now() / 1000);
-        await (delivered
-          ? this.env.DB.prepare("UPDATE messages SET delivered_at = ?, failed_at = NULL, problem = NULL WHERE id = ?").bind(when, note.message_id)
-          : this.env.DB.prepare("UPDATE messages SET failed_at = ?, problem = ? WHERE id = ? AND delivered_at IS NULL")
-            .bind(when, messageProblem(status), note.message_id)).run();
-      }
     }));
     return due.length;
   }
 }
 
-/**
- * Why a message wasn't delivered, from what the friend's site answered (0: it couldn't be reached), as messages.problem.
- * Shown in words by the chat page (views/messages.js).
- */
-export function messageProblem(status) {
-  if (status === 0 || status >= 500 || status === 429) return "unreachable";
-  if (status === 404) return "no-messages"; // a site without messages (an older afterwrd, or switched off)
-  if (status === 401 || status === 403) return "not-friends";
-  return "refused";
-}

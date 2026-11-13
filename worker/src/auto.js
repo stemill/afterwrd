@@ -609,7 +609,7 @@ export function healthCheck(env, origin) {
 
 /** GET /_version?health=1: the migrations have run (every request runs them first) and typical reads work. */
 export async function health(env) {
-  for (const table of ["users", "connections", "posts", "messages", "groups", "settings"]) {
+  for (const table of ["users", "connections", "posts", "events", "groups", "settings"]) {
     await env.DB.prepare(`SELECT 1 FROM ${table} LIMIT 1`).all();
   }
   return { id: env.VERSION?.id ?? null, ok: true };

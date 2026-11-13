@@ -12,7 +12,7 @@ const EXTENSIONS = {
 };
 const TABLES = ["settings", "facebook_people", "albums", "posts", "facebook_post_tags", "facebook_comments",
   "facebook_reactions", "media", "facebook_tagged_photos", "comments", "comments_elsewhere", "polls", "poll_votes",
-  "connections", "friend_links", "users", "groups", "group_mine", "chats", "messages", "post_versions", "comment_versions",
+  "connections", "friend_links", "users", "groups", "group_mine", "post_versions", "comment_versions",
   "comments_elsewhere_versions", "events", "event_answers", "post_audience", "events_elsewhere"];
 
 const form = document.getElementById("export");
@@ -256,25 +256,6 @@ function documents(t) {
           [multiple ? "anyOf" : "oneOf"]: options.map((name) => ({ type: "Note", name })), endTime: iso(closes) }))(JSON.parse(m.poll)) : undefined,
       };
     }), { name: "What you've posted and said in groups (the originals are kept on each group's site)" }),
-    // Messages with friends and in groups' chats: each chat in order, with everyone's messages. Only there if there are
-    // any. (A group chat's from the last 30 days: they go after that.) In a group chat, someone else's message's uid
-    // is its whole address.
-    ...(t.messages.length ? { "messages.json": collection(t.chats.map((c) => {
-      const group = c.kind === "group";
-      return {
-        type: "OrderedCollection", name: group ? `Messages in ${c.name}` : `Messages with ${c.name}`, attributedTo: group ? c.origin : actorId(c.origin),
-        orderedItems: t.messages.filter((m) => m.chat_id === c.id).sort((a, b) => a.id - b.id).map((m) => {
-          const from = m.mine ? site : group ? m.author_origin : c.origin;
-          return {
-            type: "Note", id: m.mine || !group ? `${from}/messages/${m.uid}` : m.uid,
-            attributedTo: group && !m.mine ? { type: "Person", id: actorId(from), name: m.author_name ?? undefined } : actorId(from),
-            to: [group ? c.origin : actorId(m.mine ? c.origin : site)], context: group ? c.origin : undefined,
-            published: iso(m.sent_at), mediaType: "text/plain", content: m.text,
-            "afterwrd:deliveredAt": m.mine ? iso(m.delivered_at) : undefined,
-          };
-        }),
-      };
-    }), { name: "Your messages with friends and in groups (each site keeps its own copy)" }) } : {}),
     "comments-elsewhere.json": collection([...t.comments_elsewhere].filter((c) => c.site).sort((a, b) => b.created_at - a.created_at)
       .map((c) => ({
         type: "Note",
@@ -302,7 +283,6 @@ fediverse uses. afterwrd's own extra terms start "afterwrd:" (https://afterwrd.a
   connections.json           friends' afterwrd sites you're connected with
   groups.json                the groups you're in (each is its own site, which keeps everything in it)
   groups-elsewhere.json      what you've posted and said in groups (the originals live on the group's site)
-  messages.json              your messages with friends and in groups, a chat at a time (only if there are any)
   facebook-comments.json     your comments on Facebook
   facebook-likes.json        your likes and reactions on Facebook
   facebook-tagged.json       photos of you on Facebook (links only: Facebook doesn't include the images)

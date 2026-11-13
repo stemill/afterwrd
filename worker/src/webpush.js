@@ -2,7 +2,7 @@
 // this site an address at its push service (Apple's, Google's, Mozilla's or Microsoft's) and two keys; the site
 // encrypts the message for that device alone (RFC 8291) and signs the request with its own key (VAPID, RFC 8292),
 // so the push service can only pass it on, never read it, and nobody else can send to that address. No central
-// server of ours is involved: each site has its own signing key. Used for notifications about messages (push.js).
+// server of ours is involved: each site has its own signing key. Used for notifications about events (push.js).
 import { fromBase64Url, now, toBase64Url } from "./util.js";
 
 const enc = new TextEncoder();

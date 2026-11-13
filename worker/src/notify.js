@@ -74,12 +74,17 @@ function keyOn(origin, address) {
 }
 
 /**
- * A note from a connected (approved) site: kept, ignored, or refused. Returns [body, status].
+ * A note from a connected (approved) site: kept, ignored, or refused. Returns [body, status]. `tell` is given what
+ * to say on the owner's devices (push.js notifyDevices) about an invitation or a change to an event, once it's kept.
+ * @param {any} db
+ * @param {any} peer
+ * @param {any} note
+ * @param {(notice: import("./push.js").Notice) => void} [tell]
  * @returns {Promise<import("./util.js").Answer>}
  */
-export async function receiveNote(db, peer, note) {
+export async function receiveNote(db, peer, note, tell = () => {}) {
   // About one of their events: an invitation, a change, or an invitation taken back (events.js).
-  if (["Invite", "Update", "Undo"].includes(note?.type)) return receiveFriendEventNote(db, peer, note);
+  if (["Invite", "Update", "Undo"].includes(note?.type)) return receiveFriendEventNote(db, peer, note, tell);
   const object = note?.type === "Create" && note.object?.type === "Note" ? note.object : null;
   const isComment = typeof object?.inReplyTo === "string";
   const target = object && keyOn(peer.origin, isComment ? object.inReplyTo : object.id);
@@ -136,10 +141,14 @@ export async function notifyEventChange(env, site, group, post, event, { kind, n
 
 /**
  * A group's note that an event the owner here is going to (or might) has changed or been called off: their copy of
- * it is brought up to date, and the note kept. Ignored if they've no plans for it.
+ * it is brought up to date, the note kept, and the owner's devices told (`tell`). Ignored if they've no plans for it.
+ * @param {any} db
+ * @param {any} group
+ * @param {any} note
+ * @param {(notice: import("./push.js").Notice) => void} tell
  * @returns {Promise<import("./util.js").Answer>}
  */
-async function receiveEventNote(db, group, note) {
+async function receiveEventNote(db, group, note, tell) {
   const prefix = groupPostId(group.origin, group.remote_id, "");
   const id = typeof note.object?.id === "string" && note.object.id.startsWith(prefix) ? note.object.id.slice(prefix.length) : "";
   const event = parseEvent(note.object?.["afterwrd:event"]);
@@ -179,6 +188,13 @@ async function receiveEventNote(db, group, note) {
     RETURNING id`).bind(group.id, Number(id), snippet(note.actor?.name, 100) || "Someone", snippet(words, 400), at,
     EVENT_RATE.seconds, EVENT_RATE.count, EVENT_RATE.daily, kind, date).first();
   if (!row) return [{ error: "That's a lot of notes for now." }, 429];
+  tell({
+    title: group.name,
+    text: `${kind === "changed" ? "Changed" : date !== null ? "One date called off" : "Called off"}: ${words}`,
+    hidden: kind === "changed" ? "An event you're going to has changed" : "An event you're going to is off",
+    url: `/groups/${group.id}/posts/${Number(id)}${date !== null ? `?date=${encodeURIComponent(date)}` : ""}`,
+    tag: `group-${group.id}-${Number(id)}`,
+  });
   // Then each copy brought up to date, if it's changed; a date the event no longer has is let go.
   const writes = copies.flatMap((c) => {
     const fresh = dateCopy(event, c.date);
@@ -194,11 +210,16 @@ async function receiveEventNote(db, group, note) {
 }
 
 /**
- * A note from a group the owner here is in: kept, ignored, or refused. Returns [body, status].
+ * A note from a group the owner here is in: kept, ignored, or refused. Returns [body, status]. `tell`: as for
+ * receiveNote, about a change to an event the owner's going to.
+ * @param {any} db
+ * @param {any} group
+ * @param {any} note
+ * @param {(notice: import("./push.js").Notice) => void} [tell]
  * @returns {Promise<import("./util.js").Answer>}
  */
-export async function receiveGroupNote(db, group, note) {
-  if (note?.type === "Update" && note.object?.type === "Note") return receiveEventNote(db, group, note);
+export async function receiveGroupNote(db, group, note, tell = () => {}) {
+  if (note?.type === "Update" && note.object?.type === "Note") return receiveEventNote(db, group, note, tell);
   const object = note?.type === "Create" && note.object?.type === "Note" ? note.object : null;
   const prefix = groupPostId(group.origin, group.remote_id, "");
   const post = typeof object?.inReplyTo === "string" && object.inReplyTo.startsWith(prefix) ? object.inReplyTo.slice(prefix.length) : "";

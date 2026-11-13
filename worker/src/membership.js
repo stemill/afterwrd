@@ -12,9 +12,8 @@
 // What a group's site may ask of this one, with that key:
 //   GET  /_member/hello?from=<origin>&group=<n>  only mid-join, to prove to <origin> the key is ours, for that group
 //   POST /_member/notify      a comment on a post the owner here wrote or commented on, or a change to an event
-//                             they're going to (notify.js)
+//                             they're going to (notify.js; a change also tells the owner's devices: push.js)
 //   POST /_member/removed     the group removed this site, turned down its request, or closed
-//   POST /_member/message     a member's message in the group's chat, or one deleted for everyone (messages.js)
 // The owner's own actions, from their pages (views.js); forms land back where they came from:
 //   POST /_groups/join                    {link}
 //   POST /_groups/create/…                starting a group (groupsites.js)
@@ -37,7 +36,7 @@ import { parseEdits, parseMedia } from "./friends.js";
 import { EDIT_SECONDS, mineVersions, mineVersionsGone } from "./edits.js";
 import { cleanName, cleanText, MAX_GROUP_ABOUT, MAX_GROUP_NAME, MAX_GROUP_PHOTOS, MAX_GROUP_TEXT } from "./groups.js";
 import { handleGroupSites } from "./groupsites.js";
-import { receiveGroupMessage } from "./messages.js";
+import { notifyLater } from "./push.js";
 import { parsePoll, questionFor, readPoll } from "./polls.js";
 import { receiveGroupNote } from "./notify.js";
 import { messagePage } from "./views/pages.js";
@@ -763,11 +762,8 @@ export async function handleMember(request, env, url, work) {
   }
   if (!group?.joined_at) return json({ error: "Not a member." }, 401);
   if (route === "POST /_member/notify") {
-    const [body, status] = await receiveGroupNote(db, group, await request.json().catch(() => ({})));
-    return json(body, status);
-  }
-  if (route === "POST /_member/message") {
-    const [body, status] = await receiveGroupMessage(env, group, await request.json().catch(() => ({})), { site: url.origin, work });
+    const [body, status] = await receiveGroupNote(db, group, await request.json().catch(() => ({})),
+      (notice) => notifyLater(env, url.origin, work, notice));
     return json(body, status);
   }
   if (route === "POST /_member/removed") {

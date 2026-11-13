@@ -41,9 +41,6 @@ const TABLES = {
   groups: { columns: "id, name, about, origin, remote_id, host_name, joined_at, role", where: "joined_at IS NOT NULL" },
   group_mine: { columns: "*" },
   friend_links: { columns: "connection_id, person_name" },
-  // Messages with friends: who with, and what was said. Muting and what's been read stay here.
-  chats: { columns: "id, origin, name, kind, created_at" },
-  messages: { columns: "id, chat_id, mine, uid, text, sent_at, received_at, delivered_at, author_origin, author_name", where: "deleted_at IS NULL" },
   users: { columns: "id, name" },
 };
 

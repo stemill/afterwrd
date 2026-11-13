@@ -2,9 +2,12 @@
 // a group's Worker (G, 8790). Ann is friends with Bob and with Cat. Ann makes an event and invites Bob: only Bob sees
 // it, by any route, until she invites Cat too. They answer from their own sites, see who's going, and hear about changes
 // unless they said no. Ann takes an invitation back, calls it off, deletes it. Everyone's Events page shows a month's
-// calendar of their own, friends' and groups' events.
+// calendar of their own, friends' and groups' events. Bob has notifications on (a stand-in push service on 8795, which
+// only counts: notifications.mjs looks inside them): his phone hears of each invitation and change, and nothing else.
 //   node events.mjs <zip> <fixtures dir> <A state> <B state> <C state> <G state>
 import { execFileSync } from "node:child_process";
+import { createECDH, randomBytes } from "node:crypto";
+import { createServer } from "node:http";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
 import { settled } from "./helpers.mjs";
@@ -104,6 +107,21 @@ const annOnCat = sql(stateC, "SELECT id FROM connections")[0].id;
 const bobKey = sql(stateB, "SELECT their_key FROM connections")[0].their_key; // Bob's key for Ann's site
 const catKey = sql(stateC, "SELECT their_key FROM connections")[0].their_key;
 
+// Bob's phone, with notifications on. What reaches it is counted.
+const bobPhone = [];
+const pushService = createServer((req, res) => { req.resume(); req.on("end", () => { bobPhone.push(req.url); res.writeHead(201).end(); }); }).listen(8795);
+const phoneKeys = createECDH("prime256v1");
+phoneKeys.generateKeys();
+const bobDevice = await post(bob, "/_push/devices", { endpoint: "http://localhost:8795/push/bob", name: "Android (home screen)",
+  keys: { p256dh: phoneKeys.getPublicKey().toString("base64url"), auth: randomBytes(16).toString("base64url") } });
+check("Bob turns on notifications on his phone", bobDevice.on === true, JSON.stringify(bobDevice));
+/** Whether Bob's phone was told one thing more than `before`, by now (and nothing more, after a moment). */
+async function phoneTold(before) {
+  if (!(await waitFor(() => bobPhone.length > before))) return false;
+  await new Promise((r) => setTimeout(r, 1000));
+  return bobPhone.length === before + 1;
+}
+
 // An ordinary post first, which everyone sees, so the lists below aren't empty.
 await post(ann, "/_admin/posts", { text: "Hello, everyone." });
 
@@ -137,6 +155,7 @@ check("its words change with the event, not the 15-minute edit", (await ann.eval
 // --- Bob is invited -----------------------------------------------------------------------------------------------------
 
 check("Bob's site is told he's invited", await waitFor(() => n(stateB, "inbox WHERE kind = 'invite'") === 1));
+check("…and so is his phone (and nothing before: not Ann's post)", await phoneTold(0), String(bobPhone.length));
 check("…and Ann's site notes that the invitation got there", await waitFor(() =>
   sql(stateA, `SELECT delivery FROM post_audience WHERE connection_id = ${bobId}`)[0]?.delivery === "delivered"));
 check("…and keeps a copy for his calendar, not answered yet", sql(stateB, "SELECT answer, title, post_key FROM events_elsewhere")
@@ -236,9 +255,11 @@ check("an event Cat can't go to isn't on her calendar", !(await text(cat, ".cale
 await ann.goto(`${A}/posts/${key}/event`);
 check("Ann's change form is filled in", (await ann.$eval("input[name=title]", (i) => i.value)) === "Picnic" && (await ann.$eval("input[name=start_time]", (i) => i.value)) === "13:00");
 await ann.$eval("input[name=start_time]", (i) => { i.value = "14:00"; });
+let phoneBefore = bobPhone.length;
 await Promise.all([ann.waitForNavigation(), ann.click(".event-form button.primary")]);
 check("Ann moves it an hour later", (await eventIn(ann))?.meta.includes("14:00"));
 check("Bob, going, is told", await waitFor(() => n(stateB, "inbox WHERE kind = 'changed'") === 1));
+check("…on his phone too", await phoneTold(phoneBefore), String(bobPhone.length));
 check("…and his copy moves with it", sql(stateB, "SELECT starts_at FROM events_elsewhere")[0].starts_at
   === sql(stateA, `SELECT starts_at FROM events WHERE post_id = ${postIdA}`)[0].starts_at);
 check("Cat, who said no, isn't", n(stateC, "inbox WHERE kind = 'changed'") === 0);
@@ -250,7 +271,7 @@ await ann.goto(`${A}/posts/${key}/event`);
 await ann.$eval("textarea[name=text]", (i) => { i.value = "Bring a blanket, and a flask."; });
 await Promise.all([ann.waitForNavigation(), ann.click(".event-form button.primary")]);
 check("…but changing only its words is fine, and tells no one", (await text(ann, "article.own .text")).includes("a flask")
-  && n(stateB, "inbox WHERE kind = 'changed'") === 1);
+  && n(stateB, "inbox WHERE kind = 'changed'") === 1 && bobPhone.length === phoneBefore + 1);
 
 // --- forged notes and answers ------------------------------------------------------------------------------------------------
 
@@ -364,11 +385,14 @@ const listed = await bob.$$eval(".cal-upcoming .plan-list li", (l) => l.map((x) 
 check("Bob's List shows each date, marked going or not", listed.length === 4 && listed.filter((t) => t.includes("You're going")).length === 1, JSON.stringify(listed));
 
 // Calling off one date.
+phoneBefore = bobPhone.length;
+check("nothing since reached Bob's phone: not forged notes, answers, comments, or a group's new event", phoneBefore === 2, String(phoneBefore));
 await ann.goto(`${A}/groups/${annGroup}/posts/${club.post_id}`);
 await Promise.all([settled(ann), ann.click(`#d-${clubDays[1]} .call-off-date button`)]);
 check("Ann calls off the second date", n(stateG, `group_event_skips WHERE post_id = ${club.post_id} AND date = '${clubDays[1]}'`) === 1
   && !sql(stateG, `SELECT cancelled_at FROM group_events WHERE post_id = ${club.post_id}`)[0].cancelled_at);
 check("Bob, going that day, is told", await waitFor(() => n(stateB, `group_inbox WHERE kind = 'cancelled' AND date = '${clubDays[1]}'`) === 1));
+check("…on his phone too", await phoneTold(phoneBefore), String(bobPhone.length));
 check("…his copy of that date is off", Boolean(sql(stateB, `SELECT cancelled_at FROM events_elsewhere WHERE post_id = ${club.post_id}`)[0]?.cancelled_at));
 await bob.goto(`${B}/activity`);
 check("…and Notifications say one date's off", (await text(bob)).includes("called off one date of an event you're going to"));
@@ -397,8 +421,10 @@ await ann.goto(`${A}/groups/${annGroup}/posts/${club.post_id}/edit`);
 check("the change form keeps how it repeats", (await ann.$eval("select[name=repeat]", (el) => el.value)) === "weekly"
   && (await ann.$eval("input[name=repeat_until]", (i) => i.value)) === clubDays[3]);
 await ann.$eval("input[name=start_time]", (i) => { i.value = "19:30"; });
+phoneBefore = bobPhone.length;
 await Promise.all([ann.waitForNavigation(), ann.click(".event-form button.primary")]);
 check("Bob, who might go, is told it changed", await waitFor(() => n(stateB, "group_inbox WHERE kind = 'changed'") >= 1));
+check("…on his phone too", await phoneTold(phoneBefore), String(bobPhone.length));
 const copies = sql(stateB, `SELECT date, starts_at FROM events_elsewhere WHERE post_id = ${club.post_id} ORDER BY date`);
 const londonTime = (t) => new Date(t * 1000).toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit" });
 check("…and each of his dates moves to 19:30", copies.length === 2 && copies.every((c) => londonTime(c.starts_at) === "19:30"), JSON.stringify(copies));
@@ -423,9 +449,11 @@ await bob.setViewport({ width: 1280, height: 800 });
 // --- calling it off, and deleting ------------------------------------------------------------------------------------------------
 
 await ann.goto(`${A}/posts/${key}`);
+phoneBefore = bobPhone.length;
 await Promise.all([settled(ann), ann.click('.event form[action$="/cancel"] button')]);
 check("Ann calls it off", Boolean(sql(stateA, `SELECT cancelled_at FROM events WHERE post_id = ${postIdA}`)[0].cancelled_at) && (await eventIn(ann))?.off);
 check("Bob is told", await waitFor(() => n(stateB, "inbox WHERE kind = 'cancelled'") === 1));
+check("…on his phone too", await phoneTold(phoneBefore), String(bobPhone.length));
 check("…his copy says so", Boolean(sql(stateB, "SELECT cancelled_at FROM events_elsewhere")[0].cancelled_at));
 check("…and answers aren't taken any more", (await call(A, "/_peer/answer", bobKey, { type: "Reject", object: `${A}/posts/${key}` })).status === 400);
 await bob.goto(`${B}/activity`);
@@ -457,5 +485,6 @@ check("…and his site forgets Ann's events (not the group's)", await waitFor(()
   && n(stateB, "events_elsewhere WHERE group_id IS NOT NULL") > 0);
 
 check("no script errors", errors.length === 0, errors.join("; "));
+pushService.close();
 await browser.close();
 process.exit(results.every(Boolean) ? 0 : 1);

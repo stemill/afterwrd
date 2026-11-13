@@ -5,12 +5,12 @@
 //     button's word) asks in afterwrd's own box before it's sent, in place of the browser's confirm(). Scripts can ask
 //     the same way: `if (!(await askFirst("Leave this group?", { ok: "Leave" }))) return;`
 //   - The home-screen app. The service worker (public/static/app/push-sw.js) lets afterwrd be installed as an app, and
-//     notify about messages. "Add to home screen" (the menu, /app, and a note on Home until it's installed or "Not
+//     notify about events. "Add to home screen" (the menu, /app, and a note on Home until it's installed or "Not
 //     now") uses the browser's own Install where it has one (Chrome), and shows how where it hasn't (Safari).
-//   - The small V menus (Edit, Delete) on posts, comments and messages: one open at a time, closed by a tap elsewhere,
+//   - The small V menus (Edit, Delete) on posts and comments: one open at a time, closed by a tap elsewhere,
 //     a choice, or Escape. Edit opens the words (the page's #target) with the cursor at the end, ready to change.
 //   - The look: the Dark / Light / Auto switch behind your picture, kept in this browser (nav.js LOOK applies it).
-//   - What you're writing: comments, posts, messages and edits are kept on the device until they're sent.
+//   - What you're writing: comments, posts and edits are kept on the device until they're sent.
 //   - In place: comments, edits, deletes, poll and event answers, and notices put away, without a new page.
 //   - Drop-downs you can type into. A <select data-search> becomes a box that narrows its list as you type; the
 //     select itself stays (hidden) in the form, so what's sent, and any onchange, are as before.
@@ -117,10 +117,10 @@
   }, true);
 
   // --- what you're writing --------------------------------------------------------------------------------------
-  // A box marked data-draft="<key>" (a comment, a post, a message, an edit) keeps its words in this browser until
+  // A box marked data-draft="<key>" (a comment, a post, an edit) keeps its words in this browser until
   // they're sent, so losing signal, the app being closed, or a tap elsewhere doesn't lose them: they're back in the
   // box next time. Kept for a week at most, and all gone on Sign out (this may be a shared phone or computer).
-  // Whatever sends them calls afterwrdSent(box) once the site has them: compose.js, messages.js, and "in place" below.
+  // Whatever sends them calls afterwrdSent(box) once the site has them: compose.js, and "in place" below.
   const DRAFT = "afterwrd-draft:";
   const WEEK = 7 * 24 * 3600 * 1000;
   const drafts = {
@@ -156,7 +156,7 @@
   // named in data-region instead (the post's own page, or a friend's posts). data-inplace="remove" takes that part away
   // (a deleted post, a notice put away), unless it's the post this page is about: then the site's answer is followed.
   // Without scripts, the forms send themselves and the page reloads, as before.
-  // The same words as the composer's (upload.js OFFLINE); messages.js says it its own way, as its words stay in the box.
+  // The same words as the composer's (upload.js OFFLINE).
   const OFFLINE = "You're not connected just now, so that hasn't been sent. Try again once you're back online.";
   // Said when one's done, for anything that wants to know (the tests do).
   const finished = (sent) => document.dispatchEvent(new CustomEvent("afterwrd-inplace", { detail: { sent } }));

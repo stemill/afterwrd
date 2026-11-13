@@ -37,7 +37,7 @@ export async function handleAdmin(request, env, url, owner) {
   }
   if (request.method === "GET" && url.pathname === "/_admin") return html(devicesPage(pageData(env, await devicesData(env.DB, owner))));
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
-  // Notifications about messages (push.js): turning a device off from here, and "That was me" on Home's notice.
+  // Notifications about events (push.js): turning a device off from here, and "That was me" on Home's notice.
   const forget = /^\/_admin\/notifications\/(\d+)\/forget$/.exec(url.pathname);
   if (forget) {
     await forgetDeviceById(env, forget[1]);

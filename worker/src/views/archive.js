@@ -44,7 +44,7 @@ function currentKey(ctx) {
 function header(ctx) {
   const picture = ctx.profile?.profile;
   return siteHeader({
-    main: ownerMain(ctx.newComments, ctx.requests, ctx.messages),
+    main: ownerMain(ctx.newComments, ctx.requests),
     menu: ownerMenu({ memories: hasMemories(ctx), updateWaiting: ctx.updateWaiting }),
     current: currentKey(ctx),
     face: { initial: initial(ctx.user.name), picture: picture && `/files/${picture.thumb_hash ?? picture.hash}` },
@@ -1174,7 +1174,6 @@ ${c.cover && html`<section class="profile"><div class="cover"><img src="${c.cove
 <div class="feed-head">
   <h1 class="friend-name">${c.avatar && html`<img class="avatar-small" src="${c.avatar.thumbSrc}" alt="">`}${c.name}</h1>
   ${c.facebook && has(ctx, "friends") && html`<a class="chip" href="/people/${c.facebook.id}">${raw(icon("friends"))}<span>Your Facebook history together</span></a>`}
-  ${html`<a class="chip" href="${friendBase(c)}/message">${raw(icon("messages"))}<span>Message</span></a>`}
 </div>
 <div class="meta">${host(c.origin)} · a friend you're connected with. Only you see this here. ${removeFriend(c, "link")}</div>
 <nav class="tabs">
@@ -1495,7 +1494,6 @@ ${(info?.about ?? g.about) && html`<p>${info?.about ?? g.about}</p>`}
 <nav class="tabs">
   <a href="${groupBase(g)}" ${tab === "posts" && raw('aria-current="page"')}>Posts</a>
   <a href="${groupBase(g)}/calendar" ${tab === "calendar" && raw('aria-current="page"')}>Calendar</a>
-  ${g.joined_at && html`<a href="${groupBase(g)}/chat">Chat</a>`}
   <a href="${groupBase(g)}/members" ${tab === "members" && raw('aria-current="page"')}>${g.role === "owner" ? "Members & settings" : "Members"}${waiting > 0 && html` <span class="count">${waiting}<span class="hidden"> asking to join</span></span>`}</a>
 </nav>`;
 }
@@ -1960,7 +1958,7 @@ function invitationCard(ctx, e) {
 }
 
 /** Events: invitations to answer, the owner's calendar, and making an event. */
-export function eventsPage(ctx, { view, month, day, week, items, invitations, friends, unreachable, notAsked = 0 }) {
+export function eventsPage(ctx, { view, month, day, week, items, invitations, friends, unreachable, notAsked = 0, pushKey }) {
   return page(ctx, "Events", html`
 <div class="feed-head">
   <h1>Events</h1>
@@ -1986,11 +1984,35 @@ ${view === "month" ? html`${calendarGrid(ctx, items, { month, day, base: "/event
   ${eventForm({ action: "/_admin/events", back: "/events", submit: "Make the event",
     guests: guestPicker(friends, { none: "You have no friends on afterwrd to invite yet. You can still make it, and invite people later." }) })}
 </details>
+${notificationsSwitch(pushKey)}
 <script>
   // "Make an event" opens the form.
   if (location.hash === "#make") document.getElementById("make").open = true;
   document.querySelector('a[href="#make"]').addEventListener("click", () => { document.getElementById("make").open = true; });
 </script>`);
+}
+
+/**
+ * Notifications on this device (push.js; public/static/notifications.js does the asking): only for invitations, and
+ * for changes to events the owner hasn't said no to. Without scripts it only says it's checking.
+ */
+function notificationsSwitch(pushKey) {
+  return html`<section class="card notify" id="notify" data-key="${pushKey}">
+  <h2>Notifications on this device</h2>
+  <p class="meta">Only when a friend invites you to an event, or an event you haven't said no to changes or is called
+  off: never for posts, comments or anything else.</p>
+  <p id="notify-status">Checking this device…</p>
+  <div class="row">
+    <button class="chip primary" data-do="on" hidden>Turn on notifications</button>
+    <button class="chip" data-do="off" hidden>Turn them off</button>
+  </div>
+  <label id="notify-preview" hidden><input type="checkbox"> Show the event on the lock screen (otherwise just who it's from)</label>
+  <p class="meta" id="notify-android" hidden>If they only turn up when you unlock your phone, Android is saving battery: set
+  Chrome's battery use to <strong>Unrestricted</strong> (Settings → Apps → Chrome → Battery). afterwrd's notifications
+  come through Chrome.</p>
+  <p class="error" id="notify-error" role="alert"></p>
+</section>
+<script src="${asset("/static/notifications.js")}" type="module"></script>`;
 }
 
 /**
@@ -2265,7 +2287,7 @@ export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { de
         ? html`<button class="link">${newDevices.devices.length === 1 ? "That was me" : "They were all me"}</button>`
         : html`If it was you, say so from one of your older devices.`}</form>`}
     ${newNotifying.length > 0 && html`<form class="notice alert" method="post" action="/_admin/notifications/seen" data-region="" data-inplace="remove">
-      Notifications about your messages were turned on for ${newNotifying.length === 1
+      Notifications about events were turned on for ${newNotifying.length === 1
         ? html`a new device (${newNotifying[0].name}) on ${fmtDate(newNotifying[0].created_at)}`
         : html`${newNotifying.length} new devices, on ${listed([...new Set(newNotifying.map((d) => fmtDate(d.created_at)))])}`}.
       Not you? <a href="/_admin">Turn ${newNotifying.length === 1 ? "it" : "them"} off in Your devices</a>.
@@ -2279,7 +2301,7 @@ export function homePage(ctx, { own, feed, onThisDay, friends, newDevices = { de
     ${introductions.map((i) => introductionCard(i, "/", "div"))}
     <div class="notice install-note" id="install-note" hidden>
       <span><strong>Put afterwrd on your home screen.</strong> It opens like an app, in one tap, and can tell you when a
-        friend sends you a message.</span>
+        friend invites you to an event.</span>
       <span class="row actions-row"><button class="chip primary" data-install hidden>Install</button>
         <a class="chip primary" href="/app" data-install-how>Show me how</a>
         <button class="chip" data-install-later>Not now</button></span>
@@ -2373,7 +2395,8 @@ export function appPage(ctx) {
   return page(ctx, "Add to home screen", html`
 <h1>Add afterwrd to your home screen</h1>
 <p>Then it opens like an app: full screen, in one tap, and you don't need to remember your site's address. It can
-also tell you when a friend sends you a message: turn that on in <a href="/messages">Messages</a>.</p>
+also tell you when a friend invites you to an event, or one you're going to changes: turn that on in
+<a href="/events#notify">Events</a>.</p>
 <p><button class="chip primary" data-install hidden>Install afterwrd</button></p>
 <section class="card" data-device="iphone-elsewhere" hidden>
   <h2>iPhone or iPad: open this page in Safari first</h2>
@@ -2400,7 +2423,7 @@ also tell you when a friend sends you a message: turn that on in <a href="/messa
   </ol>
   <p class="meta">If a link to afterwrd opened inside another app (WhatsApp, or an email app), there's no
     <strong>Add to Home Screen</strong> there: open the page in Safari first.</p>
-  <p class="meta">On an iPhone or iPad, notifications about messages only work in the app on the home screen.</p>
+  <p class="meta">On an iPhone or iPad, notifications only work in the app on the home screen.</p>
 </section>
 <section class="card" data-device="android">
   <h2>Android (Chrome)</h2>
@@ -2409,7 +2432,7 @@ also tell you when a friend sends you a message: turn that on in <a href="/messa
     <li>Tap <strong>Install app</strong> (on some phones, <strong>Add to Home screen</strong>).</li>
     <li>Open afterwrd from its new icon.</li>
   </ol>
-  <p class="meta">If notifications about messages only turn up when you unlock your phone, Android is saving battery:
+  <p class="meta">If notifications only turn up when you unlock your phone, Android is saving battery:
   set Chrome's battery use to <strong>Unrestricted</strong> (Settings → Apps → Chrome → Battery). afterwrd's
   notifications come through Chrome.</p>
 </section>

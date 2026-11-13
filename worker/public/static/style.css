@@ -856,3 +856,10 @@ details.more .menu a:hover, details.more .menu button:hover { background: var(--
 .event-dates .answers .chip, .event-dates .call-off-date .chip { padding: 0.3rem 0.8rem; font-size: 0.85rem; }
 .event-dates .call-off-date { align-self: flex-start; }
 .repeat-row select { padding: 0.55rem 0.7rem; border-radius: 12px; border: 1px solid var(--border); background: var(--sunken); color: var(--text); font: inherit; }
+/* Notifications on this device, on Events (public/static/notifications.js). */
+.notify h2 { margin-top: 0; }
+.notify [hidden] { display: none; }
+.notify .row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.notify label { display: flex; gap: 0.5rem; align-items: flex-start; margin: 0.5rem 0; }
+#notify-error { color: var(--danger); font-weight: 700; margin: 0; }
+#notify-error:empty { display: none; }

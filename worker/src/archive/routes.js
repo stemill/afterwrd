@@ -1,6 +1,6 @@
 // The site's pages for the owner: their posts and photos (made on afterwrd, and from their Facebook download, in the
 // same tables, told apart by `source`), Facebook's record of their life there (facebook_*), friends, groups and
-// messages. Of the Facebook download, only the sections chosen when importing are served.
+// events. Of the Facebook download, only the sections chosen when importing are served.
 import { groupPostId, postId as postAddress } from "../../public/static/activity.js";
 import { eventsFor, invitable, keepFriendEvents, oldEventsGone } from "../events.js";
 import { datesOf, FINISHED_SQL, finishedAt, icsFile, monthSpan, readDay, readMonth, readWeek, weekSpan } from "../calendar.js";
@@ -16,7 +16,7 @@ import * as groups from "../membership.js";
 import { ownerName } from "../peers.js";
 import { profilePictures } from "../photos.js";
 import { newDevices } from "../admin.js";
-import { newPushDevices } from "../push.js";
+import { newPushDevices, pushKey } from "../push.js";
 import { checkRequests, lastChecked, recentChecks } from "../checks.js";
 import { securityFixWaiting, waitingRelease } from "../update.js";
 import { autoState } from "../auto.js";
@@ -25,8 +25,6 @@ import { now, pageData, withoutKeys } from "../util.js";
 import { safeNext } from "../auth.js";
 import { fmtDate, fmtMonth } from "../views/format.js";
 import * as views from "../views/archive.js";
-import { chatPage, friendMessage, groupChat, messagesIndex, unreadChats } from "../messages.js";
-import * as messageViews from "../views/messages.js";
 
 const PAGE_SIZE = 50;
 export const AFTERWRD_KIND = "afterwrd"; // the Posts filter's choice for posts written here
@@ -85,11 +83,6 @@ const ROUTES = [
   [/^\/friend\/(\d+)\/photos$/, null, friendPhotos, views.friendPhotosPage],
   [/^\/friend\/(\d+)\/photos\/album\/(\d+|other|videos)$/, null, friendAlbum, views.friendAlbumPage],
   [/^\/friend\/(\d+)\/photos\/([0-9a-f]{64})$/, null, friendPhoto, views.friendPhotoPage],
-  // Messages with friends (messages.js).
-  [/^\/friend\/(\d+)\/message$/, null, friendMessage, null],
-  [/^\/messages$/, null, messagesIndex, messageViews.messagesPage],
-  [/^\/messages\/(\d+)$/, null, chatPage, messageViews.chatPage],
-  [/^\/groups\/(\d{1,15})\/chat$/, null, groupChat, null], // the group's chat, made if it's new
   [/^\/app$/, null, () => ({}), views.appPage], // Add to home screen
   [/^\/groups$/, null, groupsIndex, views.groupsIndexPage],
   [/^\/events$/, null, eventsIndex, views.eventsPage],
@@ -135,7 +128,6 @@ export async function renderArchive(request, env, url, user, work) {
     ownerName: await ownerName(db), // their name here, which can differ from the Facebook one (me.name)
     profile: await profilePictures(db),
     friendFaces: await friendFaces(db),
-    messages: await unreadChats(db), // chats with something unread (and not muted), for the menu
   };
   ctx.updateWaiting = Boolean(ctx.newRelease);
   // A profile picture or cover chosen here takes over from Facebook's.
@@ -173,9 +165,9 @@ export async function renderArchive(request, env, url, user, work) {
  * picture, what they've published, and the counts on the menu. No database or secrets: views only draw.
  */
 function frame(ctx) {
-  const { url, chosen, sections, newComments, zone, requests, updateWaiting, me, ownerName, profile, friendFaces, messages } = ctx;
+  const { url, chosen, sections, newComments, zone, requests, updateWaiting, me, ownerName, profile, friendFaces } = ctx;
   return { url, user: { id: ctx.user.id, name: ctx.user.name }, chosen, sections, newComments, zone, requests, updateWaiting,
-    me, ownerName, profile, friendFaces, messages };
+    me, ownerName, profile, friendFaces };
 }
 
 function page(body) {
@@ -834,6 +826,8 @@ async function eventsIndex(ctx, params) {
     invitations: invites.results.map((e) => calendarItem(e, { connection: e.connection, key: e.post_key, who: e.friend,
       href: `/friend/${e.connection}/posts/${e.post_key}` })),
     friends: (await invitable(db)).map(({ id, name }) => ({ id, name })),
+    // The site's public signing key for notifications, which a device is given when it turns them on (push.js).
+    pushKey: await pushKey(ctx.env),
   };
 }
 

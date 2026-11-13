@@ -405,10 +405,15 @@ const eventWords = (e) => `${e.title} · ${eventWhen(e)}${e.place ? ` · ${e.pla
 /**
  * A note from friend `peer` about one of their events: an invitation, a change, or an invitation taken back. Kept,
  * ignored, or refused; returns [body, status]. Only about their own posts, and changes only to events the owner here
- * was invited to and hasn't said no to.
+ * was invited to and hasn't said no to. An invitation or change that's kept is also said on the owner's devices
+ * (`tell`: push.js); one taken back isn't.
+ * @param {any} db
+ * @param {any} peer
+ * @param {any} note
+ * @param {(notice: import("./push.js").Notice) => void} [tell]
  * @returns {Promise<import("./util.js").Answer>}
  */
-export async function receiveFriendEventNote(db, peer, note) {
+export async function receiveFriendEventNote(db, peer, note, tell = () => {}) {
   const undo = note.type === "Undo";
   const address = undo ? note.object?.object : note.object?.id;
   const prefix = postId(peer.origin, "");
@@ -449,7 +454,15 @@ export async function receiveFriendEventNote(db, peer, note) {
       RETURNING id`).bind(peer.id, kind, key, peer.name, eventWords(event), at, NOTE_RATE.seconds, NOTE_RATE.count, NOTE_RATE.daily),
   ]);
   if (kind === "invite" && !kept.meta.changes) return [{ error: "That's a lot of events for now." }, 429];
-  return row.results.length ? [{ ok: true }, 202] : [{ error: "That's a lot of notes for now." }, 429];
+  if (!row.results.length) return [{ error: "That's a lot of notes for now." }, 429];
+  tell({
+    title: peer.name,
+    text: `${{ invite: "Invited you", changed: "Changed", cancelled: "Called off" }[kind]}: ${eventWords(event)}`,
+    hidden: { invite: "Invited you to an event", changed: "Changed an event you're invited to", cancelled: "Called off an event you were invited to" }[kind],
+    url: `/friend/${peer.id}/posts/${key}`,
+    tag: `event-${peer.id}-${key}`,
+  });
+  return [{ ok: true }, 202];
 }
 
 /**

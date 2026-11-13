@@ -1,13 +1,13 @@
 // The service worker for the home-screen app: the small script the phone or computer keeps for this site. It's what
 // lets the site be installed as an app, and the phone wakes it, even while asleep, when the site sends a notification
-// about a message (src/push.js). It shows the notification, and opens that chat when it's tapped.
+// about an event: an invitation, or a change to one the owner hasn't said no to (src/push.js). It shows the
+// notification, and opens that event when it's tapped.
 // It also says when the site can't be reached: with no signal or Wi-Fi, a page that won't load gets a short page of its
 // own (offlinePage) in place of the browser's error. No pages are kept on the device (a phone may be shared, and pages
 // are private), and it never fetches a page itself: the browser does (navigation preload), as it would with no
 // service worker, so the site sees exactly where a request came from (its Origin and Sec-Fetch-Site checks).
-// A notification is encrypted for this device by its own site (src/webpush.js): { title, body, url, tag, quiet, badge }.
-// tag: which chat it's about. quiet: more from a chat that's just made a sound, which bring its notification up to
-// date without another.
+// A notification is encrypted for this device by its own site (src/webpush.js): { title, body, url, tag }. tag: which
+// event it's about, so a change takes the place of the invitation still showing, rather than adding another.
 
 self.addEventListener("install", () => self.skipWaiting());
 // Navigation preload: the browser starts fetching a page while this script wakes up, so standing in between costs
@@ -101,40 +101,46 @@ self.addEventListener("push", (event) => {
     message = {};
   }
   const text = (value, max) => (typeof value === "string" ? value.slice(0, max) : "");
-  const chat = text(message.tag, 100);
-  const badge = Number.isInteger(message.badge) && message.badge > 0 && self.navigator.setAppBadge
-    ? self.navigator.setAppBadge(message.badge).catch(() => {}) : null;
-  event.waitUntil(Promise.all([show(message, chat, text), badge]));
+  event.waitUntil(show(message, text(message.tag, 200), text));
 });
 
-// One notification per chat. Phones (Chrome on Android) don't make a sound for a notification that replaces one
-// already showing, so one that should be heard takes the chat's last one away and comes as new; a quiet one (more
-// from the same chat within the minute) brings the one that's showing up to date in its place.
-async function show(message, chat, text) {
-  const showing = chat ? (await self.registration.getNotifications()).filter((n) => n.data?.chat === chat) : [];
-  let tag = chat ? `${chat}-${Date.now()}` : undefined;
-  if (message.quiet && showing.length) tag = showing.at(-1).tag;
-  else showing.forEach((n) => n.close());
+// One notification per event. Phones (Chrome on Android) don't make a sound for a notification that replaces one
+// already showing, so a new one takes that event's last one away and comes as new.
+async function show(message, about, text) {
+  if (about) (await self.registration.getNotifications()).filter((n) => n.data?.about === about).forEach((n) => n.close());
   return self.registration.showNotification(text(message.title, 100) || "afterwrd", {
     body: text(message.body, 500),
-    tag,
-    renotify: false,
-    silent: Boolean(message.quiet && showing.length),
+    tag: about ? `${about}-${Date.now()}` : undefined,
     icon: "/static/app/icon-192.png",
-    data: { url: sameSite(message.url), chat },
+    data: { url: sameSite(message.url), about },
   });
 }
+
+// The device's push service sometimes gives it a new address (Firefox does, now and then). The site is told, so
+// notifications carry on there; the browser sends the session's cookie with it, as from a page. Without the old
+// subscription to go on, nothing can be done here: Events shows notifications as off, to turn on again.
+self.addEventListener("pushsubscriptionchange", (event) => {
+  event.waitUntil((async () => {
+    const old = event.oldSubscription;
+    const key = old?.options?.applicationServerKey;
+    if (!old || !key) return;
+    const fresh = event.newSubscription ?? await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+    await fetch("/_push/devices/renew", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ old: old.endpoint, ...fresh.toJSON() }) });
+  })().catch(() => {}));
+});
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const url = sameSite(event.notification.data && event.notification.data.url);
   event.waitUntil((async () => {
-    // A window already on Messages goes to the chat; anything else (an import, a download being made) is left alone.
+    // A window already on Events or Notifications goes to the event; anything else (an import, a download being made)
+    // is left alone, and it opens in a window of its own.
     const open = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-    const chatting = open.find((c) => new URL(c.url).origin === self.location.origin && new URL(c.url).pathname.startsWith("/messages"));
-    if (chatting?.navigate) {
-      await chatting.focus();
-      if (await chatting.navigate(url).catch(() => null)) return null;
+    const there = open.find((c) => new URL(c.url).origin === self.location.origin && /^\/(events|activity)\b/.test(new URL(c.url).pathname));
+    if (there?.navigate) {
+      await there.focus();
+      if (await there.navigate(url).catch(() => null)) return null;
     }
     return self.clients.openWindow(url);
   })());

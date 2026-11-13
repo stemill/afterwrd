@@ -49,12 +49,12 @@ link here and open it on that device: it works once, for an hour, and gives owne
   ${openLinks ? `<button class="chip" data-action="cancel-links">Cancel ${openLinks} unused link${openLinks === 1 ? "" : "s"}</button>` : ""}
   ${sessions ? '<button class="chip" data-action="sign-out">Sign out everywhere</button>' : ""}
 </div>
-<h2>Notifications about messages</h2>
-<p class="meta">The phones and computers that tell you when a friend sends you a message. Turn one on in
-<a href="/messages">Messages</a>, on that device. Removing the passkey it was signed in with, or signing out there, turns
-it off too.</p>
+<h2>Notifications about events</h2>
+<p class="meta">The phones and computers that tell you when a friend invites you to an event, or one you haven't said no
+to changes. Turn one on in <a href="/events#notify">Events</a>, on that device. Removing the passkey it was signed in
+with, or signing out there, turns it off too.</p>
 ${notifying.length ? `<ul class="devices" id="notifying">
-  ${notifying.map((d) => `<li class="card"><span><strong>${escape(d.name)}</strong><span class="meta"> · on since ${day(d.created_at)}${d.preview ? ", showing messages on the lock screen" : ", showing only who they're from"}${d.last_ok_at ? `, last sent ${day(d.last_ok_at)}` : ""}</span></span>
+  ${notifying.map((d) => `<li class="card"><span><strong>${escape(d.name)}</strong><span class="meta"> · on since ${day(d.created_at)}${d.preview ? ", showing events on the lock screen" : ", showing only who they're from"}${d.last_ok_at ? `, last sent ${day(d.last_ok_at)}` : ""}</span></span>
     <form method="post" action="/_admin/notifications/${Number(d.id)}/forget" data-confirm="Turn off notifications on this device?" data-confirm-ok="Turn off"><button class="chip danger">Turn off</button></form></li>`).join("")}
 </ul>` : '<p id="notifying">None.</p>'}
 </main>

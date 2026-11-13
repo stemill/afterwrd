@@ -1,25 +1,24 @@
 # afterwrd
 
 A small, private social network of your own, with your Facebook years brought along. Post and share photos, comment,
-message, and connect with friends who have their own afterwrd site; your Facebook download (posts, photos, comments, likes,
+make events, and connect with friends who have their own afterwrd site; your Facebook download (posts, photos, comments, likes,
 friends) comes too, under *Memories*. Only you sign in to your site; friends see it from their own. It runs in your own free Cloudflare account,
 so no one else holds your data, and setting it up needs no terminal, no GitHub account and no card.
 
 afterwrd isn't affiliated with or endorsed by Meta. It only reads the "Download your information" file Facebook
 gives you; it never signs in to Facebook or fetches anything from it.
 
-**Finding your way round.** *Home* is your posts and your friends' together, with a box to write in; *Messages*,
-*Photos*, *Friends*, *Groups* and *Notifications* sit beside it. Your picture (top right) opens your profile, *Memories*
+**Finding your way round.** *Home* is your posts and your friends' together, with a box to write in; *Photos*,
+*Friends*, *Groups*, *Events* and *Notifications* sit beside it. Your picture (top right) opens your profile, *Memories*
 (everything from Facebook, with "On this day"), and your tools: *Your devices*, *Add to home screen*, *Import*,
 *Download everything* and *Update*.
 
-**Messages and the app.** *Messages* are one-to-one chats with friends, kept on your site and theirs, and each
-group has a chat too (its messages go after 30 days: for keeping, there are posts). They aren't
-end-to-end encrypted: both sites hold the text, as they do your posts. Add afterwrd to your phone's home screen
-and it opens like an app, and can tell you when a friend sends you a message, even with the phone locked: that's the
-only thing afterwrd ever notifies you about, and you can mute any chat. The notification is encrypted for your phone
-by your own site, so the phone's push service (Apple's or Google's) passes it on without being able to read it; there's
-no afterwrd server in between.
+**The app, and events on your phone.** Add afterwrd to your phone's home screen and it opens like an app. Turn on
+notifications on the *Events* page and it can tell you, even with the phone locked, when a friend invites you to an
+event, or one you haven't said no to changes or is called off. That's all afterwrd ever notifies you about: never
+posts, comments or likes. (There are no messages between friends: WhatsApp, Signal and the like do that better.) The
+notification is encrypted for your phone by your own site, so the phone's push service (Apple's or Google's) passes it
+on without being able to read it; there's no afterwrd server in between.
 
 ## What it looks like
 
@@ -242,7 +241,7 @@ it with no card needed: Workers, D1 and SQLite-backed Durable Objects only, no R
   few hours if a site is down. With more than 40 friends, Home asks those who've posted lately, plus a few others
   in turn, as a page may only ask 50 other sites on the free plan. While a page is open and in view, it
   checks your own site every 30 seconds: the counts in the menu update, and a small bar offers to show new posts
-  or comments. Nothing moves until you choose, and nothing is pushed to your phone.
+  or comments. Nothing moves until you choose, and none of it is pushed to your phone.
 
 `npm run deploy` is only for new versions of afterwrd's code; it never touches your archive.
 `npm run owner` (with no name) makes a new device link from the terminal, if you're ever without one.
