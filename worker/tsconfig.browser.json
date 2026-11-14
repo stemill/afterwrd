@@ -1,0 +1,19 @@
+{
+  // Type checks for the scripts that run in the browser (public/static), with the browser's own types: `npm run check`.
+  // The service worker runs somewhere else again (no page), so it has its own: tsconfig.sw.json. Plain
+  // JavaScript, as on the Worker's side: notes are JSDoc comments. The vendored zip library isn't checked.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": [],
+    "strict": false,
+    "noUnusedLocals": true,
+    "skipLibCheck": true
+  },
+  "include": ["types/browser.d.ts", "public/static/*.js", "public/static/ui/*.js", "public/static/import/*.js", "public/static/export/*.js"]
+}

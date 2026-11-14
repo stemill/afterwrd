@@ -6,8 +6,10 @@
 // number of friends. A site that can't be reached is tried again later (after 1, 5 and 30 minutes, then 2 and 6
 // hours) and then given up on; a site that says no (it's disconnected, or doesn't want the note) isn't asked again.
 // Notes hold the connection or member, not its key: the key is looked up in D1 when sending, so a disconnect (or a
-// member leaving) stops them at once.
+// member leaving) stops them at once. The same alarm also fetches friends' newest posts again for Home, with whatever
+// calls the notes leave (feed.js refreshCopies).
 import { DurableObject } from "cloudflare:workers";
+import { refreshCopies } from "./feed.js";
 
 const BATCH = 40;
 const TIMEOUT_MS = 5000;
@@ -44,6 +46,15 @@ export class Outbox extends DurableObject {
     // a new version), and the key its own update steps carry. Here rather than in D1, so they're never in an export, a
     // restored database or anything a page reads.
     this.sql.exec("CREATE TABLE IF NOT EXISTS vault (name TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    // Friends whose newest posts are to be fetched again for Home (feed.js refreshCopies), each once however often asked.
+    this.sql.exec("CREATE TABLE IF NOT EXISTS refreshes (connection_id INTEGER PRIMARY KEY, due INTEGER NOT NULL)");
+  }
+
+  /** Has these friends' newest posts fetched again soon, in the background, for Home (feed.js). */
+  async refresh(connectionIds) {
+    const at = Date.now();
+    for (const id of connectionIds) this.sql.exec("INSERT INTO refreshes (connection_id, due) VALUES (?, ?) ON CONFLICT DO NOTHING", id, at);
+    await this.wake(at);
   }
 
   /** A secret kept here (auto.js), or null. */
@@ -110,7 +121,13 @@ export class Outbox extends DurableObject {
     }
     let room = BATCH;
     for (const table of Object.keys(KINDS)) room -= await this.sendDue(table, room);
-    const next = Math.min(...Object.keys(KINDS).map((t) => this.sql.exec(`SELECT MIN(due) AS due FROM ${t}`).one().due ?? Infinity));
+    // Then, with the calls left, friends' posts to fetch again (notes first: they're what tells friends' sites).
+    if (room > 0) {
+      const ids = this.sql.exec("SELECT connection_id FROM refreshes WHERE due <= ? ORDER BY due LIMIT ?", Date.now(), room).toArray().map((r) => r.connection_id);
+      for (const id of ids) this.sql.exec("DELETE FROM refreshes WHERE connection_id = ?", id);
+      await refreshCopies(this.env, ids).catch((error) => console.error("Refreshing friends' posts:", error.message));
+    }
+    const next = Math.min(...[...Object.keys(KINDS), "refreshes"].map((t) => this.sql.exec(`SELECT MIN(due) AS due FROM ${t}`).one().due ?? Infinity));
     if (next !== Infinity) await this.ctx.storage.setAlarm(Math.max(next, Date.now() + 1000));
   }
 

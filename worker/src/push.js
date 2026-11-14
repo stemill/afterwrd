@@ -1,13 +1,16 @@
-// Notifications on the owner's own phones and computers, for events and for nothing else: when a friend invites them
-// to one, and when an event they haven't said no to changes or is called off (a friend's, events.js; or a group's,
-// notify.js). Never posts, comments, friend requests or updates: afterwrd doesn't chase attention, and those wait on
-// the Notifications page for whenever the owner looks. A device says yes from Events (public/static/notifications.js);
+// Notifications on the owner's own phones and computers, for events and mentions and nothing else: when a friend
+// invites them to one, when an event they haven't said no to changes or is called off (a friend's, events.js; or a
+// group's, notify.js), and when someone mentions them in a post or comment, or uses @here in a group (mentions.js), on
+// each device that hasn't turned mentions off. The test for anything that buzzes a phone: addressed to you, by a person.
+// Never other posts, comments, friend requests or updates: afterwrd doesn't chase attention, and those wait on the
+// Notifications page for whenever the owner looks. A device says yes from Events (public/static/notifications.js);
 // after that it's told even while it's asleep. Each site signs its own notifications and encrypts each one for that
 // device alone (webpush.js), so the push service passes it on without being able to read it.
 //   POST /_push/devices          {endpoint, keys: {p256dh, auth}, name, preview}: this device says yes
 //   POST /_push/devices/forget   {endpoint}: this device says no
 //   POST /_push/devices/preview  {endpoint, preview}: show the event on the lock screen, or only who it's from
-//   POST /_push/devices/state    {endpoint}: whether this device has them on
+//   POST /_push/devices/mentions {endpoint, mentions}: mentions buzz this device too, or only events
+//   POST /_push/devices/state    {endpoint}: whether this device has them on, and for mentions
 //   POST /_push/devices/renew    {old, endpoint, keys}: the device's push service gave it a new address (push-sw.js)
 // Each device is listed in Your devices (admin.js), where it can be turned off from anywhere; Home mentions a new one
 // for 14 days, as it does a new passkey. A device goes when the passkey that was signed in when it said yes is
@@ -125,10 +128,16 @@ export async function pushDevicesSeen(env) {
   await env.DB.prepare("UPDATE push_devices SET seen_at = ? WHERE seen_at IS NULL").bind(now()).run();
 }
 
-/** Whether this device (by its push address) has notifications on here, and with what preview. */
+/** Whether this device (by its push address) has notifications on here, with what preview, and for mentions too. */
 export async function deviceState(env, endpoint) {
-  const row = await env.DB.prepare("SELECT preview FROM push_devices WHERE endpoint = ?").bind(String(endpoint ?? "")).first();
-  return row ? { on: true, preview: Boolean(row.preview) } : { on: false };
+  const row = await env.DB.prepare("SELECT preview, mentions FROM push_devices WHERE endpoint = ?").bind(String(endpoint ?? "")).first();
+  return row ? { on: true, preview: Boolean(row.preview), mentions: Boolean(row.mentions) } : { on: false };
+}
+
+/** Whether this device (by its push address) is told about mentions too, or only events. */
+export async function setMentions(env, endpoint, on) {
+  await env.DB.prepare("UPDATE push_devices SET mentions = ? WHERE endpoint = ?").bind(on ? 1 : 0, String(endpoint ?? "")).run();
+  return { ok: true };
 }
 
 /**
@@ -138,20 +147,24 @@ export async function deviceState(env, endpoint) {
  * @property {string} hidden what's shown instead when it hasn't (nothing the sender wrote)
  * @property {string} url the page here that a tap opens
  * @property {string} tag what it's about: a later notice with the same tag takes the earlier one's place
+ * @property {"event" | "mention"} [kind] an event's (the default), or a mention, which only devices that said yes to
+ *   mentions are told
  */
 
 /**
  * Tells every one of the owner's devices with notifications on about `notice`, even while it's asleep. A push service
  * that can't be reached, or says to try later, is asked again a couple of times; a device whose address no longer
  * works (it said no, or the app was removed) is forgotten. `site` is this site's address, which push services are
- * given as who to contact about its notifications. Only ever called for events (see the top of this file).
+ * given as who to contact about its notifications. Only ever called for events and mentions (see the top of this
+ * file); a mention only to devices that said yes to those too (push_devices.mentions).
  * @param {any} env
  * @param {string} site
  * @param {Notice} notice
  */
 export async function notifyDevices(env, site, notice) {
   const db = env.DB;
-  const { results: devices } = await db.prepare("SELECT * FROM push_devices ORDER BY id").all();
+  const { results: all } = await db.prepare("SELECT * FROM push_devices ORDER BY id").all();
+  const devices = notice.kind === "mention" ? all.filter((d) => d.mentions) : all;
   if (!devices.length) return;
   const vapid = await vapidKeys(env);
   const subject = site.startsWith("https://") ? site : "https://afterwrd.app";
@@ -197,6 +210,7 @@ const ROUTES = {
   "/_push/devices": (env, body, owner, url) => addDevice(env, body, owner, url.origin),
   "/_push/devices/forget": (env, body) => forgetDevice(env, body.endpoint),
   "/_push/devices/preview": (env, body) => setPreview(env, body.endpoint, body.preview === true),
+  "/_push/devices/mentions": (env, body) => setMentions(env, body.endpoint, body.mentions === true),
   "/_push/devices/state": (env, body) => deviceState(env, body.endpoint),
   "/_push/devices/renew": (env, body, owner, url) => renewDevice(env, body, url.origin),
 };
@@ -204,7 +218,6 @@ const ROUTES = {
 export async function handlePush(request, env, url, owner) {
   const act = Object.hasOwn(ROUTES, url.pathname) ? ROUTES[url.pathname] : null;
   if (!act || request.method !== "POST") return new Response("Not found", { status: 404 });
-  if (request.headers.get("Origin") !== url.origin) return new Response("Request from another site", { status: 403 });
   const body = await request.json().catch(() => ({}));
   try {
     return json(await act(env, body && typeof body === "object" ? body : {}, owner, url));

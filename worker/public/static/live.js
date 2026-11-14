@@ -3,7 +3,7 @@
 // comments a small bar offers to show them. Nothing moves until you choose to, nothing pops up, nothing makes a
 // sound, and nothing runs while the tab is hidden.
 (() => {
-  const header = document.querySelector("header.site[data-now]");
+  const header = /** @type {HTMLElement | null} */ (document.querySelector("header.site[data-now]"));
   if (!header) return;
   const since = header.dataset.now;
   const EVERY = 30_000;
@@ -12,11 +12,13 @@
 
   const unique = (list) => [...new Set(list)].join(",");
   // The posts and photos this page shows comment boxes for: here, and on friends' sites.
-  const targets = () => unique([...document.querySelectorAll('form[action="/_comments"] input[name=target]')].map((i) => i.value));
-  const remote = () => unique([...document.querySelectorAll('form[action="/_feed/comments"]')]
-    .map((f) => `${f.elements.connection?.value}:${f.elements.target?.value}`));
+  const targets = () => unique([.../** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll('form[action="/_comments"] input[name=target]'))].map((i) => i.value));
+  // (By elements: a form's own .target is where it opens, not its field called "target".)
+  const field = (f, name) => /** @type {HTMLInputElement | null} */ (f.elements.namedItem(name))?.value;
+  const remote = () => unique([.../** @type {NodeListOf<HTMLFormElement>} */ (document.querySelectorAll('form[action="/_feed/comments"]'))]
+    .map((f) => `${field(f, "connection")}:${field(f, "target")}`));
   // …and in groups.
-  const groups = () => unique([...document.querySelectorAll("form[data-group][data-post]")].map((f) => `${f.dataset.group}:${f.dataset.post}`));
+  const groups = () => unique([.../** @type {NodeListOf<HTMLFormElement>} */ (document.querySelectorAll("form[data-group][data-post]"))].map((f) => `${f.dataset.group}:${f.dataset.post}`));
 
   function setCount(link, n) {
     if (!link) return;

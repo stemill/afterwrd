@@ -4,13 +4,10 @@
 // account, whose workers.dev name is "ann", TEST_SUBDOMAIN), GitHub's release downloads and the signed list. The relay
 // page is stood in for as in auto.mjs. The signing key is auto.mjs's throwaway one.
 //   node friendchecks.mjs <A state dir> <B state dir>
-import { execFileSync } from "node:child_process";
 import { createHash, createPrivateKey, randomBytes, sign } from "node:crypto";
 import { createServer } from "node:http";
 import puppeteer from "puppeteer-core";
-import { fileURLToPath } from "node:url";
-import { settled } from "./helpers.mjs";
-const WORKER = fileURLToPath(new URL("../../", import.meta.url));
+import { settled, siteSql as sql } from "./helpers.mjs";
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const [stateA, stateB] = process.argv.slice(2);
 const A = "http://localhost:8787";
@@ -22,8 +19,6 @@ const results = [];
 const check = (name, ok, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? `  (${extra})` : ""}`); };
 const errors = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const sql = (state, q) => JSON.parse(execFileSync("./node_modules/.bin/wrangler", ["d1", "execute", "afterwrd", "--local",
-  "--persist-to", state, "--json", "--command", q], { cwd: WORKER, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }))[0].results;
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const iso = (secondsAgo) => new Date(Date.now() - secondsAgo * 1000).toISOString().replace(/\.\d+Z$/, "Z");
 

@@ -6,11 +6,9 @@
 // events (adding one, answering, changing it, calling it off: only those going hear, and only of changes), leaving,
 // removing, and deleting the group.
 //   node groups.mjs <zip> <fixtures dir> <A state> <B state> <C state> <G state>
-import { execFileSync } from "node:child_process";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
-import { settled } from "./helpers.mjs";
-const WORKER = fileURLToPath(new URL("../../", import.meta.url));
+import { count as n, settled, siteSql as sql } from "./helpers.mjs";
 const OUT = process.env.OUT ?? fileURLToPath(new URL("./out/", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
@@ -21,9 +19,6 @@ const C = "http://localhost:8789";
 const G = "http://localhost:8790";
 const CODE = "local-test-setup-code";
 const GROUP_KEY = "local-test-group-key";
-const sql = (state, q) => JSON.parse(execFileSync("./node_modules/.bin/wrangler", ["d1", "execute", "afterwrd", "--local",
-  "--persist-to", state, "--json", "--command", q], { cwd: WORKER, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }))[0].results;
-const n = (state, q) => sql(state, `SELECT COUNT(*) AS n FROM ${q}`)[0].n;
 const results = [];
 const check = (name, ok, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? `  (${extra})` : ""}`); };
 const errors = [];

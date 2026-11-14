@@ -107,6 +107,7 @@ run_notifications() { # notifications on the owner's devices (src/push.js), thei
 }
 run_groups() { three_sites groups.mjs group; }
 run_polls() { three_sites polls.mjs group; }
+run_mentions() { three_sites mentions.mjs group; }
 run_events() { three_sites events.mjs group; }
 run_central() { # the installer at install.afterwrd.app, on 8791, with stand-ins on 8797 and 8799 (central.mjs runs them)
   stop
@@ -170,10 +171,10 @@ run_upgrade() { # $1: an older release tag
   git -C "$WORKER" worktree remove --force "$OUT/old"
 }
 
-if [ $# -eq 0 ]; then set -- core fresh albums notifications update auto friendchecks feed groups polls events checks central forged; fi
+if [ $# -eq 0 ]; then set -- core fresh albums notifications update auto friendchecks feed groups polls mentions events checks central forged; fi
 while [ $# -gt 0 ]; do
   case "$1" in
-    core|fresh|albums|update|auto|friendchecks|feed|groups|checks|central|forged|screenshots|notifications|polls|events) "run_$1" ;;
+    core|fresh|albums|update|auto|friendchecks|feed|groups|checks|central|forged|screenshots|notifications|polls|mentions|events) "run_$1" ;;
     upgrade) shift; run_upgrade "${1:?give an older release tag, e.g. v0.12.0}" ;;
     *) echo "Unknown suite: $1" >&2; FAILED=1 ;;
   esac

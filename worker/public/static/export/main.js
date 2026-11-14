@@ -15,10 +15,10 @@ const TABLES = ["settings", "facebook_people", "albums", "posts", "facebook_post
   "connections", "friend_links", "users", "groups", "group_mine", "post_versions", "comment_versions",
   "comments_elsewhere_versions", "events", "event_answers", "post_audience", "events_elsewhere"];
 
-const form = document.getElementById("export");
+const form = /** @type {HTMLFormElement} */ (document.getElementById("export"));
 const status = document.getElementById("status");
 const error = document.getElementById("error");
-const button = document.getElementById("go");
+const button = /** @type {HTMLButtonElement} */ (document.getElementById("go"));
 const site = location.origin;
 
 async function rows(table) {
@@ -39,9 +39,7 @@ const fileFor = (m) => `media/${m.hash}${EXTENSIONS[m.type] ?? ""}`;
 const megabytes = (n) => `${(n / 1e6).toLocaleString("en-GB", { maximumFractionDigits: n < 1e7 ? 1 : 0 })} MB`;
 
 // Sizes for the label, and a note where the download has to fit in memory.
-let media = [];
 rows("media").then((list) => {
-  media = list;
   const files = unique(list);
   if (files.length) {
     document.getElementById("size").textContent = `(${files.length.toLocaleString("en-GB")} files, ${megabytes(files.reduce((n, m) => n + (m.size ?? 0), 0))})`;
@@ -329,7 +327,6 @@ form.addEventListener("submit", async (event) => {
     status.textContent = "Reading the site…";
     const t = {};
     for (const table of TABLES) t[table] = await rows(table);
-    media = t.media;
 
     zip.configure({ useWebWorkers: false });
     const writer = new zip.ZipWriter(handle ? await handle.createWritable() : new zip.BlobWriter("application/zip"));

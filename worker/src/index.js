@@ -8,7 +8,7 @@
 import { handleAdmin } from "./admin.js";
 import { handleComments } from "./archive/comments.js";
 import { renderArchive } from "./archive/routes.js";
-import { currentUser, handleAuth } from "./auth.js";
+import { currentUser, handleAuth, safeNext } from "./auth.js";
 import { handleCloudflare } from "./cloudflare.js";
 import { handleConnectLink } from "./connect.js";
 import { handleFeed } from "./feed.js";
@@ -108,7 +108,6 @@ async function route(request, env, work) {
   // A friend checking their site at this site's invitation (checks.js): they aren't signed in here.
   if (url.pathname.startsWith("/_check/")) return handleCheck(request, env, url);
   const reading = request.method === "GET" || request.method === "HEAD";
-  const [, top, rest] = url.pathname.split("/");
   // The fonts are public, so the sign-in pages can use them too; they're open-licensed and say nothing about the site.
   if (reading && /^\/static\/fonts\/[\w-]+\.woff2$/.test(url.pathname)) return serveStatic(request, env);
   // The home-screen app's manifest, icons and service worker are public too: phones fetch them without
@@ -126,6 +125,48 @@ async function route(request, env, work) {
     if (!reading) return new Response("Not signed in", { status: 401 });
     return Response.redirect(`${url.origin}/_auth/login?next=${encodeURIComponent(url.pathname + url.search)}`, 302);
   }
+  // Every signed-in form and action is checked here, once: only this site's own pages may send them. (A browser always
+  // says which site a POST, PUT or DELETE comes from, in Origin.) So no handler below needs to, or can forget to.
+  if (!reading && request.headers.get("Origin") !== url.origin) return fromElsewhere(request);
+  return redrawn(request, env, url, user, work, await ownerRoute(request, env, url, user, work));
+}
+
+/**
+ * A form ui.js sends in place says which page its part is redrawn from (the Afterwrd-Redraw header: a path on this
+ * site). When it worked (the site sends you on), that page comes back in the same answer instead, marked
+ * Afterwrd-Redrawn: one trip over a slow phone network, not two. Anything else is answered as it was.
+ */
+async function redrawn(request, env, url, user, work, answer) {
+  const asked = request.headers.get("Afterwrd-Redraw");
+  if (request.method !== "POST" || !asked || ![302, 303].includes(answer.status)) return answer;
+  const location = answer.headers.get("Location");
+  if (!location || new URL(location, url).origin !== url.origin) return answer;
+  if (!asked.startsWith("/") || safeNext(asked, url) !== asked) return answer;
+  const page = new URL(asked, url.origin);
+  if (page.pathname.startsWith("/_")) return answer; // pages only, never another action
+  // The same reader (their session, and where they are: the page's times are in their time zone), asking for a page.
+  const reading = new Request(page, { headers: { Cookie: request.headers.get("Cookie") ?? "", Accept: "text/html" }, cf: request.cf });
+  const fresh = await renderArchive(reading, env, page, user, work);
+  if (fresh.status !== 200) return answer;
+  const headers = new Headers(fresh.headers);
+  headers.set("Afterwrd-Redrawn", "1");
+  headers.set("Cache-Control", "private, no-store");
+  for (const cookie of answer.headers.getSetCookie()) headers.append("Set-Cookie", cookie);
+  return new Response(fresh.body, { status: 200, headers });
+}
+
+/** A signed-in action sent from another site: refused, in the form its caller expects (JSON for the scripted steps). */
+function fromElsewhere(request) {
+  const message = "Request from another site";
+  const wantsJson = /json/.test(`${request.headers.get("Content-Type") ?? ""} ${request.headers.get("Accept") ?? ""}`);
+  return wantsJson ? new Response(JSON.stringify({ error: message }), { status: 403, headers: { "Content-Type": "application/json" } })
+    : new Response(message, { status: 403, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+}
+
+/** The owner's own pages and actions, once signed in (actions only from this site's own pages: see route). */
+async function ownerRoute(request, env, url, user, work) {
+  const reading = request.method === "GET" || request.method === "HEAD";
+  const [, top, rest] = url.pathname.split("/");
   if (url.pathname === "/_admin" || url.pathname.startsWith("/_admin/")) return handleAdmin(request, env, url, user);
   // Connecting to Cloudflare, for updating and groups (an hour's token in a cookie; cloudflare.js).
   // Background access for automatic updates is a Connect of its own (auto.js).

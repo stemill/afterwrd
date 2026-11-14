@@ -13,6 +13,7 @@ import { SECTIONS } from "../public/static/import/select.js";
 import { importPage } from "./views/import.js";
 import { HASH_RE, mediaStore } from "./media.js";
 import { html, json, pageData } from "./util.js";
+import { headerMe } from "./photos.js";
 
 // D1 limits statements to 100 KB of UTF-8; a JavaScript character is at most 3 bytes of it.
 const STATEMENT_CHARS = 30_000;
@@ -21,7 +22,7 @@ const SHARDS = [..."0123456789abcdef"];
 
 export async function handleImport(request, env, url, owner) {
   const path = url.pathname.slice("/_admin/import".length);
-  if (request.method === "GET" && path === "") return html(importPage(pageData(env, { owner: owner.name })));
+  if (request.method === "GET" && path === "") return html(importPage(pageData(env, { owner: owner.name, me: await headerMe(env.DB, owner) })));
 
   const file = /^\/files\/([0-9a-f]{64})$/.exec(path);
   if (request.method === "PUT" && file) return storeFile(request, env, file[1]);

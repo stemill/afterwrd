@@ -82,7 +82,6 @@ export async function handleChecksConnect(request, env, url) {
   }
   if (request.method === "GET" && path === "/checks-done") return html(donePage("/_cloudflare/checks-finish"));
   if (request.method === "POST" && path === "/checks-finish") {
-    if (request.headers.get("Origin") !== url.origin) return json({ error: "Request from another site" }, 403);
     const clear = `${START_COOKIE}=; Path=/_cloudflare; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
     const [state, verifier] = (readCookie(request, START_COOKIE) ?? "").split(".");
     const body = await request.json().catch(() => ({}));

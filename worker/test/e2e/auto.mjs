@@ -10,7 +10,7 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
-import { settled } from "./helpers.mjs";
+import { settled, sql } from "./helpers.mjs";
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const BASE = "http://localhost:8787";
@@ -20,8 +20,6 @@ const TEST_KEY = createPrivateKey({ key: Buffer.from("MC4CAQAwBQYDK2VwBCIEIAwWlX
 const results = [];
 const check = (name, ok, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? `  (${extra})` : ""}`); };
 const errors = [];
-const sql = (command) => JSON.parse(execFileSync("./node_modules/.bin/wrangler", ["d1", "execute", "afterwrd", "--local", "--json", "--command", command],
-  { cwd: WORKER, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }))[0].results;
 const state = () => JSON.parse(sql("SELECT value FROM settings WHERE key = 'auto_update'")[0]?.value ?? "{}");
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const iso = (secondsAgo) => new Date(Date.now() - secondsAgo * 1000).toISOString().replace(/\.\d+Z$/, "Z");

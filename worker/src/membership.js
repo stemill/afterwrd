@@ -44,6 +44,7 @@ import { callSite, KEY_RE, ownerName, PROTOCOL, siteOrigin } from "./peers.js";
 import { checkPhotos, removeUnusedFiles } from "./posts.js";
 import { signedFile } from "./share.js";
 import { html, json, now, randomToken, Refusal, sha256 } from "./util.js";
+import { cleanMentions, HERE, mentionTags, noteMentions } from "./mentions.js";
 
 const PENDING_SECONDS = 600; // a join half made is given up after this
 const MAX_PLANS = 200; // events in one group the owner's said they're going to and that aren't long over
@@ -71,7 +72,8 @@ function parseComments(collection, base, env) {
     const { name, from } = person(c?.attributedTo, env);
     const at = seconds(c?.published);
     return c?.type === "Note" && n && name && text(c.content, MAX_COMMENT) && at !== null
-      ? [{ id: Number(n[1]), name, from, text: c.content, created_at: at, ...parseEdits(c, at, MAX_COMMENT) }] : [];
+      ? [{ id: Number(n[1]), name, from, text: c.content, created_at: at, mentions: noteMentions(c, c.content, env, { here: true }),
+        ...parseEdits(c, at, MAX_COMMENT) }] : [];
   });
 }
 
@@ -86,6 +88,7 @@ export function parseGroupNote(note, site, n, env) {
   const attachments = Array.isArray(note.attachment) ? note.attachment.slice(0, 20) : [];
   return {
     id: Number(id), created_at: at, text: text(note.content, MAX_GROUP_TEXT * 2) || null, name, from,
+    mentions: noteMentions(note, text(note.content, MAX_GROUP_TEXT * 2) ?? "", env, { here: true }),
     ...parseEdits(note, at, MAX_GROUP_TEXT * 2),
     photos: attachments.map((m) => parseMedia(m, site)).filter(Boolean),
     comments: parseComments(note.replies, note.id, env),
@@ -106,6 +109,11 @@ function parseGroup(g, site, n, env) {
     owner: owner.name, ownerFrom: owner.from, members: count(g["afterwrd:members"]) ?? 1,
     role: ROLES.includes(g["afterwrd:role"]) ? g["afterwrd:role"] : "member",
     waiting: Number.isSafeInteger(waiting) && waiting >= 0 ? waiting : 0,
+    // Mentions (mentions.js): its members, to pick from, and whether the owner here may use @here, and anyone may.
+    people: (Array.isArray(g["afterwrd:people"]) ? g["afterwrd:people"].slice(0, 200) : [])
+      .map((p) => person(p, env)).filter((p) => p.name && p.from).map((p) => ({ name: p.name, origin: p.from })),
+    mayHere: g["afterwrd:mayHere"] === true,
+    hereAnyone: g["afterwrd:hereAnyone"] === true,
   };
 }
 
@@ -403,7 +411,10 @@ export async function claimGroup(env, url, id) {
 
 // --- the owner's part in a group (actions: see util.js Refusal) -----------------------------------------------------------
 
-/** One of the owner's groups by its id here (or, `unfinished`, one whose Worker this site made but didn't set up). */
+/**
+ * One of the owner's groups by its id here (or, `unfinished`, one whose Worker this site made but didn't set up).
+ * @returns {Promise<Row<"groups"> | null>}
+ */
 export async function findGroup(db, id, { unfinished = false } = {}) {
   const also = unfinished ? "OR (joined_at IS NULL AND script != '')" : "";
   return db.prepare(`SELECT * FROM groups WHERE id = ? AND (joined_at IS NOT NULL ${also})`).bind(Number(id)).first();
@@ -413,7 +424,7 @@ export async function findGroup(db, id, { unfinished = false } = {}) {
  * Sends a post to a group; its photos (already uploaded here) go as signed links, and are copied there. Returns
  * { id }, its number there.
  */
-export async function postToGroup(env, site, group, { text: words, photos, poll: asking = undefined }) {
+export async function postToGroup(env, site, group, { text: words, photos, poll: asking = undefined, mentions: given = null }) {
   const db = env.DB;
   const trouble = await checkPhotos(env, photos, MAX_GROUP_PHOTOS);
   if (trouble) throw new Refusal(trouble);
@@ -429,7 +440,7 @@ export async function postToGroup(env, site, group, { text: words, photos, poll:
   })));
   try {
     const reply = await call(group, "/_group/posts", { "@context": CONTEXT, type: "Note", mediaType: "text/plain", content: words, attachment,
-      ...(poll && { "afterwrd:poll": questionFor(poll) }) });
+      ...(poll && { "afterwrd:poll": questionFor(poll) }), ...mentionFields(given, words, env) });
     const prefix = groupPostId(group.origin, group.remote_id, "");
     const id = typeof reply.id === "string" && reply.id.startsWith(prefix) ? reply.id.slice(prefix.length) : "";
     if (!/^\d{1,15}$/.test(id)) throw unexpected();
@@ -450,15 +461,26 @@ export async function postToGroup(env, site, group, { text: words, photos, poll:
   }
 }
 
+/**
+ * Who a post or comment to a group mentions (mentions.js), as the note says it: Mention tags, and @here as
+ * "afterwrd:here". The group decides who's told, and whether @here is allowed.
+ */
+function mentionFields(given, words, env) {
+  const list = cleanMentions(given, words, env, { here: true });
+  const tags = mentionTags(list);
+  return { ...(tags.length && { tag: tags }), ...(list.some((m) => m.origin === HERE) && { "afterwrd:here": true }) };
+}
+
 /** Comments on post `postId` in a group. Returns { id }, its number there, or null if there's nothing to say. */
-export async function commentInGroup(env, group, postId, words) {
+export async function commentInGroup(env, group, postId, words, given = null) {
   if (!words) return null;
   if (!/^\d{1,15}$/.test(postId)) throw new Refusal("That isn't a post in this group.");
   if (words.length > MAX_COMMENT) throw new Refusal(`Comments can be up to ${MAX_COMMENT} characters.`);
   const post = groupPostId(group.origin, group.remote_id, postId);
   let reply;
   try {
-    reply = await call(group, "/_group/comments", { "@context": CONTEXT, type: "Note", mediaType: "text/plain", content: words, inReplyTo: post });
+    reply = await call(group, "/_group/comments", { "@context": CONTEXT, type: "Note", mediaType: "text/plain", content: words, inReplyTo: post,
+      ...mentionFields(given, words, env) });
   } catch (error) {
     throw new Refusal(`Couldn't send your comment: ${error.message}`);
   }
@@ -646,7 +668,6 @@ export async function admin(group, path, body = {}) {
 
 export async function handleGroupActions(request, env, url) {
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
-  if (request.headers.get("Origin") !== url.origin) return new Response("Request from another site", { status: 403 });
   const db = env.DB;
   const site = url.origin;
   const path = url.pathname.slice("/_groups".length);
@@ -669,7 +690,8 @@ export async function handleGroupActions(request, env, url) {
   try {
     if (action === "/posts") {
       const body = await request.json().catch(() => ({}));
-      await postToGroup(env, site, group, { text: cleanText(body.text), photos: Array.isArray(body.photos) ? body.photos : [], poll: body.poll });
+      await postToGroup(env, site, group, { text: cleanText(body.text), photos: Array.isArray(body.photos) ? body.photos : [], poll: body.poll,
+        mentions: body.mentions });
       return json({ ok: true });
     }
     if (action === "/link") return json({ link: (await admin(group, "link")).link });
@@ -691,7 +713,7 @@ export async function handleGroupActions(request, env, url) {
   try {
     if (action === "/comments") {
       const post = String(form.get("post") ?? "");
-      const made = await commentInGroup(env, group, post, cleanText(String(form.get("text") ?? "")));
+      const made = await commentInGroup(env, group, post, cleanText(String(form.get("text") ?? "")), form.get("mentions"));
       if (made) back.hash = `g${post}-${made.id}`;
     } else if (del) {
       await deleteInGroup(env, group, del[1], del[2]);
@@ -721,6 +743,10 @@ export async function handleGroupActions(request, env, url) {
         throw error;
       }
       return Response.redirect(`${site}/groups`, 303);
+    } else if (action === "/here") {
+      // Whether anyone in it may use @here, or only its owner and admins (mentions.js).
+      back.pathname = members.pathname;
+      await admin(group, "here", { on: form.get("anyone") === "1" });
     } else if (action === "/about") {
       back.pathname = members.pathname;
       await admin(group, "about", {
@@ -748,6 +774,7 @@ export async function handleMember(request, env, url, work) {
   const route = `${request.method} ${url.pathname}`;
   const db = env.DB;
   const match = /^Bearer (\S+)$/.exec(request.headers.get("Authorization") ?? "");
+  /** @type {Row<"groups"> | null} */
   const group = match && KEY_RE.test(match[1])
     ? await db.prepare("SELECT * FROM groups WHERE key_hash = ? AND origin IS NOT NULL").bind(await sha256(match[1])).first() : null;
 

@@ -7,8 +7,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
-import { settled } from "./helpers.mjs";
-const WORKER = fileURLToPath(new URL("../../", import.meta.url));
+import { settled, siteSql as sql } from "./helpers.mjs";
 const OUT = process.env.OUT ?? fileURLToPath(new URL("./out/", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
@@ -17,8 +16,6 @@ const A = "http://localhost:8787";
 const B = "http://localhost:8788";
 const C = "http://localhost:8789";
 const CODE = "local-test-setup-code";
-const sql = (state, q) => JSON.parse(execFileSync("./node_modules/.bin/wrangler", ["d1", "execute", "afterwrd", "--local",
-  "--persist-to", state, "--json", "--command", q], { cwd: WORKER, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }))[0].results;
 const results = [];
 const check = (name, ok, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? `  (${extra})` : ""}`); };
 const errors = [];
@@ -67,6 +64,21 @@ const feedCards = (page) => page.$$eval("article.from-friend", (l) => l.map((a) 
   comments: [...a.querySelectorAll(".comment")].map((c) => ({ name: c.querySelector("strong").textContent,
     from: c.querySelector(".from")?.textContent ?? "", text: c.querySelector(".said").textContent, canDelete: Boolean(c.querySelector(".under .delete")) })),
 })));
+// Home shows friends' posts from the copies a site keeps (feed.js), fetched again in the background: when a note says
+// something's new, or once a copy is a few minutes old. So what's changed on a friend's site can take a moment: Home
+// opened again until `ok(cards)`, or for `ms`. Returns the last cards seen.
+async function homeUntil(page, site, ok, ms = 20_000) {
+  let cards = [];
+  for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 500))) {
+    await page.goto(`${site}/`);
+    cards = await feedCards(page);
+    if (ok(cards)) break;
+  }
+  return cards;
+}
+// A copy made out of date here, as a change on the friend's site that sends no note would be within minutes: so Home
+// asks their site while it waits, as it does with no copy it can show.
+const copiesOld = (state) => sql(state, "UPDATE connections SET copy_until = 0");
 
 const ann = await owner(A, "Ann Example");
 const bob = await owner(B, "Bob Example");
@@ -156,6 +168,16 @@ const bobsPhoto = await bob.$eval("main article.own .collage a.tile", (a) => a.g
 await bob.goto(B + bobsPhoto);
 await Promise.all([bob.waitForNavigation(), bob.click('.photo-tools form:nth-of-type(1) button')]);
 check("Bob's own header shows his new picture", Boolean(await bob.$("header.site .face img")));
+const toolPages = ["/_admin", "/_admin/import", "/_admin/export", "/_admin/connections", "/_admin/update", "/_admin/photos/add"];
+const withoutPicture = [];
+for (const path of toolPages) {
+  await bob.goto(B + path);
+  if (!(await bob.$("header.site .face img"))) withoutPicture.push(path);
+}
+check("…and so do the pages behind it (devices, import, download, add a friend, update, adding photos)", !withoutPicture.length, withoutPicture.join(" "));
+// A new picture sends no note: Ann's site sees it when it next asks Bob's site, as opening his page does (Home itself
+// uses its copy of his posts, fetched again in the background once it's a few minutes old).
+await ann.goto(`${A}/friend/${sql(stateA, "SELECT id FROM connections")[0].id}/posts`);
 await ann.goto(`${A}/`);
 check("Ann's Home shows Bob's picture on his post", await ann.$eval("article.from-friend header img.who", (i) => i.getAttribute("src").startsWith("http://localhost:8788/files/")).catch(() => false));
 await ann.goto(`${A}/friend`);
@@ -206,13 +228,18 @@ check("Bob sees it Edited too", (await bob.$eval("main article.card:first-of-typ
 // Bob replies on his own site; Ann sees the reply in her Feed but can't delete it.
 await bob.type("main article.card:first-of-type .say textarea", "Thanks Ann");
 await Promise.all([settled(bob), bob.click("main article.card:first-of-type .say button")]);
-await ann.goto(`${A}/`);
-annFeed = await feedCards(ann);
+// His site's note about it (Ann commented there too) has hers fetch his posts again: the doorbell (peers.js).
+annFeed = await homeUntil(ann, A, (cards) => cards[0]?.comments.length === 2);
 check("Ann sees Bob's reply, not deletable by her", annFeed[0].comments.map((c) => c.text).join("|") === "Looks great, Bob! Where was it?|Thanks Ann"
   && !annFeed[0].comments[1].canDelete);
 
 // Bob's reply locks Ann's comment: her site no longer offers Edit, and Bob's refuses it.
 check("once Bob has replied, Ann can't change her comment", !(await ann.$(`${annComment} div.edit`)));
+// With a fresh copy of Bob's posts, Home doesn't ask his site at all.
+const askedAt = sql(stateA, "SELECT feed_checked_at FROM connections")[0].feed_checked_at;
+await ann.goto(`${A}/`);
+check("Home with a fresh copy of a friend's posts doesn't wait on their site", sql(stateA, "SELECT feed_checked_at FROM connections")[0].feed_checked_at === askedAt
+  && (await feedCards(ann))[0]?.comments.length === 2);
 const annRemoteId = sql(stateA, "SELECT remote_id FROM comments_elsewhere")[0].remote_id;
 const lateEdit = await fetch(`${B}/_peer/comments/${annRemoteId}/edit`, { method: "POST",
   headers: { Authorization: `Bearer ${sql(stateA, "SELECT their_key FROM connections")[0].their_key}`, "Content-Type": "application/json" },
@@ -237,8 +264,12 @@ check("…saying who replied, where, and what", note.what === "Bob Example repli
 // Comments from Bob's visitors (and other friends) stay on Bob's site.
 sql(stateB, `INSERT INTO comments (target, author_id, author_name, text, created_at, origin)
   SELECT target, NULL, 'Bob''s visitor', 'For Bob''s eyes', strftime('%s','now'), 'site' FROM comments LIMIT 1`);
+// No note for that: Ann's copy, once it's a few minutes old, is shown once more and fetched again in the background.
+sql(stateA, "UPDATE connections SET copied_at = copied_at - 3600");
 await ann.goto(`${A}/`);
-check("friends see the whole thread, visitors' comments included (as when visiting)", (await feedCards(ann))[0].comments.some((c) => c.text === "For Bob's eyes"));
+check("an old copy is still shown while it's fetched again", !(await feedCards(ann))[0].comments.some((c) => c.text === "For Bob's eyes"));
+check("friends see the whole thread, visitors' comments included (as when visiting)",
+  (await homeUntil(ann, A, (cards) => cards[0]?.comments.some((c) => c.text === "For Bob's eyes")))[0]?.comments.some((c) => c.text === "For Bob's eyes"));
 
 // Ann deletes her comment from her Feed.
 await ann.click("article.from-friend .comment .under details.more summary");
@@ -489,6 +520,7 @@ await bob.click("main article.card:first-of-type > header details.more summary")
 await bob.click("main article.card:first-of-type > header details.more a[href^='#edit']");
 await bob.$eval("main article.card:first-of-type > div.edit textarea", (t) => { t.value = "Off to the coast tomorrow"; });
 await Promise.all([settled(bob), bob.click("main article.card:first-of-type > div.edit button")]);
+copiesOld(stateA);
 await ann.goto(`${A}/`);
 const edited = await ann.$$eval("article.from-friend", (l) => l.map((a) => ({ text: a.querySelector(".text")?.textContent,
   was: a.querySelector(":scope > details.edited")?.textContent ?? "" })).find((p) => p.text === "Off to the coast tomorrow"));
@@ -587,12 +619,15 @@ await compose(ann, A, "Ann to all 46 friends");
 check("a post reaches a friend 46th in line (the outbox sends in batches)",
   await waitFor(() => sql(stateC, "SELECT COUNT(*) AS n FROM inbox WHERE kind = 'post'")[0].n === caraPostsBefore + 1, 20_000));
 await ann.goto(`${A}/`);
-check("Home asks at most 40 sites, Cara first as she's posted lately",
-  sql(stateA, "SELECT COUNT(*) AS n FROM connections WHERE feed_checked_at IS NOT NULL")[0].n <= 40
-  && (await feedCards(ann)).some((c) => c.who === "Cara Example"));
+check("Home still shows Cara's posts, from the copy her note had fetched", (await feedCards(ann)).some((c) => c.who === "Cara Example"));
 const notices = await ann.$$eval("p.notice", (l) => l.map((p) => p.textContent));
 const reachNotices = notices.filter((n) => /Couldn't (reach|load)/.test(n));
-check("sites that can't be reached are summed up in one line", reachNotices.length === 1 && /Couldn't reach 39 friends' sites/.test(reachNotices[0]), notices.join(" | "));
+// The notice counts the sites Home asked while it waited: no more than one page may (40), less any with a copy.
+check("Home asks at most 40 sites while it waits, and sums up those it couldn't reach in one line",
+  reachNotices.length === 1 && /Couldn't reach (\d+) friends' sites/.test(reachNotices[0]) && Number(/(\d+) friends/.exec(reachNotices[0])[1]) <= 40,
+  notices.join(" | "));
+check("…and asks the rest in the background, for next time", await waitFor(() =>
+  sql(stateA, "SELECT COUNT(*) AS n FROM connections WHERE id < 0 AND feed_checked_at IS NOT NULL")[0].n === 45, 20_000));
 const checkNotice = await ann.$eval("form.checked-notice", (f) => f.textContent.replace(/\s+/g, " ")).catch(() => "");
 check("a site nobody has checked suggests getting it checked", checkNotice.startsWith("Your site hasn't been checked yet") && checkNotice.includes("check it yourself"), checkNotice);
 await Promise.all([ann.waitForNavigation(), ann.click("form.checked-notice button.link")]);
@@ -629,10 +664,12 @@ sql(stateA, "DELETE FROM connections WHERE id >= 9000");
 // Cara removed Ann while Ann's site couldn't be told: Cara's site now says Ann's isn't connected.
 const caraId = sql(stateA, `SELECT id FROM connections WHERE origin = '${C}'`)[0].id;
 sql(stateC, "DELETE FROM connections");
+copiesOld(stateA);
 await ann.goto(`${A}/`);
 check("Home says nothing about a friend who's removed you",
   !(await ann.$$eval("p.notice", (l) => l.map((p) => p.textContent).join(" "))).includes("Cara"));
 check("…and remembers their site said no", sql(stateA, `SELECT said_no FROM connections WHERE id = ${caraId}`)[0].said_no === 1);
+check("…and forgets the copy of her posts at once", sql(stateA, `SELECT COUNT(*) AS n FROM friend_posts WHERE connection_id = ${caraId}`)[0].n === 0);
 await ann.goto(`${A}/friend/${caraId}/posts`);
 const caraNotice = await ann.$eval("p.notice", (p) => p.textContent).catch(() => "");
 check("her page says she may have removed you", caraNotice.includes("Cara Example may have removed you as a friend"), caraNotice);

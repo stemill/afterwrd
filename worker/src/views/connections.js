@@ -3,7 +3,7 @@ import { host } from "../peers.js";
 import { escape } from "../util.js";
 import { asset, FAVICON, ownerHeader } from "./nav.js";
 
-function shell(title, body, script = "") {
+function shell(me, title, body, script = "") {
   return `<!doctype html>
 <html lang="en-GB">
 <head>
@@ -14,7 +14,7 @@ function shell(title, body, script = "") {
 ${FAVICON}
 </head>
 <body>
-${ownerHeader("connections")}
+${ownerHeader("connections", me)}
 <main class="connections">
 ${body}
 </main>
@@ -34,8 +34,8 @@ const POST_SCRIPT = `
   }
   const error = document.getElementById("error");`;
 
-export function connectionsPage({ friends: connections, unchecked = false }) {
-  return shell("Add a friend", `
+export function connectionsPage({ friends: connections, unchecked = false, me = null }) {
+  return shell(me, "Add a friend", `
 <p class="crumbs"><a href="/friend">Friends</a> /</p>
 <h1>Add a friend</h1>
 <h2>Got a link from a friend?</h2>
@@ -117,8 +117,8 @@ ${connections.length ? `<table class="numbers">
   });`);
 }
 
-export function confirmPage({ name, origin }) {
-  return shell("Connect", `
+export function confirmPage({ name, origin, me = null }) {
+  return shell(me, "Connect", `
 <p class="crumbs"><a href="/_admin/connections">Add a friend</a> /</p>
 <h1>Add ${escape(name)} as a friend?</h1>
 <p>Their site is <strong>${escape(host(origin))}</strong>. Once they approve, you're friends: you'll each see the other's
@@ -141,8 +141,8 @@ posts and photos on your own site, and can comment on them. Either of you can re
   });`);
 }
 
-export function introducePage({ friend, others, maxNote }) {
-  return shell("Introduce", `
+export function introducePage({ friend, others, maxNote, me = null }) {
+  return shell(me, "Introduce", `
 <p class="crumbs"><a href="/friend">Friends</a> /</p>
 <h1>Introduce ${escape(friend.name)}</h1>
 ${others.length ? `<p class="meta">Choose a friend who'd like to know ${escape(friend.name)}. Both of them are told who you
@@ -154,8 +154,8 @@ introduced them to, and that it was you, and either can then ask the other to be
 </form>` : `<p>You'll need at least one other friend on afterwrd to introduce ${escape(friend.name)} to.</p>`}`);
 }
 
-export function togetherPage({ friends, max, maxNote }) {
-  return shell("Introduce friends to each other", `
+export function togetherPage({ friends, max, maxNote, me = null }) {
+  return shell(me, "Introduce friends to each other", `
 <p class="crumbs"><a href="/friend">Friends</a> /</p>
 <h1>Introduce friends to each other</h1>
 ${friends.length < 2 ? `<p>You'll need at least two friends on afterwrd who've approved you too.</p>` : `<p class="meta">Choose friends who'd like to know each other: a
@@ -222,9 +222,9 @@ then ask another to be friends. Nobody else is told anything, and nothing is kep
   });`);
 }
 
-export function introducedPage({ friend, other, trouble }) {
+export function introducedPage({ friend, other, trouble, me = null }) {
   const both = `${escape(friend.name)} and ${escape(other.name)}`;
-  return shell("Introduce", `
+  return shell(me, "Introduce", `
 <p class="crumbs"><a href="/friend">Friends</a> /</p>
 <h1>${trouble.length === 2 ? "Couldn't introduce them" : `Introduced ${both}`}</h1>
 ${trouble.length ? `<p>Couldn't reach ${trouble.map(escape).join("; ")}.</p>` : ""}
@@ -234,8 +234,8 @@ ${trouble.length ? `<p>Couldn't reach ${trouble.map(escape).join("; ")}.</p>` : 
 <p><a class="chip" href="/friend">Back to Friends</a></p>`);
 }
 
-export function connectionsMessage({ message }) {
-  return shell("Connect", `
+export function connectionsMessage({ message, me = null }) {
+  return shell(me, "Connect", `
 <p class="crumbs"><a href="/_admin/connections">Add a friend</a> /</p>
 <h1>Couldn't connect</h1>
 <p>${escape(message)}</p>`);

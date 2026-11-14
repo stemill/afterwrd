@@ -3,6 +3,7 @@
 // (where it was taken, the device), plus a thumbnail. Both go up by their SHA-256 through the import's file
 // endpoints; the caller then saves the post or album with the details this returns.
 const MAX_SIDE = 2560;
+/** @type {[number, number]} */
 const THUMB_BOX = [900, 600]; // as the import's thumbnails
 
 async function jpeg(bitmap, [boxWidth, boxHeight], quality) {
@@ -57,6 +58,11 @@ export async function uploadPhotos(files, say) {
 }
 
 /** Thumbnails of the photos picked so far, each with a ✕ to take it out again. */
+/**
+ * @param {HTMLInputElement} input
+ * @param {HTMLElement} list
+ * @param {{ max: number, onChange?: (picked: { file: File, url: string }[]) => void }} options
+ */
 export function picker(input, list, { max, onChange = () => {} }) {
   const picked = [];
   function show() {

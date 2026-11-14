@@ -99,6 +99,10 @@ function normalise(path) {
   return parts.join("/");
 }
 
+/**
+ * @param {any} source
+ * @param {{ log?: (line: string) => void }} [options]
+ */
 export async function ingest(source, { log = () => {} } = {}) {
   const tables = Object.fromEntries(Object.keys(ARCHIVE).map((t) => [t, []]));
   const people = new Map();
@@ -403,6 +407,7 @@ export async function ingest(source, { log = () => {} } = {}) {
   // My current profile picture and cover photo. The profile update history records each profile picture
   // change, so the latest one is current. Cover photo changes usually aren't recorded, so fall back to the
   // newest upload in the "Cover photos" album.
+  /** @type {Record<string, any>} */
   const latest = {};
   const history = await load("personal_information/profile_information/profile_update_history.json") ?? {};
   const updates = [...history.profile_updates_v2 ?? []].sort((a, b) => a.timestamp - b.timestamp);

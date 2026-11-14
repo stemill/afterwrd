@@ -9,7 +9,8 @@
 import { safeNext } from "../auth.js";
 import { messagePage } from "../views/pages.js";
 import { html, now, Refusal } from "../util.js";
-import { INBOX_JOIN, notifyComment } from "../notify.js";
+import { INBOX_JOIN, notifyComment, notifyMentions } from "../notify.js";
+import { cleanMentions, keptMentions } from "../mentions.js";
 import { commentVersions, EDIT_SECONDS, editableComments, editComment, versionsGone } from "../edits.js";
 
 export const MAX_COMMENT = 2000;
@@ -50,22 +51,23 @@ const GROUP_THERE = "FROM group_inbox i JOIN groups g ON g.id = i.group_id AND g
 // too, and friends' invitations to their events and changes to them, which their sites send (inbox, see notify.js and
 // events.js), and comments in groups and changes to events there the owner is going to. One list, newest first. For a
 // friend or group, `connection_id` is the friend or group, `friend` their name, `target` the post. `kind` is NULL for
-// a comment, or 'invite' (a friend's), 'changed' or 'cancelled' for an event. `own_post`: whether the owner wrote it
-// (groups). `date`: which date of a repeating group event, when a note's about one date.
-const FRIEND_NOTES = "('comment', 'invite', 'changed', 'cancelled')";
+// a comment, or 'invite' (a friend's), 'changed' or 'cancelled' for an event, or 'mention' (mentions.js: someone
+// mentioned the owner, or used @here in a group). `own_post`: whether the owner wrote it (groups). `date`: which date of
+// a repeating group event, when a note's about one date. `mentions`: who a comment here mentions (mentions.js).
+const FRIEND_NOTES = "('comment', 'invite', 'changed', 'cancelled', 'mention')";
 const NOTIFICATIONS_SQL = `
   SELECT 'here' AS source, c.id, c.target, c.text, c.created_at, COALESCE(u.name, c.author_name) AS name, c.author_id,
-    NULL AS connection_id, NULL AS friend, NULL AS own_post, NULL AS kind, NULL AS date
+    NULL AS connection_id, NULL AS friend, NULL AS own_post, NULL AS kind, NULL AS date, c.mentions
   FROM comments c LEFT JOIN users u ON u.id = c.author_id
   UNION ALL
   SELECT 'friend', i.id, i.target, i.text, i.created_at, i.actor, NULL, i.connection_id, co.name, NULL,
-    CASE WHEN i.kind = 'comment' THEN NULL ELSE i.kind END, NULL
+    CASE WHEN i.kind = 'comment' THEN NULL ELSE i.kind END, NULL, NULL
   FROM inbox i ${INBOX_JOIN} WHERE i.kind IN ${FRIEND_NOTES}
 
   UNION ALL
   SELECT 'group', i.id, CAST(i.post_id AS TEXT), i.text, i.created_at, i.actor, NULL, g.id, g.name,
     EXISTS (SELECT 1 FROM group_mine m WHERE m.site = g.origin AND m.remote_group = g.remote_id AND m.kind = 'post' AND m.post_id = i.post_id),
-    i.kind, i.date
+    i.kind, i.date, NULL
   ${GROUP_THERE}`;
 
 /** The newest notifications, for the Notifications page. */
@@ -108,12 +110,12 @@ export const commentable = (found) => (found?.post ?? found?.photo)?.source === 
 
 export async function handleComments(request, env, url, user) {
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
-  if (request.headers.get("Origin") !== url.origin) return new Response("Request from another site", { status: 403 });
   const form = await request.formData().catch(() => new FormData());
   const back = new URL(safeNext(String(form.get("back") ?? "/"), url), url.origin);
   try {
     if (url.pathname === "/_comments") {
-      const made = await addComment(env, url.origin, user, { target: String(form.get("target") ?? ""), text: String(form.get("text") ?? "") });
+      const made = await addComment(env, url.origin, user, { target: String(form.get("target") ?? ""), text: String(form.get("text") ?? ""),
+        mentions: form.get("mentions") });
       if (made) back.hash = `c${made.id}`;
       return Response.redirect(back.href, 303);
     }
@@ -138,8 +140,11 @@ export async function handleComments(request, env, url, user) {
 
 // --- actions (see util.js Refusal) -----------------------------------------------------------------------------------
 
-/** The owner comments on their own post or photo (`target`, its key). Returns { id }, or null if there's nothing to say. */
-export async function addComment(env, origin, user, { target, text }) {
+/**
+ * The owner comments on their own post or photo (`target`, its key), perhaps mentioning friends (mentions.js). Returns
+ * { id }, or null if there's nothing to say.
+ */
+export async function addComment(env, origin, user, { target, text, mentions: given = null }) {
   const db = env.DB;
   text = text.replace(/\r\n?/g, "\n").trim();
   if (!text) return null;
@@ -148,13 +153,15 @@ export async function addComment(env, origin, user, { target, text }) {
   if (!found) throw new Refusal("That's no longer here.", 404);
   if (!commentable(found)) throw new Refusal("Only posts and photos added on afterwrd take comments.", 403);
   // The limits are checked in the same statement as the insert, so comments sent all at once can't slip past.
-  const row = await db.prepare(`INSERT INTO comments (target, author_id, author_name, text, created_at, origin)
-    SELECT ?1, ?2, ?3, ?4, ?5, ?6
+  const mentions = cleanMentions(given, text, env);
+  const row = await db.prepare(`INSERT INTO comments (target, author_id, author_name, text, created_at, origin, mentions)
+    SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?10
     WHERE (SELECT COUNT(*) FROM comments WHERE author_id = ?2 AND created_at > ?5 - ?7) < ?8
       AND (SELECT COUNT(*) FROM comments WHERE author_id = ?2 AND created_at > ?5 - 86400) < ?9
-    RETURNING id`).bind(target, user.id, user.name, text, now(), "site", RATE.seconds, RATE.count, DAILY).first();
+    RETURNING id`).bind(target, user.id, user.name, text, now(), "site", RATE.seconds, RATE.count, DAILY, keptMentions(mentions)).first();
   if (!row) throw new Refusal("That's a lot of comments for now. Try again later.", 429);
-  await notifyComment(env, origin, target, { name: user.name, text });
+  await notifyComment(env, origin, target, { name: user.name, text, mentions });
+  await notifyMentions(env, origin, target, { name: user.name, text, mentions, comment: true });
   return { id: row.id };
 }
 

@@ -11,11 +11,13 @@ const ROWS_PER_REQUEST_BYTES = 150_000;
 const FILE_BATCH = 24; // files prepared, checked and uploaded together
 const PARALLEL = 4;
 
+/** @type {(id: string) => any} the page's own elements, each a different kind (inputs, a progress bar, lists) */
 const $ = (id) => document.getElementById(id);
 let chosen = null;
 
-$("zips").addEventListener("change", (e) => pick(e.target.files.length ? { zips: [...e.target.files] } : null));
-$("folder").addEventListener("change", (e) => pick(e.target.files.length ? { folder: e.target.files } : null));
+const filesOf = (e) => /** @type {HTMLInputElement} */ (e.target).files;
+$("zips").addEventListener("change", (e) => pick(filesOf(e).length ? { zips: [...filesOf(e)] } : null));
+$("folder").addEventListener("change", (e) => pick(filesOf(e).length ? { folder: filesOf(e) } : null));
 $("go").addEventListener("click", () => run().catch(fail));
 
 function pick(selection) {
@@ -90,7 +92,7 @@ async function eachLimited(items, limit, work) {
 // --- the import --------------------------------------------------------------
 
 async function run() {
-  const sections = [...document.querySelectorAll("input[name=section]:checked")].map((i) => i.value);
+  const sections = [.../** @type {NodeListOf<HTMLInputElement>} */ (document.querySelectorAll("input[name=section]:checked"))].map((i) => i.value);
   if (!sections.length) throw new Error("Tick at least one section to publish.");
   $("go").disabled = true;
   $("error").textContent = "";
@@ -104,7 +106,7 @@ async function run() {
   const { tables, me } = await ingest(source, { log: () => {} });
   progress(1, 1, `${me}: ${tables.posts.length.toLocaleString("en-GB")} posts, ${tables.media.length.toLocaleString("en-GB")} photos and videos`);
 
-  const locations = document.getElementById("locations").checked;
+  const locations = $("locations").checked;
   const { tables: publish, tooBig } = select(tables, sections, (m) => (source.has(m.file) ? source.size(m.file) : null),
     { locations });
   for (const [path, size] of tooBig) note(`Left out ${path} (${sizeText(size)}): too big for the site.`);

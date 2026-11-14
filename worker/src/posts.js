@@ -12,7 +12,8 @@ import { newPostKey } from "../public/static/activity.js";
 import { photoKey } from "./archive/comments.js";
 import { HASH_RE, mediaStore } from "./media.js";
 import { html, json, now, Refusal } from "./util.js";
-import { notifyNewPost } from "./notify.js";
+import { notifyMentions, notifyNewPost } from "./notify.js";
+import { cleanMentions, keptMentions } from "./mentions.js";
 import { safeNext } from "./auth.js";
 import { answerHere, readPoll } from "./polls.js";
 import { editPost, MAX_POST_TEXT, versionsGone } from "./edits.js";
@@ -46,11 +47,11 @@ export function addPhotos(db, photos, { albumId = null, role = null, postKey = n
 }
 
 /** A new post's row: its address, made now. Returns [statement, key]. */
-export function newPost(db, { text = null, title = null }) {
+export function newPost(db, { text = null, title = null, mentions = null }) {
   const at = now();
   const key = newPostKey(at);
-  return [db.prepare("INSERT INTO posts (key, source, created_at, title, text) VALUES (?, 'afterwrd', ?, ?, ?)")
-    .bind(key, at, title, text), key];
+  return [db.prepare("INSERT INTO posts (key, source, created_at, title, text, mentions) VALUES (?, 'afterwrd', ?, ?, ?, ?)")
+    .bind(key, at, title, text, mentions), key];
 }
 
 /**
@@ -134,8 +135,8 @@ export async function handlePosts(request, env, url) {
 // --- actions (see util.js Refusal) -----------------------------------------------------------------------------------
 
 /**
- * A new post: {text, photos: [{hash, thumb_hash, width, height, size}], poll}, the photos already uploaded; with a
- * poll (polls.js readPoll), the text is its question. Friends are told.
+ * A new post: {text, photos: [{hash, thumb_hash, width, height, size}], poll, mentions}, the photos already uploaded;
+ * with a poll (polls.js readPoll), the text is its question. Friends are told, and those it mentions (mentions.js).
  */
 export async function createPost(env, origin, body) {
   const db = env.DB;
@@ -149,7 +150,8 @@ export async function createPost(env, origin, body) {
   const problem = await checkPhotos(env, photos);
   if (problem) throw new Refusal(problem);
   // One transaction: the post, its photos (in "Posted on afterwrd") and its poll.
-  const [post, key] = newPost(db, { text: text || null });
+  const mentions = cleanMentions(body.mentions, text, env);
+  const [post, key] = newPost(db, { text: text || null, mentions: keptMentions(mentions) });
   await db.batch([
     post,
     ...(photos.length ? [roleAlbum(db, "posts"), ...addPhotos(db, photos, { role: "posts", postKey: key })] : []),
@@ -157,6 +159,8 @@ export async function createPost(env, origin, body) {
       .bind(key, JSON.stringify(poll.options), poll.multiple, poll.closes_at)] : []),
   ]);
   await notifyNewPost(env, origin, key);
+  const owner = await db.prepare("SELECT name FROM users LIMIT 1").first();
+  await notifyMentions(env, origin, key, { name: String(owner?.name ?? ""), text, mentions });
 }
 
 /**

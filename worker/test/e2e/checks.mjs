@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
+import { sql } from "./helpers.mjs";
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const BASE = "http://localhost:8787";
@@ -16,8 +17,6 @@ const ACCOUNT = "0123456789abcdef0123456789abcdef";
 const results = [];
 const check = (name, ok, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? `  (${extra})` : ""}`); };
 const errors = [];
-const sql = (command) => JSON.parse(execFileSync("./node_modules/.bin/wrangler", ["d1", "execute", "afterwrd", "--local", "--json", "--command", command],
-  { cwd: WORKER, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }))[0].results;
 const sha = (text) => createHash("sha256").update(text).digest("hex");
 const b64url = (buf) => buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 

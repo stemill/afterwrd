@@ -9,19 +9,22 @@
 // A notification is encrypted for this device by its own site (src/webpush.js): { title, body, url, tag }. tag: which
 // event it's about, so a change takes the place of the invitation still showing, rather than adding another.
 
-self.addEventListener("install", () => self.skipWaiting());
+/** This worker's own scope, as what it is (for the type checks: tsconfig.sw.json). @type {ServiceWorkerGlobalScope} */
+const sw = /** @type {any} */ (self);
+
+sw.addEventListener("install", () => sw.skipWaiting());
 // Navigation preload: the browser starts fetching a page while this script wakes up, so standing in between costs
 // nothing.
-self.addEventListener("activate", (event) => event.waitUntil(Promise.all([
-  self.clients.claim(),
-  self.registration.navigationPreload?.enable().catch(() => {}),
+sw.addEventListener("activate", (event) => event.waitUntil(Promise.all([
+  sw.clients.claim(),
+  sw.registration.navigationPreload?.enable().catch(() => {}),
 ])));
 
-self.addEventListener("fetch", (event) => {
+sw.addEventListener("fetch", (event) => {
   // Only opening a page. Not forms being sent (a POST), nor anything a page asks for itself, and nothing at all in a
   // browser without navigation preload: those go to the site as normal, untouched.
   const { request } = event;
-  if (request.mode !== "navigate" || request.method !== "GET" || !self.registration.navigationPreload) return;
+  if (request.mode !== "navigate" || request.method !== "GET" || !sw.registration.navigationPreload) return;
   event.respondWith((async () => {
     try {
       // The page as the browser fetched it. Preload is switched on before this worker handles anything (activate),
@@ -93,7 +96,7 @@ button { font: 800 1rem "Nunito", system-ui, sans-serif; background: var(--butto
     "X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin" } });
 }
 
-self.addEventListener("push", (event) => {
+sw.addEventListener("push", (event) => {
   let message = {};
   try {
     message = event.data ? event.data.json() : {};
@@ -107,8 +110,8 @@ self.addEventListener("push", (event) => {
 // One notification per event. Phones (Chrome on Android) don't make a sound for a notification that replaces one
 // already showing, so a new one takes that event's last one away and comes as new.
 async function show(message, about, text) {
-  if (about) (await self.registration.getNotifications()).filter((n) => n.data?.about === about).forEach((n) => n.close());
-  return self.registration.showNotification(text(message.title, 100) || "afterwrd", {
+  if (about) (await sw.registration.getNotifications()).filter((n) => n.data?.about === about).forEach((n) => n.close());
+  return sw.registration.showNotification(text(message.title, 100) || "afterwrd", {
     body: text(message.body, 500),
     tag: about ? `${about}-${Date.now()}` : undefined,
     icon: "/static/app/icon-192.png",
@@ -119,39 +122,39 @@ async function show(message, about, text) {
 // The device's push service sometimes gives it a new address (Firefox does, now and then). The site is told, so
 // notifications carry on there; the browser sends the session's cookie with it, as from a page. Without the old
 // subscription to go on, nothing can be done here: Events shows notifications as off, to turn on again.
-self.addEventListener("pushsubscriptionchange", (event) => {
+sw.addEventListener("pushsubscriptionchange", (event) => {
   event.waitUntil((async () => {
     const old = event.oldSubscription;
     const key = old?.options?.applicationServerKey;
     if (!old || !key) return;
-    const fresh = event.newSubscription ?? await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+    const fresh = event.newSubscription ?? await sw.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
     await fetch("/_push/devices/renew", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ old: old.endpoint, ...fresh.toJSON() }) });
   })().catch(() => {}));
 });
 
-self.addEventListener("notificationclick", (event) => {
+sw.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const url = sameSite(event.notification.data && event.notification.data.url);
   event.waitUntil((async () => {
     // A window already on Events or Notifications goes to the event; anything else (an import, a download being made)
     // is left alone, and it opens in a window of its own.
-    const open = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-    const there = open.find((c) => new URL(c.url).origin === self.location.origin && /^\/(events|activity)\b/.test(new URL(c.url).pathname));
+    const open = await sw.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const there = open.find((c) => new URL(c.url).origin === sw.location.origin && /^\/(events|activity)\b/.test(new URL(c.url).pathname));
     if (there?.navigate) {
       await there.focus();
       if (await there.navigate(url).catch(() => null)) return null;
     }
-    return self.clients.openWindow(url);
+    return sw.clients.openWindow(url);
   })());
 });
 
 /** A page on this site only, as a whole address (a path alone like "//elsewhere" would leave it): anything else is Home. */
 function sameSite(value) {
-  const home = new URL("/", self.location.origin).href;
+  const home = new URL("/", sw.location.origin).href;
   try {
-    const url = new URL(typeof value === "string" ? value : "/", self.location.origin);
-    return url.origin === self.location.origin && !url.pathname.startsWith("//") ? url.href : home;
+    const url = new URL(typeof value === "string" ? value : "/", sw.location.origin);
+    return url.origin === sw.location.origin && !url.pathname.startsWith("//") ? url.href : home;
   } catch {
     return home;
   }

@@ -34,7 +34,8 @@ import { commentable, findTarget, MAX_COMMENT } from "./archive/comments.js";
 import { editComment, versionsGone } from "./edits.js";
 import { notes, ownerActor, photoShared, postShared, SHARED_SQL, shareAlbum, shareAlbums, sharePhoto, sharePost, sharePosts } from "./share.js";
 import { json, now, Refusal, sha256 } from "./util.js";
-import { notifyComment, receiveNote } from "./notify.js";
+import { notifyComment, notifyMentions, pushAllowed, receiveNote } from "./notify.js";
+import { keptMentions, noteMentions } from "./mentions.js";
 import { receiveIntroduction } from "./connect.js";
 import { receiveChecked, receiveCheckRequest } from "./checks.js";
 import { giveCheckToken, receiveCheckFailed, receiveCheckSoon } from "./friendchecks.js";
@@ -42,6 +43,7 @@ import { notifyLater } from "./push.js";
 import { answerHere, pollObject, sitePolls } from "./polls.js";
 import { answerFromFriend, friendGone } from "./events.js";
 import { TOO_MANY_ANSWERS } from "./limits.js";
+import { outbox } from "./outbox.js";
 
 const FEED_POSTS = 30;
 const TIMEOUT_MS = 8000;
@@ -123,7 +125,10 @@ async function readLimited(response, limit) {
   return new TextDecoder().decode(await new Blob(parts).arrayBuffer());
 }
 
-/** The connection whose key this request carries (whether or not it's finished connecting), or null. */
+/**
+ * The connection whose key this request carries (whether or not it's finished connecting), or null.
+ * @returns {Promise<Row<"connections"> | null>}
+ */
 async function peerFrom(request, env) {
   const match = /^Bearer (\S+)$/.exec(request.headers.get("Authorization") ?? "");
   if (!match || !KEY_RE.test(match[1])) return null;
@@ -210,14 +215,31 @@ export async function handlePeer(request, env, url, work) {
     // Only what they're shown: something unshared answers as if it weren't there.
     if (!found) return json({ error: "That isn't there any more." }, 404);
     if (!commentable(found)) return json({ error: "Only posts and photos added on afterwrd take comments." }, 403);
+    // Who it mentions (mentions.js): on someone else's post, only its writer (the owner here) and those who've already
+    // commented on it; and of those, this site tells only who can still see it (notifyMentions).
+    const { results: there } = await db.prepare("SELECT DISTINCT origin FROM comments WHERE target = ? AND origin IS NOT NULL")
+      .bind(target).all();
+    const inThread = new Set(there.map((r) => r.origin));
+    const mentions = noteMentions(note, text, env)
+      .filter((m) => m.origin === url.origin || (m.origin !== peer.origin && inThread.has(m.origin)));
     // Limits checked in the same statement as the insert, so comments sent all at once can't slip past.
-    const row = await db.prepare(`INSERT INTO comments (target, author_id, author_name, text, created_at, origin)
-      SELECT ?1, NULL, ?2, ?3, ?4, ?5
+    const row = await db.prepare(`INSERT INTO comments (target, author_id, author_name, text, created_at, origin, mentions)
+      SELECT ?1, NULL, ?2, ?3, ?4, ?5, ?9
       WHERE (SELECT COUNT(*) FROM comments WHERE origin = ?5 AND created_at > ?4 - ?6) < ?7
         AND (SELECT COUNT(*) FROM comments WHERE origin = ?5 AND created_at > ?4 - 86400) < ?8
-      RETURNING id`).bind(target, peer.name, text, now(), peer.origin, RATE.seconds, RATE.count, DAILY).first();
+      RETURNING id`).bind(target, peer.name, text, now(), peer.origin, RATE.seconds, RATE.count, DAILY, keptMentions(mentions)).first();
     if (!row) return json({ error: "That's a lot of comments for now. Try again later." }, 429);
-    await notifyComment(env, url.origin, target, { name: peer.name, text, from: peer.origin });
+    await notifyComment(env, url.origin, target, { name: peer.name, text, from: peer.origin, mentions });
+    await notifyMentions(env, url.origin, target, { name: peer.name, text, mentions, comment: true, from: peer.origin });
+    // The owner here mentioned: their phones, as for an event (push.js), if they've said yes to mentions, within the
+    // same allowance per friend as mention notes (notify.js MENTION_PUSH); the newest per post in place of the last.
+    if (mentions.some((m) => m.origin === url.origin) && await pushAllowed(db,
+      "SELECT COUNT(*) AS n FROM comments WHERE origin = ?1 AND created_at > ?2 AND instr(mentions, ?3) > 0",
+      peer.origin, now(), `"origin":${JSON.stringify(url.origin)}`)) {
+      notifyLater(env, url.origin, work, { kind: "mention", title: peer.name, text: `Mentioned you: ${text}`,
+        hidden: "Mentioned you in a comment", url: target.startsWith("post-") ? `/posts/${target}#c${row.id}` : "/activity",
+        tag: `mention-${target}` });
+    }
     return json({ id: commentId(url.origin, target, row.id) });
   }
 
@@ -248,8 +270,11 @@ export async function handlePeer(request, env, url, work) {
   }
 
   if (route === "POST /_peer/notify") {
-    const [body, status] = await receiveNote(db, peer, await request.json().catch(() => ({})),
+    const [body, status, kept] = await receiveNote(db, peer, await request.json().catch(() => ({})),
       (notice) => notifyLater(env, url.origin, work, notice));
+    // A note kept (they've posted, or commented where the owner did, within notify.js's limits) is a doorbell: their
+    // newest posts are fetched again in the background, so Home has them (feed.js). Their site isn't kept waiting.
+    if (kept) work?.waitUntil?.(outbox(env).refresh([peer.id]).catch((error) => console.error("Refreshing on a note:", error.message)));
     return json(body, status);
   }
 

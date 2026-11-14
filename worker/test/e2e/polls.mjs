@@ -4,11 +4,9 @@
 // itself or when its writer closes it; forged answers are refused. Then the same in a group, where only the writer's
 // site is told who chose what, and leaving takes a member's answers with them.
 //   node polls.mjs <zip> <fixtures dir> <A state> <B state> <C state> <G state>
-import { execFileSync } from "node:child_process";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
-import { settled } from "./helpers.mjs";
-const WORKER = fileURLToPath(new URL("../../", import.meta.url));
+import { count as n, settled, siteSql as sql } from "./helpers.mjs";
 const OUT = process.env.OUT ?? fileURLToPath(new URL("./out/", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
@@ -19,9 +17,9 @@ const C = "http://localhost:8789";
 const G = "http://localhost:8790";
 const CODE = "local-test-setup-code";
 const GROUP_KEY = "local-test-group-key";
-const sql = (state, q) => JSON.parse(execFileSync("./node_modules/.bin/wrangler", ["d1", "execute", "afterwrd", "--local",
-  "--persist-to", state, "--json", "--command", q], { cwd: WORKER, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }))[0].results;
-const n = (state, q) => sql(state, `SELECT COUNT(*) AS n FROM ${q}`)[0].n;
+// Home shows friends' posts from the copy a site keeps (feed.js). Answers and closing send no note, so they reach a
+// friend's Home when its copy is next fetched, within minutes: made out of date here, so Home asks while it waits.
+const copiesOld = (state) => sql(state, "UPDATE connections SET copy_until = 0");
 const results = [];
 const check = (name, ok, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? `  (${extra})` : ""}`); };
 const errors = [];
@@ -133,6 +131,7 @@ check("one tap answers it", counts(annPoll) === "1,0,0" && chosen(annPoll) === "
 check("…without a new page", !new URL(ann.url()).hash, ann.url());
 
 // Bob answers from his Home; he sees the totals and his own choice, never who.
+copiesOld(stateB);
 await bob.goto(`${B}/`);
 let bobPoll = await pollIn(bob, "article.from-friend");
 check("Bob's Home shows Ann's poll with its totals", counts(bobPoll) === "1,0,0" && !chosen(bobPoll) && bobPoll.who === null && !bobPoll.canClose, JSON.stringify(bobPoll));
@@ -145,6 +144,7 @@ check("…and his site keeps nothing about it", !JSON.stringify(sql(stateB, "SEL
   || n(stateB, "poll_votes") === 0);
 await cat.goto(`${C}/`);
 await choose(cat, "article.from-friend", 1);
+copiesOld(stateB);
 await bob.goto(`${B}/`);
 bobPoll = await pollIn(bob, "article.from-friend");
 check("Bob sees Cat's answer counted, but not that it's hers", counts(bobPoll) === "1,2,0" && !(await text(bob, "article.from-friend")).includes("Cat"), JSON.stringify(bobPoll));
@@ -179,6 +179,7 @@ annPoll = await pollIn(ann, "article.own");
 check("Ann closes her poll: the totals stay, the buttons go", counts(annPoll) === "1,1,1" && annPoll.buttons === 0 && annPoll.facts.includes("Closed") && !annPoll.canClose, JSON.stringify(annPoll));
 check("…and no answer is taken after, or taken back", (await vote([0])).status === 400 && (await vote([])).status === 400
   && sql(stateA, `SELECT choices FROM poll_votes WHERE voter = '${B}'`)[0]?.choices === 4);
+copiesOld(stateB);
 await bob.goto(`${B}/`);
 bobPoll = await pollIn(bob, "article.from-friend");
 check("Bob sees it closed, his answer still marked", bobPoll.facts.includes("Closed") && bobPoll.buttons === 0 && chosen(bobPoll) === "Sat 19th", JSON.stringify(bobPoll));
@@ -196,8 +197,19 @@ await bob.click("article.from-friend .poll-option:nth-of-type(3) input");
 await Promise.all([settled(bob), bob.click("article.from-friend .poll-form button.chip")]);
 bobPoll = await pollIn(bob, "article.from-friend");
 check("Bob picks two", counts(bobPoll) === "1,0,1" && chosen(bobPoll) === "Sandwiches,Flask of tea", JSON.stringify(bobPoll));
+// Bob's answer had his site fetch Ann's posts again (feed.js copyChanged): once it has, his Home shows its copy.
+const past = Math.floor(Date.now() / 1000) - 1;
+for (const end = Date.now() + 15_000; Date.now() < end && !(sql(stateB, "SELECT copy_until FROM connections")[0].copy_until > past + 600);) {
+  await new Promise((r) => setTimeout(r, 300));
+}
+// A copy fetched before the poll's closing time shows it closed once that's passed, without asking Ann's site.
+sql(stateB, `UPDATE friend_posts SET data = json_set(data, '$.poll.closes_at', ${past}) WHERE data LIKE '%Flask of tea%'`);
+await bob.goto(`${B}/`);
+bobPoll = await pollIn(bob, "article.from-friend");
+check("a copy of a friend's poll shows it closed once its time has passed", bobPoll.facts.includes("Closed") && bobPoll.ticks === 0, JSON.stringify(bobPoll));
 const multiPost = sql(stateA, "SELECT post_id FROM polls WHERE multiple = 1")[0].post_id;
-sql(stateA, `UPDATE polls SET closes_at = ${Math.floor(Date.now() / 1000) - 1} WHERE post_id = ${multiPost}`);
+sql(stateA, `UPDATE polls SET closes_at = ${past} WHERE post_id = ${multiPost}`);
+copiesOld(stateB);
 await bob.goto(`${B}/`);
 bobPoll = await pollIn(bob, "article.from-friend");
 check("a poll closes by itself at its time", bobPoll.facts.includes("Closed") && bobPoll.ticks === 0, JSON.stringify(bobPoll));

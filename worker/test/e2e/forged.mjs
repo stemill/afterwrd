@@ -1,7 +1,7 @@
 // What a hostile friend's site might send, through the real parsing code.
 // The real friends.js and feed.js, bundled by run.sh (with a stand-in for Cloudflare's runtime) into $OUT/bundle.mjs.
 import { pathToFileURL } from "node:url";
-const { callSite, cleanFeed, icsFile, loadRelease, markMine, markMineInGroup, parseEvent, parseGroupPage, parseMedia, readEventForm, serveStatic, siteOrigin, findOrCreateDatabase, findWorker } = await import(pathToFileURL(`${process.env.OUT}/bundle.mjs`).href);
+const { cleanMentions, linkify, noteMentions, callSite, cleanFeed, icsFile, loadRelease, markMine, markMineInGroup, parseEvent, parseGroupPage, parseMedia, readEventForm, serveStatic, siteOrigin, findOrCreateDatabase, findWorker } = await import(pathToFileURL(`${process.env.OUT}/bundle.mjs`).href);
 const B = "https://bob.example";
 const A = "https://ann.example";
 const hash = "a".repeat(64);
@@ -25,11 +25,28 @@ const feed = cleanFeed(note([reply(1, { type: "Person", id: "https://[", name: "
 check("a malformed site address on a comment doesn't break the Feed", feed.posts[0].comments.find((c) => c.id === 1)?.from === null);
 
 // Ann's site sent comment 3 (and remembers what it said); comment 2 claims to be Ann's but she never sent it.
-const db = { prepare: () => ({ bind: () => ({ all: async () => ({ results: [{ remote_id: 3, text: "What Ann actually wrote" }] }) }) }) };
+const db = { prepare: () => ({ bind: () => ({ all: async () => ({ results: [{ connection_id: 1, target: "post-1700000000-0b918c1b", remote_id: 3, text: "What Ann actually wrote" }] }) }) }) };
 const shown = await markMine(db, 1, "post-1700000000-0b918c1b", feed.posts[0].comments, A);
 check("a comment falsely claiming to be Ann's is left out", !shown.some((c) => c.id === 2));
 check("Ann's real comment shows the words her site kept", shown.find((c) => c.id === 3)?.text === "What Ann actually wrote" && shown.find((c) => c.id === 3).mine);
 check("other people's comments still show, not as Ann's", shown.find((c) => c.id === 4)?.mine === false);
+
+// Mentions (mentions.js): only names the words really say, to real sites, ten at most, and cheap to turn down.
+const env = { ALLOW_LOCAL_SITES: "1" };
+const ann = [{ name: "Ann Example", origin: "https://ann.example" }];
+const names = (text, list, here = false) => cleanMentions(list, text, env, { here }).map((m) => m.name).join();
+check("a mention needs @ and the whole name in the words", names("Hi @Ann Example!", ann) === "Ann Example" && names("Hi Ann Example", ann) === ""
+  && names("Hi @Ann Examples", ann) === "" && names("mail bob@Ann Example", ann) === "" && names("@@Ann Example", ann) === "");
+check("…to a real site", names("@Ann", [{ name: "Ann", origin: "javascript:alert(1)" }]) === "" && names("@Ann", [{ name: "Ann", origin: "https://a.example/x" }]) === "Ann");
+check("…@here only where it's allowed (groups)", names("x @here", [{ name: "here", origin: "here" }]) === "" && names("x @here", [{ name: "here", origin: "here" }], true) === "here");
+check("…ten at most", cleanMentions(Array.from({ length: 30 }, (_, i) => ({ name: `P${i}`, origin: `https://p${i}.example` })),
+  Array.from({ length: 30 }, (_, i) => `@P${i}`).join(" "), env).length === 10);
+const started = performance.now();
+const flood = { tag: Array.from({ length: 5000 }, (_, i) => ({ type: "Mention", href: "https://z.example/", name: `@N${i}` })) };
+noteMentions(flood, `${"a".repeat(60_000)} @Zed`, env);
+check("a note with thousands of tags and long words is turned down quickly", performance.now() - started < 50);
+check("highlighting escapes names, and only highlights those listed", String(linkify("<b>@Bob & co</b> @Ann", [{ name: "Bob & co" }]))
+  === "&lt;b&gt;<strong class=\"mention\">@Bob &amp; co</strong>&lt;/b&gt; @Ann");
 
 // Edits (edits.js): what a site says a post or comment said before is checked like everything else.
 const editedReply = (extra) => ({ ...reply(5, { type: "Person", name: "Cat" }, "now"), ...extra });

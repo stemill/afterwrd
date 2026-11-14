@@ -6,13 +6,10 @@
 // again when it fails; forgetting a device that's gone; a device's new address; signing out; the download; and the
 // messages that used to be here, gone.
 //   node notifications.mjs <zip> <fixtures dir> <A state dir> <B state dir> <C state dir>
-import { execFileSync } from "node:child_process";
 import { createDecipheriv, createECDH, createHash, createPublicKey, hkdfSync, randomBytes, verify } from "node:crypto";
 import { createServer } from "node:http";
 import puppeteer from "puppeteer-core";
-import { fileURLToPath } from "node:url";
-import { settled } from "./helpers.mjs";
-const WORKER = fileURLToPath(new URL("../../", import.meta.url));
+import { count as n, settled, siteSql as sql } from "./helpers.mjs";
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 const [, , stateA, stateB] = process.argv.slice(2);
@@ -20,9 +17,6 @@ const A = "http://localhost:8787";
 const B = "http://localhost:8788";
 const PUSH = "http://localhost:8795";
 const CODE = "local-test-setup-code";
-const sql = (state, q) => JSON.parse(execFileSync("./node_modules/.bin/wrangler", ["d1", "execute", "afterwrd", "--local",
-  "--persist-to", state, "--json", "--command", q], { cwd: WORKER, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }))[0].results;
-const n = (state, q) => sql(state, `SELECT COUNT(*) AS n FROM ${q}`)[0].n;
 const results = [];
 const check = (name, ok, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? `  (${extra})` : ""}`); };
 const errors = [];
@@ -145,7 +139,8 @@ const toPhone = () => pushes.filter((p) => p.path === "/push/phone");
 await ann.goto(`${A}/events`);
 const siteKey = await ann.$eval("#notify", (s) => s.dataset.key);
 check("Events has a section for notifications on this device", /^[\w-]{87}$/.test(siteKey) && (await mainText(ann)).includes("Notifications on this device"));
-check("…which says they're only about events", (await mainText(ann)).includes("never for posts, comments or anything else"));
+check("…which says they're only about events and mentions", (await mainText(ann)).includes("never for other posts, comments or anything else")
+  && (await mainText(ann)).includes("someone mentions you"));
 check("…and it checks this device", await waitFor(async () => /off for this device|can't show/.test(await ann.$eval("#notify-status", (p) => p.textContent))),
   await ann.$eval("#notify-status", (p) => p.textContent));
 const device = { endpoint: `${PUSH}/push/phone`, keys: { p256dh: phone.getPublicKey().toString("base64url"), auth: phoneAuth.toString("base64url") } };
@@ -162,9 +157,9 @@ check("…but another site can't add one", crossPush.status === 403, String(cros
 check("…nor can a friend's site", (await fromSam("/_push/devices", { ...device, endpoint: `${PUSH}/push/evil` })).status === 401);
 await ann.goto(`${A}/_admin`);
 check("Your devices lists it, without its address", (await ann.$eval("#notifying", (l) => l.textContent)).includes("Android (home screen)")
-  && (await mainText(ann)).includes("Notifications about events") && !(await ann.content()).includes(device.endpoint));
+  && (await mainText(ann)).includes("Notifications about events and mentions") && !(await ann.content()).includes(device.endpoint));
 await ann.goto(`${A}/`);
-check("Home says a new device has notifications on", (await mainText(ann)).includes("Notifications about events were turned on for a new device (Android (home screen))"));
+check("Home says a new device has notifications on", (await mainText(ann)).includes("Notifications about events and mentions were turned on for a new device (Android (home screen))"));
 await Promise.all([settled(ann), ann.$eval('form[action="/_admin/notifications/seen"] button', (b) => b.click())]);
 check("…until Ann says that was her", !(await mainText(ann)).includes("were turned on for a new device"));
 
@@ -236,6 +231,31 @@ r = await call(ann, "/_push/devices/renew", { old: `${PUSH}/push/nobody`, endpoi
 check("…but only one that's on here", r.status === 404 && n(stateA, "push_devices WHERE endpoint LIKE '%/push/flaky3'") === 0, r.text);
 r = await call(ann, "/_push/devices/renew", { old: `${PUSH}/push/flaky2`, endpoint: "https://evil.example/push", keys: device.keys });
 check("…and only to a push service", r.status === 400, r.text);
+
+// --- mentions (mentions.js) ---------------------------------------------------------------------------------------------------
+
+// A mention buzzes the phone, titled with the friend as Ann knows them (never a name the note chose), a few at most from
+// one friend, and a later one about the same post takes its place.
+const mentionNote = (k, who, words) => fromSam("/_peer/notify", { type: "Create", object: { type: "Note", "afterwrd:mention": true,
+  inReplyTo: `${B}/posts/${k}`, content: words, attributedTo: { type: "Person", name: who } } });
+const base = toPhone().length;
+r = await mentionNote(postKey(6), "Bank Security", "Urgent: confirm your details");
+check("a mention notifies Ann", r.status === 202 && await waitFor(() => toPhone().length === base + 1), String(r.status));
+shown = decrypt(toPhone()[base].body);
+check("…titled with the friend's name as Ann knows it, whatever the note says", shown.title === "Sam Taylor"
+  && shown.body.startsWith("Bank Security mentioned you: Urgent") && shown.tag === `mention-${samHere.id}-${postKey(6)}`, JSON.stringify(shown));
+await call(ann, "/_push/devices/preview", { endpoint: device.endpoint, preview: false });
+await mentionNote(postKey(6), "Bank Security", "Urgent again");
+check("…and with the preview off, nothing the note chose", await waitFor(() => toPhone().length === base + 2)
+  && decrypt(toPhone()[base + 1].body).title === "Sam Taylor" && decrypt(toPhone()[base + 1].body).body === "Mentioned you in a comment",
+  JSON.stringify(decrypt(toPhone()[base + 1].body)));
+await call(ann, "/_push/devices/preview", { endpoint: device.endpoint, preview: true });
+for (let i = 0; i < 6; i++) await mentionNote(postKey(7), "Sam Taylor", `ping ${i}`);
+await sleep(4000);
+check("…five in ten minutes at most from one friend: the rest wait quietly on Notifications", toPhone().length === base + 5
+  && n(stateA, "inbox WHERE kind = 'mention'") === 8, `${toPhone().length - base} pushes`);
+r = await fromSam("/_peer/notify", { type: "Create", object: { type: "Note", "afterwrd:mention": true, inReplyTo: `${A}/posts/${postKey(8)}`, content: "x" } });
+check("…and a mention note about someone else's post is refused", r.status === 400, String(r.status));
 
 // --- turning them off --------------------------------------------------------------------------------------------------------
 

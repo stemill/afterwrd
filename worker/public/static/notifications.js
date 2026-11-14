@@ -1,6 +1,6 @@
-// Notifications on this device (the Events page; src/push.js): turning them on and off, and whether the lock screen
-// shows the event or only who it's from. They're only for invitations, and for changes to events the owner hasn't said
-// no to. On an iPhone or iPad this needs afterwrd added to the home screen first; Android and computers can do it in
+// Notifications on this device (the Events page; src/push.js): turning them on and off, whether the lock screen shows
+// what it's about or only who it's from, and whether mentions buzz it too. They're only for invitations, changes to
+// events the owner hasn't said no to, and (unless turned off here) someone mentioning them, or @here in a group. On an iPhone or iPad this needs afterwrd added to the home screen first; Android and computers can do it in
 // the browser too.
 const box = document.getElementById("notify");
 if (box) notifications(box).catch((err) => { document.getElementById("notify-status").textContent = `Couldn't check this device: ${err.message}`; });
@@ -12,6 +12,8 @@ async function notifications(box) {
   const off = box.querySelector('[data-do="off"]');
   const previewBox = document.getElementById("notify-preview");
   const preview = previewBox.querySelector("input");
+  const mentionsBox = document.getElementById("notify-mentions");
+  const mentions = mentionsBox.querySelector("input");
   const installed = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
   const apple = /iPhone|iPad/.test(navigator.userAgent) || (/Mac/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
   const say = (text) => { status.textContent = text; };
@@ -46,6 +48,8 @@ async function notifications(box) {
     off.hidden = !state.on;
     previewBox.hidden = !state.on;
     preview.checked = state.preview !== false;
+    mentionsBox.hidden = !state.on;
+    mentions.checked = state.mentions !== false;
     document.getElementById("notify-android").hidden = !(state.on && /Android/.test(navigator.userAgent));
   }
   const keyBytes = (text) => Uint8Array.from(atob(text.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
@@ -86,6 +90,16 @@ async function notifications(box) {
     const subscription = await registration.pushManager.getSubscription();
     try {
       await post("/_push/devices/preview", { endpoint: subscription?.endpoint, preview: preview.checked });
+    } catch (err) {
+      problem.textContent = err.message;
+      await show();
+    }
+  });
+  mentions.addEventListener("change", async () => {
+    problem.textContent = "";
+    const subscription = await registration.pushManager.getSubscription();
+    try {
+      await post("/_push/devices/mentions", { endpoint: subscription?.endpoint, mentions: mentions.checked });
     } catch (err) {
       problem.textContent = err.message;
       await show();

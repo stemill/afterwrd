@@ -8,7 +8,7 @@ import { connectedToken } from "../cloudflare.js";
 import { commentable, findTarget, latestComments, loadThreads, newCount, photoKey } from "./comments.js";
 import { sitePolls } from "../polls.js";
 import { editablePosts, postVersions } from "../edits.js";
-import { connectionById, loadFeed, markMine, noteAnswer, rememberPicture } from "../feed.js";
+import { connectionById, loadFeed, markAllMine, markMine, noteAnswer, rememberPicture } from "../feed.js";
 import * as friend from "../friends.js";
 import { MAX_GROUP_PHOTOS, MAX_MEMBERS } from "../groups.js";
 import { whereAmI } from "../groupsites.js";
@@ -24,7 +24,14 @@ import { checkGrant, friendCheckAlerts, lastFailure } from "../friendchecks.js";
 import { now, pageData, withoutKeys } from "../util.js";
 import { safeNext } from "../auth.js";
 import { fmtDate, fmtMonth } from "../views/format.js";
-import * as views from "../views/archive.js";
+import * as archiveViews from "../views/archive.js";
+import * as eventViews from "../views/events.js";
+import * as friendViews from "../views/friends.js";
+import * as groupViews from "../views/groups.js";
+import * as homeViews from "../views/home.js";
+
+// The signed-in pages' views, by area (each file in views/ draws one area).
+const views = { ...archiveViews, ...homeViews, ...friendViews, ...groupViews, ...eventViews };
 
 const PAGE_SIZE = 50;
 export const AFTERWRD_KIND = "afterwrd"; // the Posts filter's choice for posts written here
@@ -53,7 +60,7 @@ const PERSON_TABS = {
 
 // [pattern, section(s) any of which must be published (null: always), loader, view]. A loader gathers the page's
 // data and returns it as plain data (no HTML, and never a key: util.js pageData), or a Response (a redirect, a file),
-// or null for 404; the view (views/archive.js) turns the data into the page. A loader that can't reach a friend's or
+// or null for 404; the view (views/: archive, home, friends, groups, events) turns the data into the page. A loader that can't reach a friend's or
 // group's site throws a Problem, shown by that view instead.
 /** @type {Array<[RegExp, string | string[] | null, (ctx: any, params: URLSearchParams, ...match: string[]) => any, ((frame: any, data: any) => any) | null]>} */
 const ROUTES = [
@@ -119,16 +126,26 @@ export async function renderArchive(request, env, url, user, work) {
   // afterwrd, even before anything is imported; without their sections they show only those.
   const chosen = settings.results[0] ? JSON.parse(settings.results[0].value) : [];
   const sections = [...new Set([...chosen, "posts", "photos"])];
+  // The header's own lookups, all at once (each would otherwise wait for the one before).
+  const [newComments, requests, newRelease, name, profile, faces] = await Promise.all([
+    newCount(db, user),
+    first(db, "SELECT COUNT(*) AS n FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL"),
+    waitingRelease(env, work),
+    ownerName(db),
+    profilePictures(db),
+    friendFaces(db),
+  ]);
   const ctx = {
-    env, db, url, user, chosen, sections, newComments: await newCount(db, user),
+    env, db, url, user, chosen, sections, newComments,
     zone: request.cf?.timezone ?? "Europe/London", // where the reader is, as near as Cloudflare can tell
     connected: Boolean(connectedToken(request)), // an hour's Cloudflare token from Connect (cloudflare.js), for groups
-    requests: (await first(db, "SELECT COUNT(*) AS n FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL")).n,
-    newRelease: await waitingRelease(env, work), // the newer afterwrd that's out, if any
-    me: me.results[0] ?? { id: -1, name: await ownerName(db), is_me: 1 },
-    ownerName: await ownerName(db), // their name here, which can differ from the Facebook one (me.name)
-    profile: await profilePictures(db),
-    friendFaces: await friendFaces(db),
+    requests: requests.n,
+    newRelease, // the newer afterwrd that's out, if any
+    me: me.results[0] ?? { id: -1, name, is_me: 1 },
+    ownerName: name, // their name here, which can differ from the Facebook one (me.name)
+    profile,
+    friendFaces: faces.faces,
+    people: faces.people, // friends to mention (ui/mentions.js)
   };
   ctx.updateWaiting = Boolean(ctx.newRelease);
   // A profile picture or cover chosen here takes over from Facebook's.
@@ -166,9 +183,9 @@ export async function renderArchive(request, env, url, user, work) {
  * picture, what they've published, and the counts on the menu. No database or secrets: views only draw.
  */
 function frame(ctx) {
-  const { url, chosen, sections, newComments, zone, requests, updateWaiting, me, ownerName, profile, friendFaces } = ctx;
+  const { url, chosen, sections, newComments, zone, requests, updateWaiting, me, ownerName, profile, friendFaces, people } = ctx;
   return { url, user: { id: ctx.user.id, name: ctx.user.name }, chosen, sections, newComments, zone, requests, updateWaiting,
-    me, ownerName, profile, friendFaces };
+    me, ownerName, profile, friendFaces, people };
 }
 
 function page(body) {
@@ -227,17 +244,19 @@ async function loadPosts(db, rows, { threads = true } = {}) {
   const posts = await withMedia(db, rows, "post_id");
   if (!posts.length) return posts;
   const ids = posts.map((p) => p.id);
-  const tags = await all(db, `SELECT t.post_id, p.id, p.name FROM facebook_post_tags t JOIN facebook_people p ON p.id = t.person_id
-    WHERE t.post_id IN (${marks(ids)})`, ids);
   const own = posts.filter((p) => p.source === "afterwrd");
-  const comments = threads ? await loadThreads(db, own.map((p) => p.key)) : null;
-  // Polls in posts written here, with who chose what: this is the owner's own site.
-  const polls = await sitePolls(db, own.map((p) => p.id), "site");
-  // Edits (edits.js): what posts written here said before, and which can still be changed.
-  const earlier = await postVersions(db, own.filter((p) => p.edited_at).map((p) => p.id));
-  const editable = await editablePosts(db, own.map((p) => p.id));
-  // The owner's events (events.js), with everyone invited and their answers: this is the host's own site.
-  const events = await eventsFor(db, own.map((p) => p.id));
+  const [tags, comments, polls, earlier, editable, events] = await Promise.all([
+    all(db, `SELECT t.post_id, p.id, p.name FROM facebook_post_tags t JOIN facebook_people p ON p.id = t.person_id
+      WHERE t.post_id IN (${marks(ids)})`, ids),
+    threads ? loadThreads(db, own.map((p) => p.key)) : null,
+    // Polls in posts written here, with who chose what: this is the owner's own site.
+    sitePolls(db, own.map((p) => p.id), "site"),
+    // Edits (edits.js): what posts written here said before, and which can still be changed.
+    postVersions(db, own.filter((p) => p.edited_at).map((p) => p.id)),
+    editablePosts(db, own.map((p) => p.id)),
+    // The owner's events (events.js), with everyone invited and their answers: this is the host's own site.
+    eventsFor(db, own.map((p) => p.id)),
+  ]);
   return posts.map((p) => ({
     ...p, tags: tags.filter((t) => t.post_id === p.id), thread: comments ? comments.get(p.key) ?? null : undefined,
     poll: polls.get(p.id) ?? null, earlier: earlier.get(p.id) ?? [], editable: editable.has(p.id), event: events.get(p.id) ?? null,
@@ -564,29 +583,44 @@ const INTRODUCTIONS_SQL = `SELECT i.id, i.origin, i.name, i.note, c.name AS by_n
       WHERE i.created_at > ? AND NOT EXISTS (SELECT 1 FROM connections k WHERE k.origin = i.origin AND k.connected_at IS NOT NULL)
       ORDER BY i.created_at DESC`;
 
-/** Home: write something, then the owner's own posts written here and their friends' newest, together. */
+/**
+ * Home: write something, then the owner's own posts written here and their friends' newest, together. Everything's
+ * asked at once (all read-only), so the page waits for the slowest friend's site or query, not for them all in turn.
+ */
 async function home(ctx, params) {
   const { db } = ctx;
-  const own = await loadPosts(db, await all(db, `${POST_SQL} WHERE p.source = 'afterwrd' ORDER BY p.created_at DESC LIMIT 30`));
-  const friendsFeed = await loadFeed(db, ctx.url.origin, ctx.env);
-  return {
-    own, feed: friendsFeed, onThisDay: await onThisDay(ctx, 2), friends: friendsFeed.connections,
-    newDevices: await newDevices(db, ctx.user), newNotifying: await newPushDevices(db), securityFix: await securityFixWaiting(db),
-    auto: await autoState(db), // automatic updates (auto.js): offered once, and anything that needs the owner
-    // Until it's been checked (by a friend's site, or the owner themselves: checks.js), Home suggests a check.
-    unchecked: !(await lastChecked(db)),
-    // Friends asking for their site to be checked: one tap makes the link to send back (checks.js).
-    checkRequests: await checkRequests(db),
-    // A friend's site that checked this one and found something; this one's checks of friends' sites that did (or
-    // that their sites keep refusing): friendchecks.js.
-    checkFailure: await lastFailure(db),
-    friendChecks: await friendCheckAlerts(db),
-    checkGrant: await checkGrant(db), // offered once, after automatic updates
+  const [own, friendsFeed, onThisDayPosts, newDevicesFound, newNotifying, securityFix, auto, checked, requests, checkFailure,
+    friendChecks, checkGrantState, asking, introductions] = await Promise.all([
+    all(db, `${POST_SQL} WHERE p.source = 'afterwrd' ORDER BY p.created_at DESC LIMIT 30`).then((rows) => loadPosts(db, rows)),
+    loadFeed(db, ctx.url.origin, ctx.env),
+    onThisDay(ctx, 2),
+    newDevices(db, ctx.user),
+    newPushDevices(db),
+    securityFixWaiting(db),
+    autoState(db), // automatic updates (auto.js): offered once, and anything that needs the owner
+    lastChecked(db),
+    checkRequests(db),
+    lastFailure(db),
+    friendCheckAlerts(db),
+    checkGrant(db),
     // Someone asking to be friends: approved (or not) from Home in one tap, as well as from Friends.
-    asking: await all(db, `SELECT id, origin, name, invited_as, via_kind, via_name FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL
+    all(db, `SELECT id, origin, name, invited_as, via_kind, via_name FROM connections WHERE connected_at IS NOT NULL AND approved_at IS NULL
       ORDER BY connected_at DESC LIMIT 3`),
     // Friends introducing the owner to someone: asked (or not) from Home too.
-    introductions: await all(db, `${INTRODUCTIONS_SQL} LIMIT 3`, [now() - INTRODUCTION_DAYS * 86400]),
+    all(db, `${INTRODUCTIONS_SQL} LIMIT 3`, [now() - INTRODUCTION_DAYS * 86400]),
+  ]);
+  return {
+    own, feed: friendsFeed, onThisDay: onThisDayPosts, friends: friendsFeed.connections,
+    newDevices: newDevicesFound, newNotifying, securityFix, auto,
+    // Until it's been checked (by a friend's site, or the owner themselves: checks.js), Home suggests a check.
+    unchecked: !checked,
+    // Friends asking for their site to be checked: one tap makes the link to send back (checks.js).
+    checkRequests: requests,
+    // A friend's site that checked this one and found something; this one's checks of friends' sites that did (or
+    // that their sites keep refusing): friendchecks.js.
+    checkFailure, friendChecks,
+    checkGrant: checkGrantState, // offered once, after automatic updates
+    asking, introductions,
   };
 }
 
@@ -623,6 +657,7 @@ async function photoByHash(ctx, params, hash) {
  * returns the page's data; the page is given the friend without it.
  */
 async function fromFriend(ctx, id, load) {
+  /** @type {(Row<"connections"> & Record<string, any>) | null} the row, and what the page adds to it (facebook, avatar…) */
   const connection = await connectionById(ctx.db, id);
   if (!connection) return null;
   connection.facebook = await facebookSelf(ctx.db, connection);
@@ -690,7 +725,8 @@ async function friendPosts(ctx, params, id) {
     const { posts, paging, avatar, cover } = await friend.friendPosts(c, pageNumber(params), ctx.env);
     Object.assign(c, { avatar, cover });
     if (avatar) await rememberPicture(ctx.db, c, avatar)?.run();
-    for (const p of posts) p.comments = await markMine(ctx.db, c.id, p.key, p.comments, ctx.url.origin);
+    const marked = await markAllMine(ctx.db, posts.map((p) => ({ connectionId: c.id, target: p.key, comments: p.comments })), ctx.url.origin);
+    posts.forEach((p, i) => { p.comments = marked[i]; });
     await keepFriendEvents(ctx.db, c, posts);
     return { posts, paging };
   });
@@ -950,7 +986,9 @@ async function groupMembers(ctx, params, id) {
  * Every friend's site, with their profile picture where the link their site gave is still good (else null). Pages use
  * it for faces, and to show a site address only beside someone who isn't a friend.
  */
+/** Friends as every page knows them: their pictures by site (faces), and who can be mentioned (people: mentions.js). */
 async function friendFaces(db) {
-  const rows = await all(db, "SELECT origin, CASE WHEN avatar_exp > ? THEN avatar_url END AS avatar_url FROM connections WHERE approved_at IS NOT NULL", [now()]);
-  return Object.fromEntries(rows.map((r) => [r.origin, r.avatar_url]));
+  const rows = await all(db, `SELECT origin, name, CASE WHEN avatar_exp > ? THEN avatar_url END AS avatar_url FROM connections
+    WHERE approved_at IS NOT NULL ORDER BY name COLLATE NOCASE`, [now()]);
+  return { faces: Object.fromEntries(rows.map((r) => [r.origin, r.avatar_url])), people: rows.map((r) => ({ name: r.name, origin: r.origin })) };
 }

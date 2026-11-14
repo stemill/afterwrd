@@ -10,6 +10,7 @@ import { HASH_RE } from "./media.js";
 import { callSite, siteOrigin } from "./peers.js";
 import { parsePoll } from "./polls.js";
 import { parseSharedEvent } from "./events.js";
+import { noteMentions } from "./mentions.js";
 
 const text = (v, max) => (typeof v === "string" && v.length <= max ? v : null);
 const count = (n) => (Number.isSafeInteger(n) && n > 0 ? n : null);
@@ -55,17 +56,17 @@ export function parseEdits(item, created, max) {
  * Comments on something with address `base` (a post's or a photo's), as their site lists them; null if it doesn't
  * take comments (their site sent no `replies`: something from their Facebook download).
  */
-function parseThread(collection, base, site, friendName) {
+function parseThread(collection, base, site, friendName, env = null) {
   if (!collection || typeof collection !== "object") return null;
   const items = Array.isArray(collection?.items) ? collection.items.slice(0, 500) : [];
   return items.flatMap((c) => {
     const n = /^#c(\d{1,15})$/.exec((typeof c?.id === "string" && c.id.startsWith(base) && c.id.slice(base.length)) || "");
     const author = c?.attributedTo;
     const name = author === actorId(site) ? friendName : text(author?.name, 100);
-    const from = typeof author?.id === "string" && author.id !== actorId(site) ? siteOrigin(author.id.replace(/\/$/, "")) : null;
+    const from = typeof author?.id === "string" && author.id !== actorId(site) ? siteOrigin(author.id.replace(/\/$/, ""), env) : null;
     const at = seconds(c?.published);
     return c?.type === "Note" && n && name && text(c.content, MAX_COMMENT) && at !== null
-      ? [{ id: Number(n[1]), name, text: c.content, created_at: at, from, ...parseEdits(c, at, MAX_COMMENT) }] : [];
+      ? [{ id: Number(n[1]), name, text: c.content, created_at: at, from, mentions: noteMentions(c, c.content, env), ...parseEdits(c, at, MAX_COMMENT) }] : [];
   });
 }
 
@@ -84,9 +85,11 @@ export function parseNote(note, site, friendName, env = null) {
     link_url: link ? text(link.href, 2000) : null,
     place: text(note.location?.name, 300),
     group: text(note.context?.name, 300),
-    tags: (Array.isArray(note.tag) ? note.tag.slice(0, 50) : []).map((t) => text(t?.name, 100)).filter(Boolean),
+    // People tagged in a post from their Facebook download (a Mention with no address); mentions have one (below).
+    tags: (Array.isArray(note.tag) ? note.tag.slice(0, 50) : []).filter((t) => t?.href === undefined).map((t) => text(t?.name, 100)).filter(Boolean),
+    mentions: noteMentions(note, text(note.content, 60_000) ?? "", env),
     photos: attachments.map((m) => parseMedia(m, site)).filter(Boolean),
-    comments: parseThread(note.replies, note.id, site, friendName),
+    comments: parseThread(note.replies, note.id, site, friendName, env),
     ...parseEdits(note, created, MAX_POST_TEXT), // earlier words of a post written on afterwrd: no longer than it allows
     // Their poll, if the post asks one: how many chose what, and what the owner here chose. Never who.
     poll: note["afterwrd:poll"] === undefined ? null : parsePoll(note["afterwrd:poll"], env),

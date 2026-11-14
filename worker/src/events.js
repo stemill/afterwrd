@@ -23,7 +23,7 @@ import { callSite, siteOrigin } from "./peers.js";
 import { parseNote } from "./friends.js";
 import { safeNext } from "./auth.js";
 import { outbox } from "./outbox.js";
-import { ALLOWED_SQL, answerAllowance, TOO_MANY_ANSWERS, wasAllowed } from "./limits.js";
+import { ALLOWED_SQL, answerAllowance, TOO_MANY_ANSWERS } from "./limits.js";
 import { html, now, Refusal } from "./util.js";
 import { MAX_POST_TEXT } from "./edits.js";
 import { messagePage } from "./views/pages.js";
@@ -41,8 +41,12 @@ const FIELDS = ["title", "starts_at", "ends_at", "all_day", "time_zone", "place"
 const snippet = (text, size = SNIPPET) => (typeof text === "string" ? text.replace(/\s+/g, " ").trim().slice(0, size) : "");
 const APPROVED = (c = "") => `${c}connected_at IS NOT NULL AND ${c}approved_at IS NOT NULL`;
 
-/** Statements forgetting what a removed friend (`connectionId`) was invited to here, their answers, and their events. */
+/**
+ * Statements forgetting what a removed friend (`connectionId`) was invited to here, their answers, their events, and
+ * the copy of their posts Home shows (feed.js).
+ */
 export const friendGone = (db, connectionId) => [
+  db.prepare("DELETE FROM friend_posts WHERE connection_id = ?").bind(connectionId),
   db.prepare("DELETE FROM post_audience WHERE connection_id = ?").bind(connectionId),
   db.prepare("DELETE FROM event_answers WHERE connection_id = ?").bind(connectionId),
   db.prepare("DELETE FROM events_elsewhere WHERE connection_id = ?").bind(connectionId),
@@ -402,9 +406,12 @@ function keepCopy(db, connectionId, key, event, options = {}) {
  * parseNote). Their site only shows an event to those it invited, so seeing one means the owner's invited.
  */
 export async function keepFriendEvents(db, connection, posts) {
-  const events = posts.filter((p) => p.event);
-  if (events.length) await db.batch(events.map((p) => keepCopy(db, connection.id, p.key, p.event)));
+  const copies = eventCopies(db, connection, posts);
+  if (copies.length) await db.batch(copies);
 }
+
+/** keepFriendEvents' statements, to send with others in one batch. */
+export const eventCopies = (db, connection, posts) => posts.filter((p) => p.event).map((p) => keepCopy(db, connection.id, p.key, p.event));
 
 /** The words a note about an event is kept with: its title, when, and where. */
 const eventWords = (e) => `${e.title} · ${eventWhen(e)}${e.place ? ` · ${e.place}` : ""}`.slice(0, 400);
@@ -433,6 +440,8 @@ export async function receiveFriendEventNote(db, peer, note, tell = () => {}) {
     await db.batch([
       db.prepare("DELETE FROM events_elsewhere WHERE connection_id = ? AND post_key = ?").bind(peer.id, key),
       db.prepare("DELETE FROM inbox WHERE connection_id = ? AND target = ? AND kind IN ('invite', 'changed', 'cancelled')").bind(peer.id, key),
+      // The post goes from Home's copy of theirs at once (feed.js), rather than when that copy is next fetched.
+      db.prepare("DELETE FROM friend_posts WHERE connection_id = ? AND post_key = ?").bind(peer.id, key),
     ]);
     return [{ ok: true }, 202];
   }

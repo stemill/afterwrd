@@ -27,6 +27,7 @@ import { connectLinkPage, messagePage } from "./views/pages.js";
 import { callSite, host, KEY_RE, ownerName, siteOrigin } from "./peers.js";
 import { lastChecked } from "./checks.js";
 import { html, json, now, pageData, randomToken, Refusal, sha256, withoutKeys } from "./util.js";
+import { headerMe } from "./photos.js";
 import { confirmPage, connectionsMessage, connectionsPage, introducedPage, introducePage, togetherPage } from "./views/connections.js";
 
 // A friend link lasts 30 days, enough for someone new to set up their own site first (and wait for Facebook's
@@ -233,24 +234,25 @@ export async function receiveIntroduction(env, url, peer, body) {
 
 // --- the owner's side ---------------------------------------------------------------------------------------------
 
-export async function handleConnections(request, env, url) {
+export async function handleConnections(request, env, url, owner) {
   const db = env.DB;
+  const me = await headerMe(db, owner); // for the header (views/nav.js ownerHeader)
   const path = url.pathname.slice("/_admin/connections".length);
   if (request.method === "GET" && path === "") {
     const { results } = await db.prepare(`SELECT id, origin, name, connected_at FROM connections WHERE connected_at IS NOT NULL
       AND approved_at IS NOT NULL ORDER BY name COLLATE NOCASE`).all();
-    return html(connectionsPage(pageData(env, { friends: results, unchecked: !(await lastChecked(db)) })));
+    return html(connectionsPage(pageData(env, { friends: results, unchecked: !(await lastChecked(db)), me })));
   }
   if (path === "/new") {
     const link = url.searchParams.get("link") ?? "";
     if (request.method === "GET") {
       const target = parseLink(link, url, env);
-      if (target.error) return html(connectionsMessage({ message: target.error }), 400);
+      if (target.error) return html(connectionsMessage({ message: target.error, me }), 400);
       try {
         const info = await callSite(target.origin, `/_connect/${target.token}/info`);
-        return html(confirmPage(pageData(env, { name: cleanName(info.name), origin: target.origin })));
+        return html(confirmPage(pageData(env, { name: cleanName(info.name), origin: target.origin, me })));
       } catch (error) {
-        return html(connectionsMessage({ message: error.message }), 400);
+        return html(connectionsMessage({ message: error.message, me }), 400);
       }
     }
     if (request.method === "POST") return answerJson(async () => ({ ok: true, ...await addFriendByLink(env, url.origin, link) }));
@@ -286,7 +288,7 @@ export async function handleConnections(request, env, url) {
   if (path === "/together") {
     if (request.method === "GET") {
       const friends = await introducible(env.DB);
-      return html(togetherPage(pageData(env, { friends: friends.map(withoutKeys), max: TOGETHER_MAX, maxNote: MAX_NOTE })));
+      return html(togetherPage(pageData(env, { friends: friends.map(withoutKeys), max: TOGETHER_MAX, maxNote: MAX_NOTE, me })));
     }
     if (request.method !== "POST") return new Response("Not found", { status: 404 });
     const body = await request.json().catch(() => ({}));
@@ -297,7 +299,7 @@ export async function handleConnections(request, env, url) {
   }
   // Introducing a friend to another friend: each of their sites is told about the other.
   const introduce = /^\/(\d+)\/introduce$/.exec(path);
-  if (introduce) return introducing(request, env, Number(introduce[1]));
+  if (introduce) return introducing(request, env, Number(introduce[1]), me);
   const dismiss = /^\/introductions\/(\d+)\/dismiss$/.exec(path);
   if (request.method === "POST" && dismiss) {
     await dismissIntroduction(env, Number(dismiss[1]));
@@ -332,23 +334,23 @@ async function answerJson(act) {
 }
 
 /** Introducing friend `id` to another: GET the page to choose who, POST {to, note} (a form) to do it. */
-async function introducing(request, env, id) {
+async function introducing(request, env, id, me) {
   if (request.method === "POST") {
     const form = await request.formData().catch(() => new FormData());
     try {
       const { friend, other, trouble } = await introduceFriend(env, id, { to: Number(form.get("to")), note: String(form.get("note") ?? "") });
-      return html(introducedPage(pageData(env, { friend, other, trouble })), trouble.length === 2 ? 400 : 200);
+      return html(introducedPage(pageData(env, { friend, other, trouble, me })), trouble.length === 2 ? 400 : 200);
     } catch (error) {
-      if (error instanceof Refusal) return html(connectionsMessage({ message: error.message }), error.status);
+      if (error instanceof Refusal) return html(connectionsMessage({ message: error.message, me }), error.status);
       throw error;
     }
   }
   const friends = await introducible(env.DB);
   const friend = friends.find((c) => c.id === id);
-  if (!friend) return html(connectionsMessage({ message: NOT_INTRODUCIBLE }), 404);
+  if (!friend) return html(connectionsMessage({ message: NOT_INTRODUCIBLE, me }), 404);
   if (request.method !== "GET") return new Response("Not found", { status: 404 });
   const others = friends.filter((c) => c.id !== id);
-  return html(introducePage(pageData(env, { friend: withoutKeys(friend), others: others.map(withoutKeys), maxNote: MAX_NOTE })));
+  return html(introducePage(pageData(env, { friend: withoutKeys(friend), others: others.map(withoutKeys), maxNote: MAX_NOTE, me })));
 }
 
 // --- actions (see util.js Refusal) -----------------------------------------------------------------------------------

@@ -6,7 +6,7 @@
 import { execFileSync } from "node:child_process";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
-import { settled } from "./helpers.mjs";
+import { settled, sql } from "./helpers.mjs";
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
 const OUT = process.env.OUT ?? fileURLToPath(new URL("./out/", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -19,8 +19,6 @@ const newOwner = (name) => cli(name).match(/http\S+\/_auth\/device\/\S+/)[0];
 const results = [];
 const check = (name, ok, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? `  (${extra})` : ""}`); };
 const errors = [];
-const sql = (command) => JSON.parse(execFileSync("./node_modules/.bin/wrangler", ["d1", "execute", "afterwrd", "--local", "--json", "--command", command],
-  { cwd: WORKER, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }))[0].results;
 
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true });
 async function person(link) {
@@ -224,8 +222,24 @@ await Promise.all([settled(owner), owner.click(`${firstCard} .comment:first-of-t
 check("a Delete that can't go says so where it can be seen, not in its closed menu",
   await owner.$eval(`${firstCard} .comment:first-of-type .under details.more + .form-error`, (p) => p.checkVisibility() && /not connected/.test(p.textContent)).catch(() => false));
 check("…and the post's buttons and boxes work again", !(await owner.$(`${firstCard} button:disabled`)) && !(await owner.$(`${firstCard} textarea[readonly]`)));
+check("…with no faded copy of the comment left behind", !(await owner.$(".comment.pending")) && !(await owner.$("button.busy")));
 await offline(false);
+// Watched for: the comment showing at once, faded, while it's sent (ui.js pendingComment).
+await owner.evaluate(() => {
+  window.sawPending = "";
+  new MutationObserver((changes, watching) => {
+    const pending = document.querySelector(".comment.pending");
+    if (!pending) return;
+    window.sawPending = `${pending.querySelector(".said").textContent}|${pending.querySelector(".sending").textContent}`;
+    watching.disconnect();
+  }).observe(document.body, { childList: true, subtree: true });
+});
+const answered = owner.waitForResponse((r) => new URL(r.url()).pathname === "/_comments" && r.request().method() === "POST");
 await Promise.all([settled(owner), owner.click(`${firstCard} .say button`)]);
+const answer = await answered;
+check("a comment shows at once, faded and saying Sending…", (await owner.evaluate(() => window.sawPending)) === "Half-written|Sending…");
+check("…and the site sends the redrawn page back with its answer: one trip, not two",
+  answer.status() === 200 && answer.headers()["afterwrd-redrawn"] === "1" && !(await owner.$(".comment.pending")));
 check("sent once connected, still on the same page, with no note left", (await owner.evaluate(() => window.samePage))
   && sql("SELECT COUNT(*) AS n FROM comments WHERE text = 'Half-written'")[0].n === 1
   && (await bubbles(owner, firstCard)).at(-1).text === "Half-written" && !(await owner.$(`${firstCard} .form-error`)));

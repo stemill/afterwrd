@@ -979,6 +979,53 @@ The receiver:
 - may then tell its owner's own devices about an invitation or change it kept (afterwrd 0.47.0: Web Push, encrypted
   for each device by the receiving site itself). Nothing about it goes anywhere else.
 
+### 8.5 Mentions (afterwrd 0.49.0)
+
+A post or comment can mention people: `@Ann Example` in its words, with who that is beside them.
+
+**How a mention is written.** A post (6.3) or comment (6.5) carries an ActivityStreams `Mention` tag for each person
+it mentions. The tag holds their site's address; Facebook's tagged people (6.3) are Mention tags with no `href`.
+
+```json
+"tag": [{"type": "Mention", "href": "https://cat.example/", "name": "@Cat Example"}]
+```
+
+- At most 10 per post or comment.
+- A mention only counts if the words contain `@` and its name (without the `@`), as a whole name.
+- Receivers show only those names as mentions. Words typed as "@Someone" without a tag are plain text.
+
+**Who is told.** The site holding the post decides, because only it knows who can see the post:
+- the friends a post or comment mentions;
+- only those who are approved connections and can see the post or photo (section 5);
+- not whoever wrote it, nor the site's own owner.
+
+That covers its owner's posts and comments, and comments from friends (5.7: a comment may carry the tags). On a
+friend's comment, the holding site keeps only mentions of its own owner and of sites that have already commented on
+that post or photo; the rest are dropped. It never tells the commenter who was or wasn't told.
+
+**The note**, one to each person told, from the site holding the post, about its own post (as 8.3 requires):
+
+```json
+{"@context": [ … ], "type": "Create",
+ "object": {"type": "Note", "id": "https://ann.example/posts/post-1762164000-0b918c1b", "content": "first 200 characters",
+            "attributedTo": {"type": "Person", "name": "Bob Example"}, "afterwrd:mention": true,
+            "tag": [ …Mention… ]}}
+```
+
+`object.id` is the post, for a mention in the post itself. A mention in a comment uses `object.inReplyTo`, the post or
+photo, instead.
+
+**The receiver:**
+- refuses a mention note about anything but the sender's own post or photo (`400`, as 8.3);
+- keeps it as a notification (`attributedTo.name` cut to 100 characters, `content` to 200), within the same limits as
+  the sender's post and comment notes (8.3, step 4; `429` beyond them);
+- may tell its owner's devices that have said yes to mentions (Web Push, as for events).
+
+When a friend's comment on its own owner's post mentions that owner (the `href` is the site itself), the holding site
+tells its own owner's devices in the same way.
+
+**Older sites** ignore the tags and the `afterwrd:mention` flag. The words still arrive, just with no one told.
+
 ## 9. Groups
 
 A group is **its own site**, an afterwrd Worker in "group mode". It holds exactly one group, with no owner sign-in and no pages apart from the invite page. Everyone, including the person who started the group, uses it from their own site, with a key the group issued to that site.
@@ -1130,6 +1177,10 @@ Returns 20 posts per page, newest first:
 
 - In the Group object, `afterwrd:role` is the caller's role, and `afterwrd:members` counts approved members.
 - `afterwrd:waiting` (the number of requests to join) is sent only to admins.
+- Since afterwrd 0.49.0 (mentions, 8.5 and 9.6), the Group object also has:
+  - `afterwrd:people`: the approved members, each as `{type: "Person", id, name}`, as `/_group/members` lists them;
+  - `afterwrd:hereAnyone`: whether any member may use @here;
+  - `afterwrd:mayHere`: whether the caller may.
 
 A **group Note**:
 
@@ -1340,6 +1391,7 @@ These need an approved member whose role is `owner` or `admin`. Anyone else gets
 | `POST /_group/admin/members/<id>/member` | **Owner only.** Makes an admin an ordinary member again. |
 | `POST /_group/admin/link` | `200 {"link": "https://g.example/_join/<token>"}`. Cancels the previous link. |
 | `POST /_group/admin/about` | Body `{"name", "about"}`. `name` must be non-empty after trimming (cut to 100). `about` is normalised and cut to 1000. |
+| `POST /_group/admin/here` | Body `{"on": true}`: any member may use @here. `{"on": false}`, the default: only the owner and admins (afterwrd 0.49.0). |
 | `POST /_group/admin/close` | **Owner only** (`403` otherwise). See below. |
 
 More on these actions:
@@ -1353,6 +1405,34 @@ Answers are `200 {"ok": true}`, or `400 {"error": …}`.
 Source: `src/groups.js:33-40`, `src/groups.js:441-485`, `src/groups.js:650-681`, `src/groupsites.js:121-157`.
 
 ### 9.6 Notes from a group (to members' sites)
+
+**Mentions (afterwrd 0.49.0).** A member's post or comment to the group (9.4) may carry Mention tags (8.5). It may also
+carry `"afterwrd:here": true`, with `@here` in its words, to tell everyone in the group.
+
+The group:
+- keeps only mentions of approved members, apart from the writer, and sends them back with the post or comment;
+- refuses @here with `403 "Only the group's admins can use @here."` unless the writer is its owner or an admin, or
+  `afterwrd:hereAnyone` is on;
+- refuses it with `429` beyond 3 a day for each member, or 10 a day for the group, counted in the same statement as
+  the check.
+
+It then sends each member told (everyone but the writer, for @here) a note through `POST /_member/notify`:
+
+```json
+{"@context": [ … ], "type": "Create",
+ "object": {"type": "Note", "inReplyTo": "https://g.example/groups/1/posts/12", "id": "…/posts/12#c3 (a comment's)",
+            "content": "first 200 characters", "attributedTo": {"type": "Person", "name": "Ann Example"},
+            "afterwrd:mention": true, "afterwrd:here": true}}
+```
+
+`afterwrd:here` is only there for @here. Those told aren't also sent the ordinary comment note below, and no one is
+for @here.
+
+The member's site:
+- keeps a mention note whether or not its owner wrote on that post, as a notification of kind `mention` or `here`;
+- applies limits of its own: 20 per 600 s and 60 a day from each group (`429` beyond them);
+- may tell its owner's devices that have said yes to mentions.
+
 
 Notes go to `POST /_member/notify` on members' sites, with the key each member's site issued. Delivery is as in 2.5. A group sends only two kinds of note. New posts, new events and answers are never pushed.
 

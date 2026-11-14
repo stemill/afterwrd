@@ -1,6 +1,6 @@
 {
   "name": "afterwrd-worker",
-  "version": "0.48.0",
+  "version": "0.49.0",
   "private": true,
   "license": "AGPL-3.0-or-later",
   "type": "module",
@@ -11,7 +11,7 @@
     "release": "node scripts/release.mjs",
     "notices": "node scripts/notices.mjs",
     "test:e2e": "test/e2e/run.sh",
-    "check": "wrangler types types/worker-configuration.d.ts > /dev/null && tsc -p tsconfig.json"
+    "check": "node --no-warnings scripts/row-types.mjs && wrangler types types/worker-configuration.d.ts > /dev/null && tsc -p tsconfig.json && tsc -p tsconfig.browser.json && tsc -p tsconfig.sw.json"
   },
   "dependencies": {
     "@simplewebauthn/server": "14.0.3",

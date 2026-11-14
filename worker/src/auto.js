@@ -97,7 +97,6 @@ export async function handleAutoConnect(request, env, url) {
   }
   if (request.method === "GET" && path === "/auto-done") return html(donePage("/_cloudflare/auto-finish"));
   if (request.method === "POST" && path === "/auto-finish") {
-    if (request.headers.get("Origin") !== url.origin) return json({ error: "Request from another site" }, 403);
     const clear = `${START_COOKIE}=; Path=/_cloudflare; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
     const [state, verifier, then] = (readCookie(request, START_COOKIE) ?? "").split(".");
     const body = await request.json().catch(() => ({}));

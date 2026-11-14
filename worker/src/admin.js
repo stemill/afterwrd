@@ -7,7 +7,7 @@ import { handleCheckAdmin } from "./checks.js";
 import { handleConnections } from "./connect.js";
 import { handleExport } from "./export.js";
 import { handleImport } from "./importer.js";
-import { handlePhotos } from "./photos.js";
+import { handlePhotos, headerMe } from "./photos.js";
 import { handlePosts } from "./posts.js";
 import { handleEvents } from "./events.js";
 import { handleUpdate } from "./update.js";
@@ -18,9 +18,6 @@ import { devicesPage } from "./views/devices.js";
 export const DEVICE_LINK_SECONDS = 3600;
 
 export async function handleAdmin(request, env, url, owner) {
-  if (request.method !== "GET" && request.method !== "HEAD" && request.headers.get("Origin") !== url.origin) {
-    return json({ error: "Request from another site" }, 403);
-  }
   if (url.pathname === "/_admin/import" || url.pathname.startsWith("/_admin/import/")) {
     return handleImport(request, env, url, owner);
   }
@@ -30,12 +27,14 @@ export async function handleAdmin(request, env, url, owner) {
   if (url.pathname.startsWith("/_admin/checks/")) return handleCheckAdmin(request, env, url);
   if (url.pathname === "/_admin/posts" || url.pathname.startsWith("/_admin/posts/")) return handlePosts(request, env, url);
   if (url.pathname === "/_admin/events" || url.pathname.startsWith("/_admin/events/")) return handleEvents(request, env, url);
-  if (/^\/_admin\/(photos|albums|profile)(\/|$)/.test(url.pathname)) return handlePhotos(request, env, url);
-  if (url.pathname === "/_admin/export" || url.pathname.startsWith("/_admin/export/")) return handleExport(request, env, url);
+  if (/^\/_admin\/(photos|albums|profile)(\/|$)/.test(url.pathname)) return handlePhotos(request, env, url, owner);
+  if (url.pathname === "/_admin/export" || url.pathname.startsWith("/_admin/export/")) return handleExport(request, env, url, owner);
   if (url.pathname === "/_admin/connections" || url.pathname.startsWith("/_admin/connections/")) {
-    return handleConnections(request, env, url);
+    return handleConnections(request, env, url, owner);
   }
-  if (request.method === "GET" && url.pathname === "/_admin") return html(devicesPage(pageData(env, await devicesData(env.DB, owner))));
+  if (request.method === "GET" && url.pathname === "/_admin") {
+    return html(devicesPage(pageData(env, { ...(await devicesData(env.DB, owner)), me: await headerMe(env.DB, owner) })));
+  }
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
   // Notifications about events (push.js): turning a device off from here, and "That was me" on Home's notice.
   const forget = /^\/_admin\/notifications\/(\d+)\/forget$/.exec(url.pathname);

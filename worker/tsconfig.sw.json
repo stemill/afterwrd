@@ -1,0 +1,17 @@
+{
+  // Type checks for the service worker (public/static/app/push-sw.js), which runs with no page: `npm run check`.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "WebWorker"],
+    "types": [],
+    "strict": false,
+    "noUnusedLocals": true,
+    "skipLibCheck": true
+  },
+  "include": ["public/static/app/push-sw.js"]
+}

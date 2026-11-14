@@ -114,7 +114,8 @@ export function siteHeader({ main, menu, current, face = {}, updateKnown = true 
   </details>
 </div></header>
 <script src="${asset("/static/live.js")}" defer></script>
-<script src="${asset("/static/ui.js")}" defer></script>
+${UI_PRELOAD}
+<script type="module" src="${asset("/static/ui/main.js")}"></script>
 <script>
   // Close the menu when clicking anywhere else.
   document.addEventListener("click", (e) => {
@@ -145,7 +146,20 @@ export const ownerMenu = ({ memories = true, updateWaiting = false } = {}) => [
   { key: "update", label: updateWaiting ? "Update available" : "Update", href: "/_admin/update", badge: updateWaiting },
 ];
 
-/** The header for the owner's own pages (People, Import, Update…), which sit behind the picture. */
-export function ownerHeader(current) {
-  return siteHeader({ main: ownerMain(), menu: ownerMenu(), current, updateKnown: false });
+// The parts public/static/ui/main.js imports, fetched alongside it rather than after it (a slow phone network would
+// otherwise wait twice before asking first, in place and the rest work). Keep in step with main.js's imports; one
+// missing here still works, just a moment later.
+const UI_PARTS = ["confirm", "look", "menus", "drafts", "inplace", "arriving", "search", "mentions", "app"];
+const UI_PRELOAD = UI_PARTS.map((part) => `<link rel="modulepreload" href="/static/ui/${part}.js">`).join("\n");
+
+/** A name's first letter, for when there's no picture. */
+export const initial = (name) => [...String(name).trim()][0]?.toUpperCase() ?? "?";
+
+/**
+ * The header for the owner's own pages (People, Import, Update…), which sit behind the picture. `me`: the owner as
+ * photos.js headerMe gives them, so the picture (or their initial) shows as on every other page.
+ */
+export function ownerHeader(current, me = null) {
+  return siteHeader({ main: ownerMain(), menu: ownerMenu(), current, updateKnown: false,
+    face: me ? { initial: initial(me.name), picture: me.picture } : {} });
 }

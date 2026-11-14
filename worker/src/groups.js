@@ -41,6 +41,7 @@
 //   POST /_group/admin/members/<id>/(approve|decline|remove)    (the owner also: admin, member)
 //   POST /_group/admin/link       a new invite link (the old one stops working)
 //   POST /_group/admin/about      {name, about}
+//   POST /_group/admin/here       {on}: whether any member may use @here (mentions.js), or only the owner and admins
 // The owner:
 //   POST /_group/admin/close      tells every member's site the group's gone, and empties it (the owner's site then
 //                                 deletes this Worker)
@@ -52,7 +53,8 @@ import { ALLOWED_SQL, answerAllowance, TOO_MANY_ANSWERS, wasAllowed } from "./li
 import { choicesMask, isOpen, OPEN_SQL, pollFromQuestion, pollObject, readPoll, tally } from "./polls.js";
 import { signedLink } from "./friends.js";
 import { mediaStore } from "./media.js";
-import { notifyEventChange, notifyGroupComment } from "./notify.js";
+import { notifyEventChange, notifyGroupComment, notifyGroupMentions } from "./notify.js";
+import { HERE, keptMentions, mentionTags, noteMentions, readMentions } from "./mentions.js";
 import { groupLinkPage, messagePage } from "./views/pages.js";
 import { callSite, KEY_RE, PROTOCOL, siteOrigin } from "./peers.js";
 import { removeUnusedFiles } from "./posts.js";
@@ -90,6 +92,7 @@ export const cleanName = (name, fallback = "Someone") => (typeof name === "strin
 const isAdmin = (member) => member.role === "owner" || member.role === "admin";
 
 /** The group this Worker holds, or null before it's claimed. */
+/** @type {(db: D1Database) => Promise<Row<"groups"> | null>} */
 const theGroup = (db) => db.prepare("SELECT * FROM groups WHERE origin IS NULL ORDER BY id LIMIT 1").first();
 const ownerOf = (db) => db.prepare("SELECT origin, name FROM group_members WHERE role = 'owner' LIMIT 1").first();
 
@@ -99,15 +102,18 @@ const ownerOf = (db) => db.prepare("SELECT origin, name FROM group_members WHERE
 async function groupObject(db, site, group, member) {
   const [owner, members, waiting] = await db.batch([
     db.prepare("SELECT origin, name FROM group_members WHERE role = 'owner' LIMIT 1"),
-    db.prepare("SELECT COUNT(*) AS n FROM group_members WHERE approved_at IS NOT NULL"),
+    db.prepare("SELECT origin, name FROM group_members WHERE approved_at IS NOT NULL ORDER BY name COLLATE NOCASE"),
     db.prepare("SELECT COUNT(*) AS n FROM group_members WHERE approved_at IS NULL"),
   ]);
   const o = owner.results[0];
   return {
     type: "Group", id: groupId(site, group.id), name: group.name, summary: group.about || undefined, published: iso(group.created_at),
     attributedTo: o ? { type: "Person", id: actorId(o.origin), name: o.name } : undefined,
-    "afterwrd:members": members.results[0].n, "afterwrd:role": member.role,
+    "afterwrd:members": members.results.length, "afterwrd:role": member.role,
     "afterwrd:waiting": isAdmin(member) ? waiting.results[0].n : undefined,
+    // Mentions (mentions.js): who's in it, to mention (as GET /_group/members says), and who may use @here.
+    "afterwrd:people": members.results.map((m) => ({ type: "Person", id: actorId(m.origin), name: m.name })),
+    "afterwrd:hereAnyone": Boolean(group.here_anyone), "afterwrd:mayHere": isAdmin(member) || Boolean(group.here_anyone),
   };
 }
 
@@ -181,7 +187,7 @@ async function groupNotes(env, site, group, posts, member, comments = PAGE_COMME
     const poll = polls.results.find((q) => q.post_id === p.id);
     return {
       type: "Note", id: address, attributedTo: author(p), context: groupId(site, group.id), published: iso(p.created_at),
-      mediaType: "text/plain", content: p.text ?? "", ...editedFields({ ...p, earlier: postsEarlier.get(p.id) }),
+      mediaType: "text/plain", content: p.text ?? "", ...editedFields({ ...p, earlier: postsEarlier.get(p.id) }), ...mentionFields(p),
       "afterwrd:event": event ? eventWithAnswers(event, answers.results, member) : undefined,
       // Who chose what goes only to whoever asked, and only with the post on its own (so a page of posts stays small).
       "afterwrd:poll": poll ? pollObject(tally(poll, votes.results.filter((v) => v.post_id === p.id),
@@ -190,11 +196,18 @@ async function groupNotes(env, site, group, posts, member, comments = PAGE_COMME
       replies: {
         type: "Collection", totalItems: counts.results.find((c) => c.post_id === p.id)?.n ?? 0,
         items: thread.map((c) => ({ type: "Note", id: `${address}#c${c.id}`, attributedTo: author(c), inReplyTo: address,
-          published: iso(c.created_at), mediaType: "text/plain", content: c.text,
+          published: iso(c.created_at), mediaType: "text/plain", content: c.text, ...mentionFields(c),
           ...editedFields({ ...c, earlier: commentsEarlier.get(c.id) }) })),
       },
     };
   }));
+}
+
+/** Who a post or comment mentions (mentions.js), as a note says it: Mention tags, and "afterwrd:here". */
+function mentionFields(row) {
+  const list = readMentions(row.mentions);
+  const tags = mentionTags(list);
+  return { ...(tags.length && { tag: tags }), ...(list.some((m) => m.origin === HERE) && { "afterwrd:here": true }) };
 }
 
 async function groupPage(env, site, group, member, page) {
@@ -245,6 +258,39 @@ async function groupMembers(db, site, group, member, { all = false } = {}) {
 }
 
 // --- posting and commenting -----------------------------------------------------------------------------------------
+
+// @here (mentions.js): its owner and admins may use it, or anyone if they've said so (here_anyone); either way only a
+// few a day for each member, and for the group. The group's allowance only holds back ordinary members, so they can't
+// use it all and leave the admins without.
+const HERE_LIMITS = { member: 3, group: 10 };
+
+/**
+ * Who a member's post or comment (`note`, its words `text`) mentions: only members, and @here if they may use it now.
+ * Using @here takes one of the day's allowance there and then, in the same statement as the check (so two sent at once
+ * can't both slip past); release() gives it back if what it was in isn't kept after all.
+ * @returns {Promise<{ mentions: import("./mentions.js").Mention[], release: () => Promise<void>, error: string | null, status: number }>}
+ */
+async function groupMentions(env, group, member, note, text) {
+  const db = env.DB;
+  const asked = noteMentions(note, text, env, { here: true });
+  let release = async () => {};
+  if (asked.some((m) => m.origin === HERE)) {
+    if (!isAdmin(member) && !group.here_anyone) return { mentions: [], release, error: "Only the group's admins can use @here.", status: 403 };
+    const at = now();
+    const taken = await db.prepare(`INSERT INTO here_log (member_id, at) SELECT ?1, ?2
+      WHERE (SELECT COUNT(*) FROM here_log WHERE member_id = ?1 AND at > ?2 - 86400) < ?3
+        AND (?5 OR (SELECT COUNT(*) FROM here_log WHERE at > ?2 - 86400) < ?4)
+      RETURNING rowid`).bind(member.id, at, HERE_LIMITS.member, HERE_LIMITS.group, isAdmin(member) ? 1 : 0).first();
+    if (!taken) return { mentions: [], release, error: "@here has been used a lot today. Mention people by name instead.", status: 429 };
+    release = async () => { await db.prepare("DELETE FROM here_log WHERE rowid = ?").bind(taken.rowid).run(); };
+    await db.prepare("DELETE FROM here_log WHERE at < ?").bind(at - 2 * 86400).run();
+  }
+  const people = asked.filter((m) => m.origin !== HERE && m.origin !== member.origin).map((m) => m.origin);
+  const { results } = people.length ? await db.prepare(`SELECT origin FROM group_members WHERE group_id = ? AND approved_at IS NOT NULL
+    AND origin IN (SELECT value FROM json_each(?))`).bind(group.id, JSON.stringify(people)).all() : { results: [] };
+  const members = new Set(results.map((r) => r.origin));
+  return { mentions: asked.filter((m) => m.origin === HERE || members.has(m.origin)), release, error: null, status: 200 };
+}
 
 const tooMany = (what) => ({ error: `That's a lot of ${what} for now. Try again later.`, status: 429 });
 
@@ -315,7 +361,7 @@ async function copyPhotos(env, photos) {
  * (posts, photos a day) and the group's room for photos; then the photos are copied from the member's site, and if
  * that fails the post goes again, with any files it brought. Returns { id } or { error, status }.
  */
-async function createPost(env, group, member, { text, photos, event = null, poll = null }) {
+async function createPost(env, group, member, { text, photos, event = null, poll = null, mentions = [] }) {
   const db = env.DB;
   if (text.length > MAX_GROUP_TEXT) return { error: `Posts can be up to ${MAX_GROUP_TEXT} characters.`, status: 400 };
   if (poll && !text) return { error: "Write the question your poll asks.", status: 400 };
@@ -325,15 +371,15 @@ async function createPost(env, group, member, { text, photos, event = null, poll
   if (event?.rrule && firstOver(event, now())) return { error: "Its first date would already be over.", status: 400 };
   const at = now();
   const bytes = photos.reduce((n, f) => n + f.size + THUMB_BYTES, 0);
-  const saved = await db.prepare(`INSERT INTO group_posts (group_id, origin, author_name, text, created_at)
-      SELECT ?1, ?2, ?3, ?4, ?5
+  const saved = await db.prepare(`INSERT INTO group_posts (group_id, origin, author_name, text, created_at, mentions)
+      SELECT ?1, ?2, ?3, ?4, ?5, ?13
       WHERE (SELECT COUNT(*) FROM group_posts WHERE origin = ?2 AND created_at > ?5 - ?6) < ?7
         AND (SELECT COUNT(*) FROM group_posts WHERE origin = ?2 AND created_at > ?5 - 86400) < ?8
         AND (SELECT COUNT(*) FROM group_photos f JOIN group_posts p ON p.id = f.post_id
           WHERE p.origin = ?2 AND p.created_at > ?5 - 86400) + ?9 <= ?10
         AND (SELECT COALESCE(SUM(size), 0) FROM group_photos) + ?11 <= ?12
       RETURNING id`).bind(group.id, member.origin, member.name, text || null, at, POST_RATE.seconds, POST_RATE.count,
-      POST_RATE.daily, photos.length, POST_RATE.photos, bytes, GROUP_BYTES).first();
+      POST_RATE.daily, photos.length, POST_RATE.photos, bytes, GROUP_BYTES, keptMentions(mentions)).first();
   const id = saved?.id;
   if (!id) return { error: "That's a lot of posts or photos for now, or the group is full of photos. Try again later.", status: 429 };
   try {
@@ -391,21 +437,25 @@ async function mayDelete(db, member, origin) {
   return (await ownerOf(db))?.origin !== origin;
 }
 
-/** A comment on a post; tells the members who'll want to know. Returns { id } or { error, status }. */
-async function addComment(env, site, group, member, postId, text) {
+/**
+ * A comment on a post; tells the members who'll want to know, and those it mentions (notifyGroupMentions, from the
+ * route). Returns { id, post } or { error, status }.
+ */
+async function addComment(env, site, group, member, postId, text, mentions = []) {
   const db = env.DB;
   if (!text || text.length > MAX_COMMENT) return { error: `Comments need 1 to ${MAX_COMMENT} characters.`, status: 400 };
   const post = await db.prepare("SELECT * FROM group_posts WHERE id = ? AND group_id = ?").bind(Number(postId), group.id).first();
   if (!post) return { error: "That post isn't there any more.", status: 404 };
   const at = now();
-  const row = await db.prepare(`INSERT INTO group_comments (post_id, origin, author_name, text, created_at)
-    SELECT ?1, ?2, ?3, ?4, ?5
+  const row = await db.prepare(`INSERT INTO group_comments (post_id, origin, author_name, text, created_at, mentions)
+    SELECT ?1, ?2, ?3, ?4, ?5, ?9
     WHERE (SELECT COUNT(*) FROM group_comments WHERE origin = ?2 AND created_at > ?5 - ?6) < ?7
       AND (SELECT COUNT(*) FROM group_comments WHERE origin = ?2 AND created_at > ?5 - 86400) < ?8
-    RETURNING id`).bind(post.id, member.origin, member.name, text, at, COMMENT_RATE.seconds, COMMENT_RATE.count, COMMENT_RATE.daily).first();
+    RETURNING id`).bind(post.id, member.origin, member.name, text, at, COMMENT_RATE.seconds, COMMENT_RATE.count, COMMENT_RATE.daily,
+    keptMentions(mentions)).first();
   if (!row) return tooMany("comments");
-  await notifyGroupComment(env, site, group, post, { id: row.id, name: member.name, text, from: member.origin });
-  return { id: row.id };
+  await notifyGroupComment(env, site, group, post, { id: row.id, name: member.name, text, from: member.origin, mentions });
+  return { id: row.id, post };
 }
 
 async function deleteComment(db, group, member, id) {
@@ -723,6 +773,7 @@ export async function handleJoinLink(request, env, url) {
 
 // --- members' sites --------------------------------------------------------------------------------------------------
 
+/** @returns {Promise<Row<"group_members"> | null>} the member whose key this request carries, or null */
 async function memberFrom(request, env) {
   const match = /^Bearer (\S+)$/.exec(request.headers.get("Authorization") ?? "");
   if (!match || !KEY_RE.test(match[1])) return null;
@@ -781,10 +832,17 @@ export async function handleGroupApi(request, env, url) {
     if (note["afterwrd:event"] !== undefined && (!event || event.cancelled_at)) return json({ error: "Unexpected event details." }, 400);
     const asked = note["afterwrd:poll"] === undefined ? { poll: null } : readPoll(pollFromQuestion(note["afterwrd:poll"]));
     if (asked.error) return json({ error: asked.error }, 400);
-    const made = await createPost(env, group, member, { text: cleanText(note.content), photos, event, poll: asked.poll });
-    return made.error ? json({ error: made.error }, made.status)
-      : json({ id: groupPostId(site, group.id, made.id), "afterwrd:poll": asked.poll ? true : undefined,
-        "afterwrd:rrule": event?.rrule ? true : undefined });
+    const text = cleanText(note.content);
+    const mentioned = await groupMentions(env, group, member, note, text);
+    if (mentioned.error) return json({ error: mentioned.error }, mentioned.status);
+    const made = await createPost(env, group, member, { text, photos, event, poll: asked.poll, mentions: mentioned.mentions });
+    if (made.error) {
+      await mentioned.release();
+      return json({ error: made.error }, made.status);
+    }
+    await notifyGroupMentions(env, site, group, { id: made.id }, { name: member.name, text, mentions: mentioned.mentions, from: member.origin });
+    return json({ id: groupPostId(site, group.id, made.id), "afterwrd:poll": asked.poll ? true : undefined,
+      "afterwrd:rrule": event?.rrule ? true : undefined });
   }
   if (route === "GET /_group/events") return json(await groupEvents(env, site, group, member, url.searchParams.get("when") === "past"));
   const polled = /^POST \/_group\/polls\/(\d{1,15})\/(vote|close)$/.exec(route);
@@ -818,8 +876,16 @@ export async function handleGroupApi(request, env, url) {
     const base = groupPostId(site, group.id, "");
     const reply = typeof note?.inReplyTo === "string" && note.inReplyTo.startsWith(base) ? note.inReplyTo.slice(base.length) : "";
     if (note?.type !== "Note" || !/^\d{1,15}$/.test(reply)) return json({ error: "That isn't a post in this group." }, 404);
-    const made = await addComment(env, site, group, member, reply, cleanText(note.content));
-    return made.error ? json({ error: made.error }, made.status) : json({ id: `${groupPostId(site, group.id, reply)}#c${made.id}` });
+    const text = cleanText(note.content);
+    const mentioned = await groupMentions(env, group, member, note, text);
+    if (mentioned.error) return json({ error: mentioned.error }, mentioned.status);
+    const made = await addComment(env, site, group, member, reply, text, mentioned.mentions);
+    if (made.error) {
+      await mentioned.release();
+      return json({ error: made.error }, made.status);
+    }
+    await notifyGroupMentions(env, site, group, made.post, { comment: made.id, name: member.name, text, mentions: mentioned.mentions, from: member.origin });
+    return json({ id: `${groupPostId(site, group.id, reply)}#c${made.id}` });
   }
 
   // Running the group.
@@ -839,6 +905,12 @@ export async function handleGroupApi(request, env, url) {
         .bind(await sha256(token), group.id, now() + LINK_SECONDS, now()),
     ]);
     return json({ link: `${site}/_join/${token}` });
+  }
+  // Whether any member may use @here (mentions.js), or only the owner and admins.
+  if (route === "POST /_group/admin/here") {
+    const body = await request.json().catch(() => ({}));
+    await db.prepare("UPDATE groups SET here_anyone = ? WHERE id = ?").bind(body?.on === true ? 1 : 0, group.id).run();
+    return json({ ok: true });
   }
   if (route === "POST /_group/admin/about") {
     const body = await request.json().catch(() => ({}));

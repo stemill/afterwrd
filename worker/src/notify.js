@@ -15,6 +15,11 @@
 // owner wrote or commented on that post there (receiveGroupNote). The only other note a group sends is to those going
 // to an event (or who might) when it changes or is called off (notifyEventChange); a member's site keeps it only if
 // its owner still has plans for that event (events_elsewhere).
+//
+// Mentions (mentions.js): a post or comment here that mentions friends who can see it tells each of them, with
+//   {type: "Create", object: {type: "Note", id or inReplyTo, content, attributedTo: {name}, "afterwrd:mention": true,
+//   tag: [Mention…]}}; their site keeps it as kind 'mention', and it may buzz their phones. A group does the same for
+//   the members a post or comment there mentions (or everyone, for @here).
 import { CONTEXT, groupPostId, POST_KEY_RE, postId, targetId } from "../public/static/activity.js";
 import { eventObject, eventWhen, hasDate, parseEvent } from "./calendar.js";
 import { dateCopy, sameCopy } from "./membership.js";
@@ -22,6 +27,7 @@ import { outbox } from "./outbox.js";
 import { SHARED_SQL } from "./share.js";
 import { receiveFriendEventNote } from "./events.js";
 import { now } from "./util.js";
+import { HERE, mentionTags } from "./mentions.js";
 
 const SNIPPET = 200;
 const KEEP_SECONDS = 60 * 86400;
@@ -52,15 +58,39 @@ export async function notifyNewPost(env, origin, key) {
  * apart from its writer's site, and anyone it's no longer shared with (share.js: the post, or the post a photo came
  * with).
  */
-export async function notifyComment(env, origin, target, { name, text, from = null }) {
+export async function notifyComment(env, origin, target, { name, text, from = null, mentions = [] }) {
+  // Not to those it mentions: they're told by notifyMentions instead, once.
   const { results } = await env.DB.prepare(`SELECT DISTINCT c.id FROM connections c
     JOIN comments s ON s.origin = c.origin AND s.target = ?1
     WHERE c.connected_at IS NOT NULL AND c.approved_at IS NOT NULL AND c.origin != ?2
+      AND c.origin NOT IN (SELECT value FROM json_each(?3))
       AND NOT EXISTS (SELECT 1 FROM posts p WHERE (p.key = ?1 OR p.id IN (SELECT post_id FROM media WHERE 'photo-' || hash = ?1))
         AND NOT ${SHARED_SQL("c.id")})
-    ORDER BY c.id`).bind(target, from ?? "").all();
+    ORDER BY c.id`).bind(target, from ?? "", JSON.stringify(mentions.map((m) => m.origin))).all();
   await send(env, results, { type: "Create", object: { type: "Note", inReplyTo: targetId(origin, target), content: snippet(text),
     attributedTo: { type: "Person", name: snippet(name, 100) } } });
+}
+
+/**
+ * Tells the friends a post or comment here mentions (`mentions`: mentions.js) that it does, if they can see `target`
+ * (a post's key, or photo-<sha256>), apart from `from` (a friend who wrote it) and the owner here. `comment`: whether
+ * it's a comment on `target` rather than the post itself.
+ * @param {any} env
+ * @param {string} origin this site
+ * @param {string} target
+ * @param {{ name: string, text: string, mentions: import("./mentions.js").Mention[], comment?: boolean, from?: string | null }} what
+ */
+export async function notifyMentions(env, origin, target, { name, text, mentions, comment = false, from = null }) {
+  const wanted = mentions.map((m) => m.origin).filter((o) => o !== HERE && o !== origin && o !== from);
+  if (!wanted.length) return;
+  const { results } = await env.DB.prepare(`SELECT c.id FROM connections c WHERE c.connected_at IS NOT NULL AND c.approved_at IS NOT NULL
+      AND c.origin IN (SELECT value FROM json_each(?2))
+      AND NOT EXISTS (SELECT 1 FROM posts p WHERE (p.key = ?1 OR p.id IN (SELECT post_id FROM media WHERE 'photo-' || hash = ?1))
+        AND NOT ${SHARED_SQL("c.id")})
+    ORDER BY c.id`).bind(target, JSON.stringify(wanted)).all();
+  const address = targetId(origin, target);
+  await send(env, results, { type: "Create", object: { type: "Note", ...(comment ? { inReplyTo: address } : { id: address }),
+    content: snippet(text), attributedTo: { type: "Person", name: snippet(name, 100) }, "afterwrd:mention": true, tag: mentionTags(mentions) } });
 }
 
 /** A post or photo address on `origin` (the sender's own site) as a key: post-… or photo-<sha256>; else null. */
@@ -80,12 +110,13 @@ function keyOn(origin, address) {
  * @param {any} peer
  * @param {any} note
  * @param {(notice: import("./push.js").Notice) => void} [tell]
- * @returns {Promise<import("./util.js").Answer>}
+ * @returns {Promise<[object, number, boolean?]>} the reply (util.js Answer), and whether a post or comment note was kept
  */
 export async function receiveNote(db, peer, note, tell = () => {}) {
   // About one of their events: an invitation, a change, or an invitation taken back (events.js).
   if (["Invite", "Update", "Undo"].includes(note?.type)) return receiveFriendEventNote(db, peer, note, tell);
   const object = note?.type === "Create" && note.object?.type === "Note" ? note.object : null;
+  if (object?.["afterwrd:mention"] === true) return receiveMention(db, peer, object, tell);
   const isComment = typeof object?.inReplyTo === "string";
   const target = object && keyOn(peer.origin, isComment ? object.inReplyTo : object.id);
   if (!target || (!isComment && !target.startsWith("post-"))) return [{ error: "That isn't about something on your site." }, 400];
@@ -98,8 +129,8 @@ export async function receiveNote(db, peer, note, tell = () => {}) {
   const at = now();
   const row = await db.prepare(`INSERT INTO inbox (connection_id, kind, target, actor, text, created_at)
     SELECT ?1, ?2, ?3, ?4, ?5, ?6
-    WHERE (SELECT COUNT(*) FROM inbox WHERE connection_id = ?1 AND kind IN ('post', 'comment') AND created_at > ?6 - ?7) < ?8
-      AND (SELECT COUNT(*) FROM inbox WHERE connection_id = ?1 AND kind IN ('post', 'comment') AND created_at > ?6 - 86400) < ?9
+    WHERE (SELECT COUNT(*) FROM inbox WHERE connection_id = ?1 AND kind IN ('post', 'comment', 'mention') AND created_at > ?6 - ?7) < ?8
+      AND (SELECT COUNT(*) FROM inbox WHERE connection_id = ?1 AND kind IN ('post', 'comment', 'mention') AND created_at > ?6 - 86400) < ?9
       AND NOT (?2 = 'post' AND EXISTS (SELECT 1 FROM inbox WHERE connection_id = ?1 AND kind = 'post' AND target = ?3))
     RETURNING id`).bind(peer.id, isComment ? "comment" : "post", target,
     isComment ? snippet(object.attributedTo?.name, 100) || "Someone" : null, snippet(object.content) || null,
@@ -107,21 +138,84 @@ export async function receiveNote(db, peer, note, tell = () => {}) {
   await db.prepare("DELETE FROM inbox WHERE created_at < ? OR connection_id NOT IN (SELECT id FROM connections)")
     .bind(at - KEEP_SECONDS).run();
   if (!row && isComment) return [{ error: "That's a lot of notes for now." }, 429];
-  return [{ ok: true }, 202];
+  // And whether it was kept (within the limits above): what has Home's copy of their posts fetched again (peers.js).
+  return [{ ok: true }, 202, Boolean(row)];
+}
+
+/**
+ * A friend's site saying its post (or a comment on it) mentions the owner here (notifyMentions there): kept as kind
+ * 'mention', within the same limits as their other notes, and said on the owner's devices that take mentions
+ * (`tell`). Only about their own posts and photos, like every note. Returns [body, status, kept].
+ * @returns {Promise<[object, number, boolean?]>}
+ */
+async function receiveMention(db, peer, object, tell) {
+  const target = keyOn(peer.origin, typeof object.inReplyTo === "string" ? object.inReplyTo : object.id);
+  if (!target) return [{ error: "That isn't about something on your site." }, 400];
+  const actor = snippet(object.attributedTo?.name, 100) || peer.name;
+  const text = snippet(object.content);
+  const at = now();
+  const row = await db.prepare(`INSERT INTO inbox (connection_id, kind, target, actor, text, created_at)
+    SELECT ?1, 'mention', ?2, ?3, ?4, ?5
+    WHERE (SELECT COUNT(*) FROM inbox WHERE connection_id = ?1 AND kind IN ('post', 'comment', 'mention') AND created_at > ?5 - ?6) < ?7
+      AND (SELECT COUNT(*) FROM inbox WHERE connection_id = ?1 AND kind IN ('post', 'comment', 'mention') AND created_at > ?5 - 86400) < ?8
+    RETURNING id`).bind(peer.id, target, actor, text || null, at, RATE.seconds, RATE.count, DAILY).first();
+  if (!row) return [{ error: "That's a lot of notes for now." }, 429];
+  // On the owner's phones within an allowance of its own (fewer than are kept): one at a time per post, the newest in
+  // place of the last. Named as the friend's site is known here, with nothing else they chose unless previews are on.
+  if (await pushAllowed(db, "SELECT COUNT(*) AS n FROM inbox WHERE connection_id = ?1 AND kind = 'mention' AND created_at > ?2", peer.id, at)) {
+    const page = target.startsWith("post-") ? `/friend/${peer.id}/posts/${target}` : `/friend/${peer.id}/photos/${target.slice(6)}`;
+    const comment = typeof object.inReplyTo === "string";
+    tell({ kind: "mention", title: peer.name, text: `${actor === peer.name ? "Mentioned you" : `${actor} mentioned you`}: ${text}`,
+      hidden: comment ? "Mentioned you in a comment" : "Mentioned you in a post", url: page, tag: `mention-${peer.id}-${target}` });
+  }
+  return [{ ok: true }, 202, true];
 }
 
 /**
  * In a group's Worker: tells the members' sites that will want to know about a new comment (`id`) on `post`:
  * its writer's and those of everyone else who's commented on it, apart from the comment's own writer (`from`).
  */
-export async function notifyGroupComment(env, site, group, post, { id, name, text, from }) {
+export async function notifyGroupComment(env, site, group, post, { id, name, text, from, mentions = [] }) {
+  // Not to those it mentions (or anyone, with @here): notifyGroupMentions tells them instead, once.
+  if (mentions.some((m) => m.origin === HERE)) return;
   const { results } = await env.DB.prepare(`SELECT id FROM group_members WHERE group_id = ?1 AND approved_at IS NOT NULL AND origin != ?2
-    AND (origin = ?3 OR origin IN (SELECT origin FROM group_comments WHERE post_id = ?4 AND origin IS NOT NULL)) ORDER BY id`)
-    .bind(group.id, from, post.origin, post.id).all();
+    AND (origin = ?3 OR origin IN (SELECT origin FROM group_comments WHERE post_id = ?4 AND origin IS NOT NULL))
+    AND origin NOT IN (SELECT value FROM json_each(?5)) ORDER BY id`)
+    .bind(group.id, from, post.origin, post.id, JSON.stringify(mentions.map((m) => m.origin))).all();
   if (!results.length) return;
   const address = groupPostId(site, group.id, post.id);
   await outbox(env).sendToMembers(results.map((r) => r.id), { "@context": CONTEXT, type: "Create", object: { type: "Note",
     id: `${address}#c${id}`, inReplyTo: address, content: snippet(text), attributedTo: { type: "Person", name: snippet(name, 100) } } });
+}
+
+/**
+ * In a group's Worker: tells the members a post (or, with `comment`, a comment on it) mentions that it does, or, for
+ * @here, every member, apart from its writer (`from`). `mentions` are only of members already (groups.js).
+ * @param {any} env
+ * @param {string} site
+ * @param {any} group
+ * @param {{ id: number }} post
+ * @param {{ comment?: number | null, name: string, text: string, mentions: import("./mentions.js").Mention[], from: string }} what
+ */
+export async function notifyGroupMentions(env, site, group, post, { comment = null, name, text, mentions, from }) {
+  const db = env.DB;
+  const here = mentions.some((m) => m.origin === HERE);
+  // Someone mentioned by the same member more than a few times a day isn't told again (it's kept, and shown, all the
+  // same), so one member can't use up what that person's site will take from the group (receiveGroupMention).
+  const named = mentions.filter((m) => m.origin !== HERE).map((m) => m.origin);
+  const { results: counted } = named.length ? await db.prepare(`SELECT j.value AS origin,
+      (SELECT COUNT(*) FROM group_posts WHERE origin = ?1 AND created_at > ?2 AND instr(mentions, '"origin":' || json_quote(j.value)) > 0)
+      + (SELECT COUNT(*) FROM group_comments WHERE origin = ?1 AND created_at > ?2 AND instr(mentions, '"origin":' || json_quote(j.value)) > 0) AS n
+    FROM json_each(?3) j`).bind(from, now() - 86400, JSON.stringify(named)).all() : { results: [] };
+  const people = counted.filter((r) => r.n <= MENTION_PAIR_DAILY).map((r) => r.origin);
+  if (!here && !people.length) return;
+  const { results } = await db.prepare(`SELECT id FROM group_members WHERE group_id = ?1 AND approved_at IS NOT NULL AND origin != ?2
+    AND (?3 OR origin IN (SELECT value FROM json_each(?4))) ORDER BY id`).bind(group.id, from, here ? 1 : 0, JSON.stringify(people)).all();
+  if (!results.length) return;
+  const address = groupPostId(site, group.id, post.id);
+  await outbox(env).sendToMembers(results.map((r) => r.id), { "@context": CONTEXT, type: "Create", object: { type: "Note",
+    ...(comment ? { id: `${address}#c${comment}` } : {}), inReplyTo: address, content: snippet(text),
+    attributedTo: { type: "Person", name: snippet(name, 100) }, "afterwrd:mention": true, ...(here && { "afterwrd:here": true }) } });
 }
 
 /**
@@ -224,6 +318,7 @@ export async function receiveGroupNote(db, group, note, tell = () => {}) {
   const prefix = groupPostId(group.origin, group.remote_id, "");
   const post = typeof object?.inReplyTo === "string" && object.inReplyTo.startsWith(prefix) ? object.inReplyTo.slice(prefix.length) : "";
   if (!/^\d{1,15}$/.test(post)) return [{ error: "That isn't about a post in this group." }, 400];
+  if (object["afterwrd:mention"] === true) return receiveGroupMention(db, group, Number(post), object, tell);
   // Only news if the owner here wrote that post or commented on it.
   if (!(await db.prepare("SELECT 1 FROM group_mine WHERE site = ? AND remote_group = ? AND post_id = ? LIMIT 1")
     .bind(group.origin, group.remote_id, Number(post)).first())) {
@@ -238,6 +333,47 @@ export async function receiveGroupNote(db, group, note, tell = () => {}) {
     at, RATE.seconds, RATE.count, DAILY).first();
   await db.prepare("DELETE FROM group_inbox WHERE created_at < ? OR group_id NOT IN (SELECT id FROM groups)").bind(at - KEEP_SECONDS).run();
   return row ? [{ ok: true }, 202] : [{ error: "That's a lot of notes for now." }, 429];
+}
+
+// In a group's Worker: how many times a day one member's mentions of the same person tell them (notifyGroupMentions).
+const MENTION_PAIR_DAILY = 5;
+// Mentions from one group (and @here there): plenty for a group of friends, few enough that it can't flood a phone.
+const MENTION_RATE = { count: 20, seconds: 600, daily: 60 };
+// Of those kept (from one friend's site, or one group), how many may reach the owner's phones: the rest wait quietly on
+// Notifications. `sql` counts those kept so far, including the one just kept, since ?2 (with ?1 who from, and ?3
+// anything else it needs).
+export const MENTION_PUSH = { count: 5, seconds: 600, daily: 20 };
+export async function pushAllowed(db, sql, from, at, more = null) {
+  const [recent, today] = await db.batch([
+    db.prepare(sql).bind(from, at - MENTION_PUSH.seconds, ...(more === null ? [] : [more])),
+    db.prepare(sql).bind(from, at - 86400, ...(more === null ? [] : [more])),
+  ]);
+  return recent.results[0].n <= MENTION_PUSH.count && today.results[0].n <= MENTION_PUSH.daily;
+}
+
+/**
+ * A group saying a post or comment there mentions the owner here, or is to everyone (@here, notifyGroupMentions):
+ * kept as kind 'mention' or 'here', within limits of its own, and said on the owner's devices that take mentions.
+ * @returns {Promise<import("./util.js").Answer>}
+ */
+async function receiveGroupMention(db, group, post, object, tell) {
+  const here = object["afterwrd:here"] === true;
+  const actor = snippet(object.attributedTo?.name, 100) || "Someone";
+  const text = snippet(object.content);
+  const at = now();
+  const row = await db.prepare(`INSERT INTO group_inbox (group_id, post_id, actor, text, created_at, kind)
+    SELECT ?1, ?2, ?3, ?4, ?5, ?6
+    WHERE (SELECT COUNT(*) FROM group_inbox WHERE group_id = ?1 AND kind IN ('mention', 'here') AND created_at > ?5 - ?7) < ?8
+      AND (SELECT COUNT(*) FROM group_inbox WHERE group_id = ?1 AND kind IN ('mention', 'here') AND created_at > ?5 - 86400) < ?9
+    RETURNING id`).bind(group.id, post, actor, text || null, at, here ? "here" : "mention",
+    MENTION_RATE.seconds, MENTION_RATE.count, MENTION_RATE.daily).first();
+  if (!row) return [{ error: "That's a lot of mentions for now." }, 429];
+  if (await pushAllowed(db, "SELECT COUNT(*) AS n FROM group_inbox WHERE group_id = ?1 AND kind IN ('mention', 'here') AND created_at > ?2", group.id, at)) {
+    tell({ kind: "mention", title: group.name, text: `${actor} ${here ? "to everyone" : "mentioned you"}: ${text}`,
+      hidden: here ? "Wrote to everyone (@here)" : "Mentioned you", url: `/groups/${group.id}/posts/${post}`,
+      tag: `mention-g${group.id}-${post}` });
+  }
+  return [{ ok: true }, 202];
 }
 
 /** Notes from a current, approved connection: the join every read of `inbox` uses. */

@@ -133,7 +133,7 @@ function checkingPart(auto, checking, results) {
 }
 
 /** @param {Record<string, any> & { auto?: AutoState, checkGrant?: CheckGrant }} data */
-export function updatePage({ owner, version: VERSION, latest, available, securityFix, site, connected, oldToken, groups, go, checked = null, friends = [], checkWait = 0, auto = { on: false }, history = [], problem = null, madeGroups = 0, checkGrant = {}, checkFailure = null, checking = true, friendChecks = [] }) {
+export function updatePage({ owner, version: VERSION, latest, available, securityFix, site, connected, oldToken, groups, go, checked = null, friends = [], checkWait = 0, auto = { on: false }, history = [], problem = null, madeGroups = 0, checkGrant = {}, checkFailure = null, checking = true, friendChecks = [], me = null }) {
   // While automatic updates are on, they're the one way to update (signed releases only), unless a release has to be
   // installed by hand (a new kind of store): then the steps below, with their access.
   const byHand = !auto.on || !auto.next || (auto.waiting?.needsHand && auto.waiting.version === auto.next.version);
@@ -211,7 +211,7 @@ ${FAVICON}
 </style>
 </head>
 <body>
-${ownerHeader("update")}
+${ownerHeader("update", me)}
 <main>
 <h1>Update afterwrd</h1>
 <p class="meta">Signed in as ${escape(owner)}. This site is afterwrd ${escape(VERSION)}.</p>

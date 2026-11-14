@@ -61,16 +61,30 @@ export function dateRange(start, end) {
   return `${a.day} – ${dm(b)} ${b.year}`;
 }
 
-export function linkify(text) {
+/**
+ * Words as a page shows them: escaped, with web addresses as links, and @names highlighted where `mentions` (the post's
+ * or comment's own list: src/mentions.js) has them. Words typed as "@Someone" that aren't in the list stay plain.
+ * @param {string | null | undefined} text
+ * @param {{ name: string }[]} [mentions]
+ */
+export function linkify(text, mentions = []) {
   if (!text) return "";
+  const names = [...new Set((mentions ?? []).map((m) => m?.name).filter((n) => typeof n === "string" && n))]
+    .sort((a, b) => b.length - a.length); // the longest first, so "@Ann Example" wins over "@Ann"
+  const said = names.length
+    // Matched in the words once escaped, so a name with & or < in it is escaped the same way first.
+    ? new RegExp(`(^|[^\\w@])@(${names.map((n) => escape(n).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})(?![\\w])`, "gu") : null;
+  const words = (part) => (said
+    ? escape(part).replace(said, (_, before, name) => `${before}<strong class="mention">@${name}</strong>`)
+    : escape(part));
   let out = "";
   let last = 0;
   for (const m of text.matchAll(URL_RE)) {
-    out += escape(text.slice(last, m.index));
+    out += words(text.slice(last, m.index));
     out += `<a href="${escape(m[0])}" target="_blank" rel="noopener noreferrer">${escape(m[0])}</a>`;
     last = m.index + m[0].length;
   }
-  return raw(out + escape(text.slice(last)));
+  return raw(out + words(text.slice(last)));
 }
 
 export function safeUrl(url) {

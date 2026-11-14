@@ -19,6 +19,7 @@ import { profilePictures } from "./photos.js";
 import { pollObject, sitePolls } from "./polls.js";
 import { eventsFor, guestEventObject } from "./events.js";
 import { fromBase64Url, now, randomToken, toBase64Url } from "./util.js";
+import { mentionTags, readMentions } from "./mentions.js";
 
 const POSTS_PAGE = 30;
 const PHOTOS_PAGE = 150;
@@ -83,8 +84,14 @@ async function media(env, site, m, { long = false } = {}) {
 
 async function threadOf(db, site, target) {
   const comments = (await loadThreads(db, [target])).get(target);
-  return { type: "Collection", totalItems: comments.length, items: comments.map((c) => commentNote(site, c, commentAuthor(site, c))) };
+  return { type: "Collection", totalItems: comments.length, items: comments.map((c) => withMentions(commentNote(site, c, commentAuthor(site, c)), c)) };
 }
+
+/** A comment's note with who it mentions (mentions.js), if anyone. */
+const withMentions = (note, c) => {
+  const tags = mentionTags(readMentions(c.mentions));
+  return tags.length ? { ...note, tag: tags } : note;
+};
 
 /**
  * Posts as Notes for a friend (`peer`, their connection: {id, origin}), with photos (signed links), tags, place, a
@@ -119,7 +126,8 @@ export async function notes(env, site, posts, { replies = true, peer }) {
       ...await Promise.all(photos.results.filter((m) => m.post_id === p.id).map((m) => media(env, site, m))),
       ...(p.link_url ? [{ type: "Link", href: p.link_url }] : []),
     ],
-    tag: tags.results.filter((t) => t.post_id === p.id).map((t) => ({ type: "Mention", name: t.name })),
+    // People tagged on Facebook (a name only), then who it mentions (mentions.js: with their site's address).
+    tag: [...tags.results.filter((t) => t.post_id === p.id).map((t) => ({ type: "Mention", name: t.name })), ...mentionTags(readMentions(p.mentions))],
     location: p.place_name ? { type: "Place", name: p.place_name } : undefined,
     context: p.group_name ? { type: "Group", name: p.group_name } : undefined,
     ...editedFields({ ...p, earlier: earlier.get(p.id) }),
@@ -128,7 +136,7 @@ export async function notes(env, site, posts, { replies = true, peer }) {
     "afterwrd:event": events.has(p.id) ? guestEventObject(events.get(p.id)) : undefined,
     replies: threads.has(p.key) ? {
       type: "Collection", totalItems: threads.get(p.key).length,
-      items: threads.get(p.key).map((c) => commentNote(site, c, commentAuthor(site, c))),
+      items: threads.get(p.key).map((c) => withMentions(commentNote(site, c, commentAuthor(site, c)), c)),
     } : undefined,
   })));
 }

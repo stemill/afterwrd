@@ -6,7 +6,7 @@ function day(ts) {
   return ts ? new Date(ts * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "";
 }
 
-export function devicesPage({ owner, passkeys, openLinks, sessions, notifying = [] }) {
+export function devicesPage({ owner, passkeys, openLinks, sessions, notifying = [], me = null }) {
   return `<!doctype html>
 <html lang="en-GB">
 <head>
@@ -29,7 +29,7 @@ ${FAVICON}
 </style>
 </head>
 <body>
-${ownerHeader("devices")}
+${ownerHeader("devices", me)}
 <main>
 <h1>Your devices</h1>
 <p class="meta">Signed in as ${escape(owner)}. Each phone or computer you use has its own passkey. To add one, make a
@@ -49,9 +49,10 @@ link here and open it on that device: it works once, for an hour, and gives owne
   ${openLinks ? `<button class="chip" data-action="cancel-links">Cancel ${openLinks} unused link${openLinks === 1 ? "" : "s"}</button>` : ""}
   ${sessions ? '<button class="chip" data-action="sign-out">Sign out everywhere</button>' : ""}
 </div>
-<h2>Notifications about events</h2>
-<p class="meta">The phones and computers that tell you when a friend invites you to an event, or one you haven't said no
-to changes. Turn one on in <a href="/events#notify">Events</a>, on that device. Removing the passkey it was signed in
+<h2>Notifications about events and mentions</h2>
+<p class="meta">The phones and computers that tell you when a friend invites you to an event, one you haven't said no
+to changes, or someone mentions you (unless that device has mentions turned off). Turn one on in
+<a href="/events#notify">Events</a>, on that device. Removing the passkey it was signed in
 with, or signing out there, turns it off too.</p>
 ${notifying.length ? `<ul class="devices" id="notifying">
   ${notifying.map((d) => `<li class="card"><span><strong>${escape(d.name)}</strong><span class="meta"> · on since ${day(d.created_at)}${d.preview ? ", showing events on the lock screen" : ", showing only who they're from"}${d.last_ok_at ? `, last sent ${day(d.last_ok_at)}` : ""}</span></span>

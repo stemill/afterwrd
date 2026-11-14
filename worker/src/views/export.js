@@ -1,7 +1,7 @@
 // Download everything (export.js): the page; the zip is made in the browser (public/static/export/main.js).
 import { asset, FAVICON, ownerHeader } from "./nav.js";
 
-export function exportPage() {
+export function exportPage({ me = null } = {}) {
   return `<!doctype html>
 <html lang="en-GB">
 <head>
@@ -12,7 +12,7 @@ export function exportPage() {
 ${FAVICON}
 </head>
 <body>
-${ownerHeader("export")}
+${ownerHeader("export", me)}
 <main class="export">
 <h1>Download everything</h1>
 <p>Everything on this site in one zip file: your posts, photos and videos, albums, comments (including the

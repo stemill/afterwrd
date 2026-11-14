@@ -55,7 +55,6 @@ export async function handleCloudflare(request, env, url) {
   if (request.method === "GET" && path === "/start") return start(request, url);
   if (request.method === "GET" && path === "/done") return html(donePage("/_cloudflare/finish"));
   if (request.method !== "POST") return null;
-  if (request.headers.get("Origin") !== url.origin) return json({ error: "Request from another site" }, 403);
   if (path === "/finish") return finish(request, env, await request.json().catch(() => ({})));
   if (path === "/disconnect") return withCookie(json({ ok: true }), `${TOKEN_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`);
   return null;

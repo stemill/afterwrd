@@ -30,6 +30,7 @@ import { checkNewer, PROBLEM_KEY } from "./migrate.js";
 import { releaseKey, signedList } from "./signing.js";
 import { GROUP_RELEASE, isGroupWorker } from "./groupsites.js";
 import { html, json, now, pageData } from "./util.js";
+import { headerMe } from "./photos.js";
 import { updatePage } from "./views/update.js";
 import { lastChecked, tooSoonToCheck } from "./checks.js";
 import { checkGrant, checkingFriends, friendCheckResults, lastFailure } from "./friendchecks.js";
@@ -49,7 +50,7 @@ const FRESH_SECONDS = 300; // how long the Update page trusts its last answer fr
 export async function handleUpdate(request, env, url, owner) {
   const path = url.pathname.slice("/_admin/update".length);
   if (request.method === "GET" && path === "") {
-    return html(updatePage(pageData(env, await updateData(request, env, url, owner))));
+    return html(updatePage(pageData(env, { ...(await updateData(request, env, url, owner)), me: await headerMe(env.DB, owner) })));
   }
   if (request.method === "GET" && path === "/version") return json({ version: VERSION });
   if (request.method === "GET" && path === "/progress") {
@@ -60,12 +61,10 @@ export async function handleUpdate(request, env, url, owner) {
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
 
   if (path === "/auto-later") { // "Not now" on Home's offer of automatic updates: the Update page still has it
-    if (request.headers.get("Origin") !== url.origin) return json({ error: "Request from another site" }, 403);
     await laterAuto(env);
     return Response.redirect(`${url.origin}/`, 303);
   }
   if (path === "/install-now") { // "Install it now": the automatic run, straight away (the page waits for it)
-    if (request.headers.get("Origin") !== url.origin) return json({ error: "Request from another site" }, 403);
     if (!(await autoState(env.DB)).on) return json({ error: "Automatic updates are off." }, 400);
     if (await runningSince(env.DB)) return json({ busy: true });
     // Started by the vault, so it carries on whatever happens to this page (auto.js startRunNow).
@@ -73,7 +72,6 @@ export async function handleUpdate(request, env, url, owner) {
     return json({ asked: Date.now() });
   }
   if (path === "/auto-off") {
-    if (request.headers.get("Origin") !== url.origin) return json({ error: "Request from another site" }, 403);
     await turnOff(env, url);
     return Response.redirect(`${url.origin}/_admin/update#auto`, 303);
   }

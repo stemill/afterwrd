@@ -3,7 +3,7 @@
 import { escape } from "../util.js";
 import { asset, FAVICON, ownerHeader } from "./nav.js";
 
-export function addPage({ albums, chosen, role, max }) {
+export function addPage({ albums, chosen, role, max, me = null }) {
   const title = role === "profile" ? "Choose a profile picture" : role === "cover" ? "Choose a cover photo" : "Add photos";
   return `<!doctype html>
 <html lang="en-GB">
@@ -15,7 +15,7 @@ export function addPage({ albums, chosen, role, max }) {
 ${FAVICON}
 </head>
 <body>
-${ownerHeader("photos")}
+${ownerHeader("photos", me)}
 <main class="add-photos">
 <p class="crumbs"><a href="${role ? "/posts" : "/photos"}">${role ? "Posts" : "Photos"}</a> /</p>
 <h1>${title}</h1>

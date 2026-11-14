@@ -24,6 +24,12 @@ const clean = (v, max) => (typeof v === "string" ? v.replace(/\r\n?/g, "\n").tri
  * The owner's profile picture and cover: the ones chosen here (settings), if those photos are still here, or else
  * Facebook's, from the download.
  */
+/** The owner as the header on their own tools pages shows them (views/nav.js ownerHeader): name and picture. */
+export async function headerMe(db, owner) {
+  const picture = (await profilePictures(db)).profile;
+  return { name: owner.name, picture: picture ? `/files/${picture.thumb_hash ?? picture.hash}` : null };
+}
+
 export async function profilePictures(db) {
   const [chosen, facebook] = await db.batch([
     db.prepare(`SELECT s.key, m.id, m.hash, m.thumb_hash FROM settings s
@@ -37,7 +43,7 @@ export async function profilePictures(db) {
   return { profile: pick("profile_hash"), cover: pick("cover_hash") };
 }
 
-export async function handlePhotos(request, env, url) {
+export async function handlePhotos(request, env, url, owner) {
   const db = env.DB;
   if (request.method === "GET" && url.pathname === "/_admin/photos/add") {
     const { results: albums } = await db.prepare(`SELECT id, name FROM albums WHERE source = 'afterwrd' AND role IS NOT 'posts'
@@ -45,7 +51,7 @@ export async function handlePhotos(request, env, url) {
     const role = ROLES.includes(url.searchParams.get("for")) ? url.searchParams.get("for") : null;
     // `chosen` is the one to start with.
     return html(addPage(pageData(env, { albums,
-      chosen: Number(url.searchParams.get("album")), role, max: role ? 1 : MAX_BATCH })));
+      chosen: Number(url.searchParams.get("album")), role, max: role ? 1 : MAX_BATCH, me: await headerMe(db, owner) })));
   }
   if (request.method !== "POST") return new Response("Not found", { status: 404 });
 

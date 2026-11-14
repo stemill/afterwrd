@@ -4,7 +4,8 @@
 //   GET /_admin/export                         the page
 //   GET /_admin/export/rows?table=<t>&after=<n>  up to 1000 rows of one table, after rowid n
 // Keys and anything to do with signing in never leave: connections give only who and where, users only names.
-import { html, json } from "./util.js";
+import { html, json, pageData } from "./util.js";
+import { headerMe } from "./photos.js";
 import { exportPage } from "./views/export.js";
 
 const PAGE = 1000;
@@ -44,9 +45,9 @@ const TABLES = {
   users: { columns: "id, name" },
 };
 
-export async function handleExport(request, env, url) {
+export async function handleExport(request, env, url, owner) {
   if (request.method !== "GET") return new Response("Not found", { status: 404 });
-  if (url.pathname === "/_admin/export") return html(exportPage());
+  if (url.pathname === "/_admin/export") return html(exportPage(pageData(env, { me: await headerMe(env.DB, owner) })));
   if (url.pathname === "/_admin/export/rows") {
     const table = url.searchParams.get("table");
     if (!Object.hasOwn(TABLES, table)) return json({ error: "Unknown table." }, 400);

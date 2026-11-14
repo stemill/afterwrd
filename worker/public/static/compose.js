@@ -3,25 +3,25 @@
 // it goes and how many photos it takes (src/groups.js).
 import { call, picker, uploadPhotos } from "./upload.js";
 
-const form = document.getElementById("composer");
+const form = /** @type {HTMLFormElement} */ (document.getElementById("composer"));
 const MAX_PHOTOS = Number(form.dataset.max) || 20;
 const MAX_OPTIONS = 10;
 const ACTION = form.dataset.action || "/_admin/posts";
-const input = form.querySelector("input[type=file]");
-const status = form.querySelector(".status");
-const error = form.querySelector(".error");
-const button = form.querySelector("button.post");
-const picked = picker(input, form.querySelector(".picked"), {
+const input = /** @type {HTMLInputElement} */ (form.querySelector("input[type=file]"));
+const status = /** @type {HTMLElement} */ (form.querySelector(".status"));
+const error = /** @type {HTMLElement} */ (form.querySelector(".error"));
+const button = /** @type {HTMLButtonElement} */ (form.querySelector("button.post"));
+const picked = picker(input, /** @type {HTMLElement} */ (form.querySelector(".picked")), {
   max: MAX_PHOTOS,
   onChange: (list) => { error.textContent = list.length > MAX_PHOTOS ? `Up to ${MAX_PHOTOS} photos in a post.` : ""; },
 });
 
 // The poll: hidden until asked for.
-const poll = form.querySelector(".poll-maker");
-const addPoll = form.querySelector(".add-poll");
-const options = poll.querySelector(".poll-options");
-const addOption = poll.querySelector(".add-option");
-const closes = poll.querySelector("input[name=closes]");
+const poll = /** @type {HTMLFieldSetElement} */ (form.querySelector(".poll-maker"));
+const addPoll = /** @type {HTMLButtonElement} */ (form.querySelector(".add-poll"));
+const options = /** @type {HTMLElement} */ (poll.querySelector(".poll-options"));
+const addOption = /** @type {HTMLButtonElement} */ (poll.querySelector(".add-option"));
+const closes = /** @type {HTMLInputElement} */ (poll.querySelector("input[name=closes]"));
 const placeholder = form.text.placeholder;
 const pad = (n) => String(n).padStart(2, "0");
 const today = new Date();
@@ -57,7 +57,7 @@ function readPoll(text) {
   // A closing day ends at midnight, wherever the person asking is.
   const day = closes.value ? new Date(`${closes.value}T23:59:59`) : null;
   if (day && !(day > new Date())) throw new Error("Pick a closing day that hasn't gone yet.");
-  return { options: list, multiple: poll.querySelector("input[name=multiple]").checked, closes_at: day ? Math.floor(day / 1000) : null };
+  return { options: list, multiple: /** @type {HTMLInputElement} */ (poll.querySelector("input[name=multiple]")).checked, closes_at: day ? Math.floor(day.getTime() / 1000) : null };
 }
 
 function busy(on) {
@@ -88,7 +88,9 @@ form.addEventListener("submit", async (event) => {
   try {
     const photos = await uploadPhotos(picked.map((p) => p.file), (message) => { status.textContent = message; });
     status.textContent = "Posting…";
-    await call(ACTION, { text, photos, ...(question && { poll: question }) });
+    // Who it mentions, as picked (ui/mentions.js): the site keeps those whose @name is still in the words.
+    const mentions = /** @type {HTMLInputElement | null} */ (form.querySelector("input[name=mentions]"))?.value ?? null;
+    await call(ACTION, { text, photos, ...(question && { poll: question }), ...(mentions && { mentions }) });
     window.afterwrdSent?.(form.text); // it's posted: no need to keep the words on this device (ui.js)
     location.href = location.pathname; // back to the page it was written on (Home or Posts), showing the new post
   } catch (err) {

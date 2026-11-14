@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import puppeteer from "puppeteer-core";
 import { fileURLToPath } from "node:url";
+import { sql } from "./helpers.mjs";
 const WORKER = fileURLToPath(new URL("../../", import.meta.url));
 const OUT = process.env.OUT ?? fileURLToPath(new URL("./out/", import.meta.url));
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -11,8 +12,6 @@ const BASE = "http://localhost:8787";
 const CODE = "local-test-setup-code";
 const results = [];
 const check = (name, ok, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${extra ? `  (${extra})` : ""}`); };
-const sql = (q) => JSON.parse(execFileSync("./node_modules/.bin/wrangler", ["d1", "execute", "afterwrd", "--local", "--json", "--command", q],
-  { cwd: WORKER, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }))[0].results;
 const post = (path, body, cookie, origin = BASE) => fetch(BASE + path, { method: "POST", redirect: "manual",
   headers: { Origin: origin, "Content-Type": "application/json", ...(cookie ? { Cookie: `__Host-session=${cookie}` } : {}) },
   body: JSON.stringify(body ?? {}) });
@@ -141,6 +140,30 @@ await laptop.waitForFunction(() => document.getElementById("error").textContent.
 check("a removed passkey can't sign in", (await laptop.$eval("#error", (e) => e.textContent)).includes("isn't recognised"));
 check("the last passkey can't be removed", (await post("/_admin/devices/delete-passkey", { credential: ownerKey }, ownerCookie)).status === 400);
 check("there's no inviting anyone else", (await post("/_admin/invite", { name: "Viewer" }, ownerCookie)).status === 404);
+
+// --- a form sent in place gets its page back (index.js redrawn): only a page here, and never past the checks ---------
+const sendInPlace = (redraw, origin = BASE) => fetch(`${BASE}/_admin/notifications/seen`, { method: "POST", redirect: "manual",
+  headers: { Origin: origin, "Afterwrd-Redraw": redraw, Cookie: `__Host-session=${ownerCookie}`, "Content-Type": "application/x-www-form-urlencoded" },
+  body: "back=/" });
+const redrawnPage = await sendInPlace("/posts");
+check("a form sent in place comes back with the page it's redrawn from",
+  redrawnPage.status === 200 && redrawnPage.headers.get("afterwrd-redrawn") === "1" && /<html/i.test(await redrawnPage.text()));
+for (const redraw of ["https://elsewhere.example/", "//elsewhere.example/posts", "/_admin/connections", "/_auth/login", "posts"]) {
+  const res = await sendInPlace(redraw);
+  check(`…but not from ${redraw}`, res.status === 303 && !res.headers.get("afterwrd-redrawn"), `HTTP ${res.status}`);
+}
+const fromElsewhere = await sendInPlace("/posts", "https://elsewhere.example");
+check("…and never for a form sent from another site", fromElsewhere.status === 403 && !fromElsewhere.headers.get("afterwrd-redrawn"));
+
+// --- every signed-in action refuses another site, from one check in index.js: so a new one can't forget -------------
+for (const path of ["/_comments", "/_feed/comments", "/_push/on", "/_groups/1/comments", "/_admin/devices/seen", "/_admin/update/auto-later",
+  "/_cloudflare/finish", "/_cloudflare/auto-finish", "/_cloudflare/checks-finish", "/_a-handler-not-written-yet"]) {
+  const res = await fetch(BASE + path, { method: "POST", redirect: "manual", body: "text=hi",
+    headers: { Origin: "https://elsewhere.example", Cookie: `__Host-session=${ownerCookie}`, "Content-Type": "application/x-www-form-urlencoded" } });
+  check(`another site can't send ${path}`, res.status === 403, `HTTP ${res.status}`);
+}
+const noOrigin = await fetch(`${BASE}/_admin/devices/seen`, { method: "POST", redirect: "manual", headers: { Cookie: `__Host-session=${ownerCookie}` } });
+check("…nor anything that doesn't say where it's from", noOrigin.status === 403, `HTTP ${noOrigin.status}`);
 
 // --- import validation ------------------------------------------------------------------
 await post("/_admin/import/start", {}, ownerCookie);

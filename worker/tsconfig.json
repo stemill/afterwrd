@@ -2,8 +2,9 @@
   // Type checks for the Worker's own code (src/, and the installer's in central/), which is plain JavaScript:
   // `npm run check`. Nothing is built from this; wrangler bundles the code as it is. Notes on what a function takes or
   // gives back are JSDoc comments in the code; shapes several files share are in types/afterwrd.d.ts, and
-  // types/worker-configuration.d.ts (Cloudflare's own, made by `wrangler types`) is made afresh by each check.
-  // The browser scripts (public/static) aren't checked yet.
+  // types/worker-configuration.d.ts (Cloudflare's own, made by `wrangler types`) and types/rows.d.ts (each table's
+  // row, made from migrations/ by scripts/row-types.mjs: @type {Row<"connections">}) are made afresh by each check.
+  // The browser scripts (public/static) have their own: tsconfig.browser.json, and tsconfig.sw.json for the service worker.
   "compilerOptions": {
     "allowJs": true,
     "checkJs": true,
@@ -15,6 +16,8 @@
     "types": [],
     "resolveJsonModule": true,
     "strict": false,
+    // Leftovers (an import, a variable nothing reads) fail the check, so they don't pile up.
+    "noUnusedLocals": true,
     "skipLibCheck": true
   },
   "include": ["src/**/*.js", "central/**/*.js", "types/*.d.ts"]

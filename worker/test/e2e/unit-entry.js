@@ -6,3 +6,5 @@ export { callSite, siteOrigin } from "../../src/peers.js";
 export { icsFile, parseEvent, readEventForm } from "../../src/calendar.js";
 export { findOrCreateDatabase, findWorker, loadRelease } from "../../src/deploy.js";
 export { serveStatic } from "../../src/static.js";
+export { cleanMentions, noteMentions } from "../../src/mentions.js";
+export { linkify } from "../../src/views/format.js";

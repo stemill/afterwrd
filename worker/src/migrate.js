@@ -31,6 +31,8 @@ import m0016 from "../migrations/0016_friend_checks.sql";
 import m0017 from "../migrations/0017_personal_events.sql";
 import m0018 from "../migrations/0018_answer_limits.sql";
 import m0019 from "../migrations/0019_no_messages.sql";
+import m0020 from "../migrations/0020_friend_copies.sql";
+import m0021 from "../migrations/0021_mentions.sql";
 import pkg from "../package.json";
 
 // Every file in migrations/, in order. A new migration needs adding here too.
@@ -54,6 +56,8 @@ const MIGRATIONS = [
   ["0017_personal_events.sql", m0017],
   ["0018_answer_limits.sql", m0018],
   ["0019_no_messages.sql", m0019],
+  ["0020_friend_copies.sql", m0020],
+  ["0021_mentions.sql", m0021],
 ];
 const VERSION = pkg.version;
 // A migration that failed, kept so the version left running can say so (the Update page): {version, migration, error, at}.

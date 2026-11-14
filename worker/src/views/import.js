@@ -14,7 +14,7 @@ const SECTION_CHOICES = [
 ];
 const DEFAULT_ON = new Set(["posts", "photos"]);
 
-export function importPage({ owner }) {
+export function importPage({ owner, me = null }) {
   return `<!doctype html>
 <html lang="en-GB">
 <head>
@@ -48,7 +48,7 @@ ${FAVICON}
 </style>
 </head>
 <body>
-${ownerHeader("import")}
+${ownerHeader("import", me)}
 <main>
 <h1>Import your Facebook archive</h1>
 <p class="meta">Signed in as ${escape(owner)}. Choose the download Facebook gave you, in JSON format.
